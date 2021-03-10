@@ -13,7 +13,7 @@ private class OldBlock = Reachability::ReachableBlock;
 
 private class OldInstruction = Reachability::ReachableInstruction;
 
-import Cached
+import Cached 
 
 cached
 private module Cached {
@@ -854,6 +854,26 @@ module DefUse {
       exists(Alias::getOverlap(defLocation, useLocation))
     )
   }
+}
+
+predicate canReuseSSAForMemoryResult(Instruction instruction) {
+  exists(OldInstruction oldInstruction |
+    oldInstruction = getOldInstruction(instruction) and
+    (
+      // The previous iteration said it was reusable, so we should mark it as reusable as well.
+      Alias::canReuseSSAForOldResult(oldInstruction)
+      or
+      // The current alias analysis says it is reusable.
+      Alias::getResultMemoryLocation(oldInstruction).canReuseSSA()
+    )
+  )
+  or
+  exists(Alias::MemoryLocation defLocation |
+    // This is a `Phi` for a reusable location, so the result of the `Phi` is reusable as well.
+    instruction = phiInstruction(_, defLocation) and
+    defLocation.canReuseSSA()
+  )
+  // We don't support reusing SSA for any location that could create a `Chi` instruction.
 }
 
 /**
