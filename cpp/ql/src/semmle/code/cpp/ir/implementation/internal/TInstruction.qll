@@ -55,7 +55,7 @@ module UnaliasedSSAInstructions {
     result = TUnaliasedSSAPhiInstruction(blockStartInstr, memoryLocation)
   }
 
-  TPhiInstruction reusedPhiInstruction(
+  TRawInstruction reusedPhiInstruction(
     TRawInstruction blockStartInstr) {
     none()
   }

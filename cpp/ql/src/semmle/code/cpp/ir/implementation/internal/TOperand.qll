@@ -109,6 +109,12 @@ module RawOperands {
     none()
   }
 
+  TPhiOperand reusedPhiOperand(
+    Raw::PhiInstruction useInstr, Raw::Instruction defInstr, Raw::IRBlock predecessorBlock,
+    Overlap overlap
+  ) {
+    none()
+  }
   /**
    * Returns the Chi operand with the specified parameters.
    */
@@ -140,6 +146,12 @@ module UnaliasedSSAOperands {
     result = Internal::TUnaliasedPhiOperand(useInstr, defInstr, predecessorBlock, overlap)
   }
 
+  TPhiOperand reusedPhiOperand(
+    Unaliased::PhiInstruction useInstr, Unaliased::Instruction defInstr,
+    Unaliased::IRBlock predecessorBlock, Overlap overlap
+  ) {
+    none()
+  }
   /**
    * Returns the Chi operand with the specified parameters.
    */
