@@ -90,6 +90,11 @@ private predicate operandIsConsumedWithoutEscaping(Operand operand) {
       or
       // Converting an address to a `bool` does not escape the address.
       instr.(ConvertInstruction).getResultIRType() instanceof IRBooleanType
+      or
+      instr instanceof CallInstruction and
+      not exists(IREscapeAnalysisConfiguration config |
+        config.useSoundEscapeAnalysis()
+      )
     )
   )
   or
@@ -323,6 +328,10 @@ predicate allocationEscapes(Configuration::Allocation allocation) {
   allocation.alwaysEscapes()
   or
   exists(IREscapeAnalysisConfiguration config |
+    config.useSoundEscapeAnalysis() and resultEscapesNonReturn(allocation.getABaseInstruction())
+  )
+  or
+  exists(Configuration::StageEscapeConfiguration config |
     config.useSoundEscapeAnalysis() and resultEscapesNonReturn(allocation.getABaseInstruction())
   )
 }
