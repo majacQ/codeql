@@ -5,11 +5,15 @@
   <<<<<<< snyk-upgrade-64fcee62f31274a8f96fd037992c8e84
     "mysql": "2.18.1",
     "xpath": "0.0.27",
+  <<<<<<< snyk-upgrade-9dde6e169c590378880c6becf25941c4
+    "libxmljs": "0.19.7"
+  =======
   =======
     "mysql": "2.15.0",
     "xpath": "0.0.32",
   >>>>>>> main
     "libxmljs": "0.19.1"
+  >>>>>>> main
   },
   "main": "index.js"
 }
