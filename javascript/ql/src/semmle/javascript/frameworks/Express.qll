@@ -224,7 +224,13 @@ module Express {
     /**
      * Gets the function body of this handler, if it is defined locally.
      */
-    RouteHandler getBody() { result.(DataFlow::SourceNode).flowsToExpr(this) }
+    RouteHandler getBody() {
+      exists(DataFlow::SourceNode source | source = flow().getALocalSource() |
+        result = source
+        or
+        DataFlow::functionOneWayForwardingStep(result.(DataFlow::SourceNode).getALocalUse(), source)
+      )
+    }
 
     /**
      * Holds if this is not followed by more handlers.
@@ -688,8 +694,7 @@ module Express {
     override RouteHandler getRouteHandler() { result = rh }
 
     override Expr getNameExpr() {
-      exists(DataFlow::PropWrite write |
-        getAHeaderSource().flowsTo(write.getBase()) and
+      exists(DataFlow::PropWrite write | getAHeaderSource().getAPropertyWrite() = write |
         result = write.getPropertyNameExpr()
       )
     }
@@ -738,16 +743,32 @@ module Express {
    * as the value of a template variable.
    */
   private class TemplateInput extends HTTP::ResponseBody {
-    RouteHandler rh;
+    TemplateObjectInput obj;
 
     TemplateInput() {
+      obj.getALocalSource().(DataFlow::ObjectLiteralNode).hasPropertyWrite(_, this.flow())
+    }
+
+    override RouteHandler getRouteHandler() { result = obj.getRouteHandler() }
+  }
+
+  /**
+   * An object passed to the `render` method of an HTTP response object.
+   */
+  class TemplateObjectInput extends DataFlow::Node {
+    RouteHandler rh;
+
+    TemplateObjectInput() {
       exists(DataFlow::MethodCallNode render |
         render.calls(rh.getAResponseExpr().flow(), "render") and
-        this = render.getOptionArgument(1, _).asExpr()
+        this = render.getArgument(1)
       )
     }
 
-    override RouteHandler getRouteHandler() { result = rh }
+    /**
+     * Gets the route handler that uses this object.
+     */
+    RouteHandler getRouteHandler() { result = rh }
   }
 
   /**

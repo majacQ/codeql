@@ -7,45 +7,45 @@ import javascript
 /**
  * A taint step for the `marked` library, that converts markdown to HTML.
  */
-private class MarkedStep extends TaintTracking::AdditionalTaintStep, DataFlow::CallNode {
-  MarkedStep() {
-    this = DataFlow::globalVarRef("marked").getACall()
-    or
-    this = DataFlow::moduleImport("marked").getACall()
-  }
-
+private class MarkedStep extends TaintTracking::SharedTaintStep {
   override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-    succ = this and
-    pred = this.getArgument(0)
+    exists(DataFlow::CallNode call |
+      call = DataFlow::globalVarRef("marked").getACall()
+      or
+      call = DataFlow::moduleImport("marked").getACall()
+    |
+      succ = call and
+      pred = call.getArgument(0)
+    )
   }
 }
 
 /**
  * A taint step for the `markdown-table` library.
  */
-private class MarkdownTableStep extends TaintTracking::AdditionalTaintStep, DataFlow::CallNode {
-  MarkdownTableStep() { this = DataFlow::moduleImport("markdown-table").getACall() }
-
+private class MarkdownTableStep extends TaintTracking::SharedTaintStep {
   override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-    succ = this and
-    pred = this.getArgument(0)
+    exists(DataFlow::CallNode call | call = DataFlow::moduleImport("markdown-table").getACall() |
+      succ = call and
+      pred = call.getArgument(0)
+    )
   }
 }
 
 /**
  * A taint step for the `showdown` library.
  */
-private class ShowDownStep extends TaintTracking::AdditionalTaintStep, DataFlow::CallNode {
-  ShowDownStep() {
-    this =
-      [DataFlow::globalVarRef("showdown"), DataFlow::moduleImport("showdown")]
-          .getAConstructorInvocation("Converter")
-          .getAMemberCall(["makeHtml", "makeMd"])
-  }
-
+private class ShowDownStep extends TaintTracking::SharedTaintStep {
   override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-    succ = this and
-    pred = this.getArgument(0)
+    exists(DataFlow::CallNode call |
+      call =
+        [DataFlow::globalVarRef("showdown"), DataFlow::moduleImport("showdown")]
+            .getAConstructorInvocation("Converter")
+            .getAMemberCall(["makeHtml", "makeMd"])
+    |
+      succ = call and
+      pred = call.getArgument(0)
+    )
   }
 }
 
@@ -93,16 +93,16 @@ private module Unified {
   /**
    * A taint step for the `unified` library.
    */
-  class UnifiedStep extends TaintTracking::AdditionalTaintStep, UnifiedChain {
-    UnifiedStep() {
-      // sanitizer. Mostly looking for `rehype-sanitize`, but also other plugins with `sanitize` in their name.
-      not this.getAUsedPlugin().getALocalSource() =
-        DataFlow::moduleImport(any(string s | s.matches("%sanitize%")))
-    }
-
+  class UnifiedStep extends TaintTracking::SharedTaintStep {
     override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-      pred = getInput() and
-      succ = getOutput()
+      exists(UnifiedChain chain |
+        // sanitizer. Mostly looking for `rehype-sanitize`, but also other plugins with `sanitize` in their name.
+        not chain.getAUsedPlugin().getALocalSource() =
+          DataFlow::moduleImport(any(string s | s.matches("%sanitize%")))
+      |
+        pred = chain.getInput() and
+        succ = chain.getOutput()
+      )
     }
   }
 }
@@ -110,11 +110,51 @@ private module Unified {
 /**
  * A taint step for the `snarkdown` library.
  */
-private class SnarkdownStep extends TaintTracking::AdditionalTaintStep, DataFlow::CallNode {
-  SnarkdownStep() { this = DataFlow::moduleImport("snarkdown").getACall() }
-
+private class SnarkdownStep extends TaintTracking::SharedTaintStep {
   override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-    this = succ and
-    pred = this.getArgument(0)
+    exists(DataFlow::CallNode call | call = DataFlow::moduleImport("snarkdown").getACall() |
+      call = succ and
+      pred = call.getArgument(0)
+    )
+  }
+}
+
+/**
+ * Classes and predicates for modelling taint steps the `markdown-it` library.
+ */
+private module MarkdownIt {
+  /**
+   * The creation of a parser from `markdown-it`.
+   */
+  private API::Node markdownIt() {
+    exists(API::InvokeNode call |
+      call = API::moduleImport("markdown-it").getAnInvocation()
+      or
+      call = API::moduleImport("markdown-it").getMember("Markdown").getAnInvocation()
+    |
+      call.getParameter(0).getMember("html").getARhs().mayHaveBooleanValue(true) and
+      result = call.getReturn()
+    )
+    or
+    exists(API::CallNode call |
+      call = markdownIt().getMember(["use", "set", "configure", "enable", "disable"]).getACall() and
+      result = call.getReturn() and
+      not call.getParameter(0).getAValueReachingRhs() =
+        DataFlow::moduleImport("markdown-it-sanitizer")
+    )
+  }
+
+  /**
+   * A taint step for the `markdown-it` library.
+   */
+  private class MarkdownItStep extends TaintTracking::SharedTaintStep {
+    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
+      exists(API::CallNode call |
+        call = markdownIt().getMember(["render", "renderInline"]).getACall()
+      |
+        succ = call and
+        pred = call.getArgument(0)
+      )
+    }
   }
 }

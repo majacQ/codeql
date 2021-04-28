@@ -6,7 +6,7 @@
  * directed and labeled; they specify how the components represented by nodes relate to each other.
  */
 
-import python
+private import python
 import semmle.python.dataflow.new.DataFlow
 
 /**
@@ -55,7 +55,7 @@ module API {
     /**
      * Gets a call to the function represented by this API component.
      */
-    DataFlow::Node getACall() { result = getReturn().getAnImmediateUse() }
+    DataFlow::CallCfgNode getACall() { result = getReturn().getAnImmediateUse() }
 
     /**
      * Gets a node representing member `m` of this API component.
@@ -216,6 +216,9 @@ module API {
    */
   Node moduleImport(string m) { result = Impl::MkModuleImport(m) }
 
+  /** Gets a node corresponding to the built-in with the given name, if any. */
+  Node builtin(string n) { result = moduleImport("builtins").getMember(n) }
+
   /**
    * Provides the actual implementation of API graphs, cached for performance.
    *
@@ -300,11 +303,18 @@ module API {
       MkRoot() or
       /** An abstract representative for imports of the module called `name`. */
       MkModuleImport(string name) {
-        imports(_, name)
+        // Ignore the following module name for Python 2, as we alias `__builtin__` to `builtins` elsewhere
+        (name != "__builtin__" or major_version() = 3) and
+        (
+          imports(_, name)
+          or
+          // When we `import foo.bar.baz` we want to create API graph nodes also for the prefixes
+          // `foo` and `foo.bar`:
+          name = any(ImportExpr e | not e.isRelative()).getAnImportedModuleName()
+        )
         or
-        // When we `import foo.bar.baz` we want to create API graph nodes also for the prefixes
-        // `foo` and `foo.bar`:
-        name = any(ImportExpr e | not e.isRelative()).getAnImportedModuleName()
+        // The `builtins` module should always be implicitly available
+        name = "builtins"
       } or
       /** A use of an API member at the node `nd`. */
       MkUse(DataFlow::Node nd) { use(_, _, nd) }
@@ -339,6 +349,24 @@ module API {
       )
     }
 
+    private import semmle.python.types.Builtins as Builtins
+
+    /**
+     * Gets a data flow node that is likely to refer to a built-in with the name `name`.
+     *
+     * Currently this is an over-approximation, and does not account for things like overwriting a
+     * built-in with a different value.
+     */
+    private DataFlow::Node likely_builtin(string name) {
+      result.asCfgNode() =
+        any(NameNode n |
+          n.isGlobal() and
+          n.isLoad() and
+          name = n.getId() and
+          name in [any(Builtins::Builtin b).getName(), "None", "True", "False"]
+        )
+    }
+
     /**
      * Holds if `ref` is a use of a node that should have an incoming edge from `base` labeled
      * `lbl` in the API graph.
@@ -369,6 +397,10 @@ module API {
           ref.asExpr().(ClassExpr).getABase() = superclass.asExpr()
         )
       )
+      or
+      // Built-ins, treated as members of the module `builtins`
+      base = MkModuleImport("builtins") and
+      lbl = Label::member(any(string name | ref = likely_builtin(name)))
     }
 
     /**
@@ -381,13 +413,18 @@ module API {
         imports(ref, name)
       )
       or
+      // Ensure the Python 2 `__builtin__` module gets the name of the Python 3 `builtins` module.
+      major_version() = 2 and
+      nd = MkModuleImport("builtins") and
+      imports(ref, "__builtin__")
+      or
       nd = MkUse(ref)
     }
 
     /**
-     * Gets a data-flow node to which `nd`, which is a use of an API-graph node, flows.
+     * Gets a data-flow node to which `src`, which is a use of an API-graph node, flows.
      *
-     * The flow from `nd` to that node may be inter-procedural.
+     * The flow from `src` to that node may be inter-procedural.
      */
     private DataFlow::LocalSourceNode trackUseNode(
       DataFlow::LocalSourceNode src, DataFlow::TypeTracker t
@@ -396,30 +433,26 @@ module API {
       use(_, src) and
       result = src
       or
-      // Due to bad performance when using `trackUseNode(t2, attr_name).track(t2, t)`
-      // we have inlined that code and forced a join
-      exists(DataFlow::StepSummary summary |
-        t = trackUseNode_first_join(src, result, summary).append(summary)
-      )
+      exists(DataFlow::TypeTracker t2 | result = trackUseNode(src, t2).track(t2, t))
     }
 
-    pragma[nomagic]
-    private DataFlow::TypeTracker trackUseNode_first_join(
-      DataFlow::LocalSourceNode src, DataFlow::LocalSourceNode res, DataFlow::StepSummary summary
-    ) {
-      DataFlow::StepSummary::step(trackUseNode(src, result), res, summary)
-    }
-
+    /**
+     * Gets a data-flow node to which `src`, which is a use of an API-graph node, flows.
+     *
+     * The flow from `src` to that node may be inter-procedural.
+     */
     cached
     DataFlow::LocalSourceNode trackUseNode(DataFlow::LocalSourceNode src) {
-      result = trackUseNode(src, DataFlow::TypeTracker::end())
+      result = trackUseNode(src, DataFlow::TypeTracker::end()) and
+      // We exclude module variable nodes, as these do not correspond to real uses.
+      not result instanceof DataFlow::ModuleVariableNode
     }
 
     /**
      * Holds if there is an edge from `pred` to `succ` in the API graph that is labeled with `lbl`.
      */
     cached
-    predicate edge(Node pred, string lbl, Node succ) {
+    predicate edge(TApiNode pred, string lbl, TApiNode succ) {
       /* There's an edge from the root node for each imported module. */
       exists(string m |
         pred = MkRoot() and

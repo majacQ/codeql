@@ -12,11 +12,11 @@ namespace Semmle.Extraction.CSharp.Entities
     internal class Expression : FreshEntity, IExpressionParentEntity
     {
         private readonly IExpressionInfo info;
-        public AnnotatedTypeSymbol? Type { get; }
+        public AnnotatedTypeSymbol? Type { get; private set; }
         public Extraction.Entities.Location Location { get; }
         public ExprKind Kind { get; }
 
-        internal Expression(IExpressionInfo info)
+        internal Expression(IExpressionInfo info, bool shouldPopulate = true)
             : base(info.Context)
         {
             this.info = info;
@@ -24,7 +24,10 @@ namespace Semmle.Extraction.CSharp.Entities
             Kind = info.Kind;
             Type = info.Type;
 
-            TryPopulate();
+            if (shouldPopulate)
+            {
+                TryPopulate();
+            }
         }
 
         protected sealed override void Populate(TextWriter trapFile)
@@ -58,6 +61,14 @@ namespace Semmle.Extraction.CSharp.Entities
         }
 
         public override Location? ReportingLocation => Location.Symbol;
+
+        internal void SetType(ITypeSymbol? type)
+        {
+            if (type is not null)
+            {
+                Type = new AnnotatedTypeSymbol(type, type.NullableAnnotation);
+            }
+        }
 
         bool IExpressionParentEntity.IsTopLevelParent => false;
 
@@ -151,6 +162,49 @@ namespace Semmle.Extraction.CSharp.Entities
                     cx.ExtractionError("Couldn't extract constant in attribute", constant.ToString(), location);
                     return null;
             }
+        }
+
+        /// <summary>
+        /// Creates a generated expression for a default argument value.
+        /// </summary>
+        public static Expression? CreateGenerated(Context cx, IParameterSymbol parameter, IExpressionParentEntity parent,
+            int childIndex, Extraction.Entities.Location location)
+        {
+            if (!parameter.HasExplicitDefaultValue)
+            {
+                return null;
+            }
+
+            var defaultValue = parameter.ExplicitDefaultValue;
+
+            if (parameter.Type is INamedTypeSymbol nt && nt.EnumUnderlyingType is not null)
+            {
+                // = (MyEnum)1, = MyEnum.Value1, = default(MyEnum), = new MyEnum()
+                // we're generating a (MyEnum)value cast expression:
+                defaultValue ??= 0;
+                Action<Expression, int> createChild = (parent, index) => Literal.CreateGenerated(cx, parent, index, nt.EnumUnderlyingType, defaultValue, location);
+                return Cast.CreateGenerated(cx, parent, childIndex, parameter.Type, defaultValue, createChild, location);
+            }
+
+            if (defaultValue is null)
+            {
+                // = null, = default, = default(T), = new MyStruct()
+                // we're generating a default expression:
+                return Default.CreateGenerated(cx, parent, childIndex, location, parameter.Type.IsReferenceType ? ValueAsString(null) : null);
+            }
+
+            if (parameter.Type.SpecialType == SpecialType.System_Object)
+            {
+                // this can happen in VB.NET
+                cx.ExtractionError($"Extracting default argument value 'object {parameter.Name} = default' instead of 'object {parameter.Name} = {defaultValue}'. The latter is not supported in C#.",
+                    null, null, severity: Util.Logging.Severity.Warning);
+
+                // we're generating a default expression:
+                return Default.CreateGenerated(cx, parent, childIndex, location, ValueAsString(null));
+            }
+
+            // const literal:
+            return Literal.CreateGenerated(cx, parent, childIndex, parameter.Type, defaultValue, location);
         }
 
         /// <summary>
