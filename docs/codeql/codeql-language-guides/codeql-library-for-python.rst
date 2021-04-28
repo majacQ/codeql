@@ -8,7 +8,7 @@ When you need to analyze a Python program, you can make use of the large collect
 About the CodeQL library for Python
 -----------------------------------
 
-The CodeQL library for each programming language uses classes with abstractions and predicates to present data in an object-oriented form. 
+The CodeQL library for each programming language uses classes with abstractions and predicates to present data in an object-oriented form.
 
 Each CodeQL library is implemented as a set of QL modules, that is, files with the extension ``.qll``. The module ``python.qll`` imports all the core Python library modules, so you can include the complete library by beginning your query with:
 
@@ -20,18 +20,22 @@ The CodeQL library for Python incorporates a large number of classes. Each class
 
 -  **Syntactic** - classes that represent entities in the Python source code.
 -  **Control flow** - classes that represent entities from the control flow graphs.
--  **Type inference** - classes that represent the inferred values and types of entities in the Python source code.
--  **Taint tracking** - classes that represent the source, sinks and kinds of taint used to implement taint-tracking queries.
+-  **Data flow** - classes that represent entities from the data flow graphs.
+-  **API graphs** - classes that represent entities from the API graphs.
+
+The first two categories are described below. 
+For a description of data flow and associated classes, see ":doc:`Analyzing data flow in Python <analyzing-data-flow-in-python>`".
+For a description of API graphs and their use, see ":doc:`Using API graphs in Python <using-api-graphs-in-python>`."
 
 Syntactic classes
 -----------------
 
-This part of the library represents the Python source code. The ``Module``, ``Class``, and ``Function`` classes correspond to Python modules, classes, and functions respectively, collectively these are known as ``Scope`` classes. Each ``Scope`` contains a list of statements each of which is represented by a subclass of the class ``Stmt``. Statements themselves can contain other statements or expressions which are represented by subclasses of ``Expr``. Finally, there are a few additional classes for the parts of more complex expressions such as list comprehensions. Collectively these classes are subclasses of ``AstNode`` and form an Abstract syntax tree (AST). The root of each AST is a ``Module``. Symbolic information is attached to the AST in the form of variables (represented by the class ``Variable``). For more information, see `Abstract syntax tree <http://en.wikipedia.org/wiki/Abstract_syntax_tree>`__ and `Symbolic information <http://en.wikipedia.org/wiki/Symbol_table>`__ on Wikipedia.
+This part of the library represents the Python source code. The ``Module``, ``Class``, and ``Function`` classes correspond to Python modules, classes, and functions respectively, collectively these are known as ``Scope`` classes. Each ``Scope`` contains a list of statements each of which is represented by a subclass of the class ``Stmt``. Statements themselves can contain other statements or expressions which are represented by subclasses of ``Expr``. Finally, there are a few additional classes for the parts of more complex expressions such as list comprehensions. Collectively these classes are subclasses of ``AstNode`` and form an Abstract syntax tree (AST). The root of each AST is a ``Module``. Symbolic information is attached to the AST in the form of variables (represented by the class ``Variable``). For more information, see `Abstract syntax tree <https://en.wikipedia.org/wiki/Abstract_syntax_tree>`__ and `Symbolic information <https://en.wikipedia.org/wiki/Symbol_table>`__ on Wikipedia.
 
 Scope
 ^^^^^
 
-A Python program is a group of modules. Technically a module is just a list of statements, but we often think of it as composed of classes and functions. These top-level entities, the module, class, and function are represented by the three CodeQL classes `Module <https://help.semmle.com/qldoc/python/semmle/python/Module.qll/type.Module$Module.html>`__, `Class <https://help.semmle.com/qldoc/python/semmle/python/Class.qll/type.Class$Class.html>`__ and `Function <https://help.semmle.com/qldoc/python/semmle/python/Function.qll/type.Function$Function.html>`__ which are all subclasses of ``Scope``.
+A Python program is a group of modules. Technically a module is just a list of statements, but we often think of it as composed of classes and functions. These top-level entities, the module, class, and function are represented by the three CodeQL classes `Module <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Module.qll/type.Module$Module.html>`__, `Class <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Class.qll/type.Class$Class.html>`__ and `Function <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Function.qll/type.Function$Function.html>`__ which are all subclasses of ``Scope``.
 
 -  ``Scope``
 
@@ -54,7 +58,7 @@ All scopes are basically a list of statements, although ``Scope`` classes have a
 Statement
 ^^^^^^^^^
 
-A statement is represented by the `Stmt <https://help.semmle.com/qldoc/python/semmle/python/Stmts.qll/type.Stmts$Stmt.html>`__ class which has about 20 subclasses representing the various kinds of statements, such as the ``Pass`` statement, the ``Return`` statement or the ``For`` statement. Statements are usually made up of parts. The most common of these is the expression, represented by the ``Expr`` class. For example, take the following Python ``for`` statement:
+A statement is represented by the `Stmt <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Stmts.qll/type.Stmts$Stmt.html>`__ class which has about 20 subclasses representing the various kinds of statements, such as the ``Pass`` statement, the ``Return`` statement or the ``For`` statement. Statements are usually made up of parts. The most common of these is the expression, represented by the ``Expr`` class. For example, take the following Python ``for`` statement:
 
 .. code-block:: python
 
@@ -63,7 +67,7 @@ A statement is represented by the `Stmt <https://help.semmle.com/qldoc/python/se
    else:
        return 0
 
-The `For <https://help.semmle.com/qldoc/python/semmle/python/Stmts.qll/type.Stmts$For.html>`__ class representing the ``for`` statement has a number of member predicates to access its parts:
+The `For <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Stmts.qll/type.Stmts$For.html>`__ class representing the ``for`` statement has a number of member predicates to access its parts:
 
 -  ``getTarget()`` returns the ``Expr`` representing the variable ``var``.
 -  ``getIter()`` returns the ``Expr`` resenting the variable ``seq``.
@@ -74,7 +78,7 @@ The `For <https://help.semmle.com/qldoc/python/semmle/python/Stmts.qll/type.Stmt
 Expression
 ^^^^^^^^^^
 
-Most statements are made up of expressions. The `Expr <https://help.semmle.com/qldoc/python/semmle/python/Exprs.qll/type.Exprs$Expr.html>`__ class is the superclass of all expression classes, of which there are about 30 including calls, comprehensions, tuples, lists and arithmetic operations. For example, the Python expression ``a+2`` is represented by the ``BinaryExpr`` class:
+Most statements are made up of expressions. The `Expr <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Exprs.qll/type.Exprs$Expr.html>`__ class is the superclass of all expression classes, of which there are about 30 including calls, comprehensions, tuples, lists and arithmetic operations. For example, the Python expression ``a+2`` is represented by the ``BinaryExpr`` class:
 
 -  ``getLeft()`` returns the ``Expr`` representing the ``a``.
 -  ``getRight()`` returns the ``Expr`` representing the ``2``.
@@ -96,12 +100,12 @@ As an example, to find expressions of the form ``a+2`` where the left is a simpl
 Variable
 ^^^^^^^^
 
-Variables are represented by the `Variable <https://help.semmle.com/qldoc/python/semmle/python/Variables.qll/type.Variables$Variable.html>`__ class in the CodeQL library. There are two subclasses, ``LocalVariable`` for function-level and class-level variables and ``GlobalVariable`` for module-level variables.
+Variables are represented by the `Variable <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Variables.qll/type.Variables$Variable.html>`__ class in the CodeQL library. There are two subclasses, ``LocalVariable`` for function-level and class-level variables and ``GlobalVariable`` for module-level variables.
 
 Other source code elements
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Although the meaning of the program is encoded by the syntactic elements, ``Scope``, ``Stmt`` and ``Expr`` there are some parts of the source code not covered by the abstract syntax tree. The most useful of these is the `Comment <https://help.semmle.com/qldoc/python/semmle/python/Comment.qll/type.Comment$Comment.html>`__ class which describes comments in the source code.
+Although the meaning of the program is encoded by the syntactic elements, ``Scope``, ``Stmt`` and ``Expr`` there are some parts of the source code not covered by the abstract syntax tree. The most useful of these is the `Comment <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Comment.qll/type.Comment$Comment.html>`__ class which describes comments in the source code.
 
 Examples
 ^^^^^^^^
@@ -160,7 +164,7 @@ Summary
 
 The most commonly used standard classes in the syntactic part of the library are organized as follows:
 
-``Module``, ``Class``, ``Function``, ``Stmt``, and ``Expr`` - they are all subclasses of `AstNode <https://help.semmle.com/qldoc/python/semmle/python/AstExtended.qll/type.AstExtended$AstNode.html>`__.
+``Module``, ``Class``, ``Function``, ``Stmt``, and ``Expr`` - they are all subclasses of `AstNode <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/AstExtended.qll/type.AstExtended$AstNode.html>`__.
 
 Abstract syntax tree
 ''''''''''''''''''''
@@ -241,7 +245,7 @@ Other
 Control flow classes
 --------------------
 
-This part of the library represents the control flow graph of each ``Scope`` (classes, functions, and modules). Each ``Scope`` contains a graph of ``ControlFlowNode`` elements. Each scope has a single entry point and at least one (potentially many) exit points. To speed up control and data flow analysis, control flow nodes are grouped into basic blocks. For more information, see `Basic block <http://en.wikipedia.org/wiki/Basic_block>`__ on Wikipedia.
+This part of the library represents the control flow graph of each ``Scope`` (classes, functions, and modules). Each ``Scope`` contains a graph of ``ControlFlowNode`` elements. Each scope has a single entry point and at least one (potentially many) exit points. To speed up control and data flow analysis, control flow nodes are grouped into basic blocks. For more information, see `Basic block <https://en.wikipedia.org/wiki/Basic_block>`__ on Wikipedia.
 
 Example
 ^^^^^^^
@@ -287,56 +291,8 @@ Summary
 
 The classes in the control-flow part of the library are:
 
--  `ControlFlowNode <https://help.semmle.com/qldoc/python/semmle/python/Flow.qll/type.Flow$ControlFlowNode.html>`__ – A control-flow node. There is a one-to-many relation between AST nodes and control-flow nodes.
--  `BasicBlock <https://help.semmle.com/qldoc/python/semmle/python/Flow.qll/type.Flow$BasicBlock.html>`__ – A non branching list of control-flow nodes.
-
-
-Type-inference classes
-----------------------
-
-The CodeQL library for Python also supplies some classes for accessing the inferred types of values. The classes ``Value`` and ``ClassValue`` allow you to query the possible classes that an expression may have at runtime. 
-
-Example
-^^^^^^^
-
-For example, which ``ClassValue``\ s are iterable can be determined using the query:
-
-**Find iterable "ClassValue"s**
-
-.. code-block:: ql
-
-   import python
-
-   from ClassValue cls
-   where cls.hasAttribute("__iter__")
-   select cls
-
-➤ `See this in the query console on LGTM.com <https://lgtm.com/query/5151030165280978402/>`__ This query returns a list of classes for the projects analyzed. If you want to include the results for ``builtin`` classes, which do not have any Python source code, show the non-source results. For more information, see `builtin classes <http://docs.python.org/library/stdtypes.html>`__ in the Python documentation.
-
-Summary
-^^^^^^^
-
--  `Value <https://help.semmle.com/qldoc/python/semmle/python/objects/ObjectAPI.qll/type.ObjectAPI$Value.html>`__
-
-   -  ``ClassValue``
-   -  ``CallableValue``
-   -  ``ModuleValue``
-
-For more information about these classes, see ":doc:`Pointer analysis and type inference in Python <pointer-analysis-and-type-inference-in-python>`."
-
-Taint-tracking classes
-----------------------
-
-The CodeQL library for Python also supplies classes to specify taint-tracking analyses. The ``Configuration`` class can be overridden to specify a taint-tracking analysis, by specifying source, sinks, sanitizers and additional flow steps. For those analyses that require additional types of taint to be tracked the ``TaintKind`` class can be overridden.
-
-
-Summary
-^^^^^^^
-
-- `TaintKind <https://help.semmle.com/qldoc/python/semmle/python/dataflow/TaintTracking.qll/type.TaintTracking$TaintKind.html>`__
-- `Configuration <https://help.semmle.com/qldoc/python/semmle/python/dataflow/Configuration.qll/type.Configuration$TaintTracking$Configuration.html>`__
-
-For more information about these classes, see ":doc:`Analyzing data flow and tracking tainted data in Python <analyzing-data-flow-and-tracking-tainted-data-in-python>`."
+-  `ControlFlowNode <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Flow.qll/type.Flow$ControlFlowNode.html>`__ – A control-flow node. There is a one-to-many relation between AST nodes and control-flow nodes.
+-  `BasicBlock <https://codeql.github.com/codeql-standard-libraries/python/semmle/python/Flow.qll/type.Flow$BasicBlock.html>`__ – A non branching list of control-flow nodes.
 
 
 Further reading
@@ -344,4 +300,3 @@ Further reading
 
 .. include:: ../reusables/python-further-reading.rst
 .. include:: ../reusables/codeql-ref-tools-further-reading.rst
-

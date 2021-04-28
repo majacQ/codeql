@@ -14,7 +14,7 @@ To analyze a project, you need to add a :ref:`CodeQL database <codeql-database>`
 
 #. Open the CodeQL Databases view in the sidebar.
 
-#. Hover over the **Databases** title bar and click the appropriate icon to add your database. You can add a database from a local ZIP archive or folder, from a public URL, or from a project URL on LGTM.com.
+#. Hover over the **Databases** title bar and click the appropriate icon to add your database. You can add a database from a local ZIP archive or folder, from a public URL, or from a project slug or URL on LGTM.com.
 
    .. image:: ../images/codeql-for-visual-studio-code/choose-database.png
       :width: 350
@@ -137,7 +137,7 @@ To use standard code navigation features in the source code, you can right-click
 
      If you're using an older database, code navigation commands such as **Go to Definition** and **Go to References** may not work.
      To use code navigation, try unzipping the database and running ``codeql database cleanup <database>`` on the unzipped database using the CodeQL CLI. Then, re-add the database to Visual Studio Code.
-     For more information, see the `database cleanup <../codeql-cli/codeql-cli-manual/database-cleanup.html>`__ reference documentation.
+     For more information, see the `database cleanup <../../codeql-cli/manual/database-cleanup>`__ reference documentation.
 
 Comparing query results
 ------------------------

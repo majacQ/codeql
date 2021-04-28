@@ -74,5 +74,9 @@
     if (something()) {
         selector = $("textarea").val || ''
     }
-    $(selector); // NOT OK
+	$(selector); // NOT OK
+	
+	$(document.my_form.my_input.value); // NOT OK
+
+	$("#id").html( $('#foo').prop('innerText') ); // NOT OK
 })();

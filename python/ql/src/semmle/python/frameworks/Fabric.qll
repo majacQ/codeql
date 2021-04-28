@@ -168,13 +168,14 @@ private module FabricV2 {
    * WARNING: Only holds for a few predefined attributes.
    */
   private DataFlow::Node fabric_attr(DataFlow::TypeTracker t, string attr_name) {
-    attr_name in ["connection",
-          // connection.py
-          "Connection",
-          // group.py
-          "group", "SerialGroup", "ThreadingGroup",
-          // tasks.py
-          "tasks", "task"] and
+    attr_name in [
+        // connection.py
+        "connection", "Connection",
+        // group.py
+        "group", "SerialGroup", "ThreadingGroup",
+        // tasks.py
+        "tasks", "task"
+      ] and
     (
       t.start() and
       result = DataFlow::importNode("fabric" + "." + attr_name)
@@ -280,13 +281,13 @@ private module FabricV2 {
         DataFlow::Node classRef() { result = classRef(DataFlow::TypeTracker::end()) }
 
         /**
-         * A source of an instance of `fabric.connection.Connection`.
+         * A source of instances of `fabric.connection.Connection`, extend this class to model new instances.
          *
-         * This can include instantiation of the class, return value from function
+         * This can include instantiations of the class, return values from function
          * calls, or a special parameter that will be set when functions are called by an external
          * library.
          *
-         * Use `Connection::instance()` predicate to get references to instances of `fabric.connection.Connection`.
+         * Use the predicate `Connection::instance()` to get references to instances of `fabric.connection.Connection`.
          */
         abstract class InstanceSource extends DataFlow::Node { }
 
@@ -456,7 +457,7 @@ private module FabricV2 {
        */
       module Group {
         /**
-         * A source of an instance of a subclass of `fabric.group.Group`
+         * A source of instances of a subclass of `fabric.group, extend this class to model new instances.Group`
          *
          * This can include instantiation of a class, return value from function
          * calls, or a special parameter that will be set when functions are called by an external

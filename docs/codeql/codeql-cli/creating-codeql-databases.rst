@@ -50,7 +50,7 @@ the language you want to analyze:
   detect the build system automatically, using a built-in autobuilder. 
    
 For full details of all the options you can use when creating databases,
-see the `database create reference documentation <../codeql-cli-manual/database-create.html>`__.  
+see the `database create reference documentation <../manual/database-create>`__.  
 
 Progress and results
 --------------------
@@ -168,7 +168,7 @@ build steps, you may need to explicitly define each step in the command line.
    For Go, you should always use the CodeQL autobuilder. Install the Go
    toolchain (version 1.11 or later) and, if there are dependencies, the
    appropriate dependency manager (such as `dep
-   <https://golang.github.io/dep/>`__ or `Glide <http://glide.sh/>`__).
+   <https://golang.github.io/dep/>`__).
    
    Do not specify any build commands, as you will override the autobuilder
    invocation, which will create an empty database.  

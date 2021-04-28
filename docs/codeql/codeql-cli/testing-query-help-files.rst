@@ -38,7 +38,7 @@ where ``<qhelp|query|dir|suite>`` is one of:
 - the path to a ``.ql`` file.
 - the path to a directory containing queries and query help files.
 - the path to a query suite, or the name of a well-known query suite for a QL pack. 
-  For more information, see "`Creating CodeQL query suites <creating-codeql-query-suites.html#specifying-well-known-query-suites>`__."
+  For more information, see "`Creating CodeQL query suites <https://codeql.github.com/docs/codeql-cli/creating-codeql-query-suites#specifying-well-known-query-suites>`__."
 
 You must specify a ``--format`` option, which defines how the query help is rendered. 
 Currently, you must specify ``markdown`` to render the query help as markdown. 
@@ -54,7 +54,7 @@ The ``--output`` option defines a file path where the rendered query help will b
 
 For full details of all the options you can use when testing query help files,
 see the `generate query-help reference documentation
-<codeql-cli-manual:generate-query-help>`__.
+<../manual/generate-query-help>`__.
 
 Results
 -------
@@ -73,7 +73,7 @@ By default, the CodeQL CLI will print a warning message if:
   as an accompanying ``.qhelp`` file
 
 You can tell the CodeQL CLI how to handle these warnings by including a ``--warnings`` option in your command.
-For more information, see the `generate query-help reference documentation <../codeql-cli-manual/generate-query-help.html#cmdoption-codeql-generate-query-help-warnings>`__.
+For more information, see the `generate query-help reference documentation <../manual/generate-query-help#cmdoption-codeql-generate-query-help-warnings>`__.
 
 Further reading
 ---------------

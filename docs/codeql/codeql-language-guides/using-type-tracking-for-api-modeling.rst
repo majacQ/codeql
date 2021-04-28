@@ -11,9 +11,9 @@ The type-tracking library makes it possible to track values through properties a
 usually to recognize method calls and properties accessed on a specific type of object.
 
 This is an advanced topic and is intended for readers already familiar with the
-`SourceNode <analyzing-data-flow-in-javascript.html#source-nodes>`__ class as well as
-`taint tracking <analyzing-data-flow-in-javascript.html#using-global-analyzing-data-flow-and-tracking-tainted-data-in-python>`__.
-For TypeScript analysis also consider reading about `static type information <codeql-library-for-typescript.html.html#static-type-information>`__ first.
+`SourceNode <https://codeql.github.com/docs/codeql-language-guides/analyzing-data-flow-in-javascript-and-typescript/#source-nodes>`__ class as well as
+`taint tracking <https://codeql.github.com/docs/codeql-language-guides/analyzing-data-flow-in-javascript-and-typescript/#using-global-taint-tracking>`__.
+For TypeScript analysis also consider reading about `static type information <https://codeql.github.com/docs/codeql-language-guides/codeql-library-for-typescript/#static-type-information>`__ first.
 
 
 The problem of recognizing method calls
@@ -120,9 +120,9 @@ Type tracking is a generalization of the above pattern, where a predicate matche
 and has a recursive clause that tracks the flow of that value.
 But instead of us having to deal with function calls/returns and property reads/writes,
 all of these steps are included in a single predicate,
-`SourceNode.track <https://help.semmle.com/qldoc/javascript/semmle/javascript/dataflow/Sources.qll/predicate.Sources$SourceNode$track.2.html>`__,
+`SourceNode.track <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/dataflow/Sources.qll/predicate.Sources$SourceNode$track.2.html>`__,
 to be used with the companion class
-`TypeTracker <https://help.semmle.com/qldoc/javascript/semmle/javascript/dataflow/TypeTracking.qll/type.TypeTracking$TypeTracker.html>`__.
+`TypeTracker <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/dataflow/TypeTracking.qll/type.TypeTracking$TypeTracker.html>`__.
 
 Predicates that use type tracking usually conform to the following general pattern, which we explain below:
 
@@ -435,7 +435,7 @@ Note that these predicates all return ``SourceNode``,
 so attempts to track a non-source node, such as an identifier or string literal,
 will not work.
 If this becomes an issue, see
-`TypeTracker.smallstep <https://help.semmle.com/qldoc/javascript/semmle/javascript/dataflow/TypeTracking.qll/predicate.TypeTracking$TypeTracker$smallstep.2.html>`__.
+`TypeTracker.smallstep <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/dataflow/TypeTracking.qll/predicate.TypeTracking$TypeTracker$smallstep.2.html>`__.
 
 Also note that the predicates taking a ``TypeTracker`` or ``TypeBackTracker`` can often be made ``private``,
 as they are typically only used as an intermediate result to compute the other predicate.
@@ -458,7 +458,7 @@ Here's an example that the model from this tutorial won't find:
   let wrapper = wrapDB(firebase.database())
   wrapper.db.ref("forecast"); // <-- not found
 
-This is an example of where `data-flow configurations <analyzing-data-flow-in-javascript.html#global-data-flow>`__ are more powerful.
+This is an example of where `data-flow configurations <https://codeql.github.com/docs/codeql-language-guides/analyzing-data-flow-in-javascript-and-typescript/#global-data-flow>`__ are more powerful.
 
 When to use type tracking
 -------------------------
@@ -491,7 +491,7 @@ Prefer type tracking when:
 
 Prefer data-flow configurations when:
 
-- Tracking user-controlled data -- use `taint tracking <analyzing-data-flow-in-javascript.html#using-global-analyzing-data-flow-and-tracking-tainted-data-in-python>`__.
+- Tracking user-controlled data -- use `taint tracking <https://codeql.github.com/docs/codeql-language-guides/analyzing-data-flow-in-javascript-and-typescript/#using-global-taint-tracking>`__.
 - Differentiating between different kinds of user-controlled data -- see ":doc:`Using flow labels for precise data flow analysis <using-flow-labels-for-precise-data-flow-analysis>`."
 - Tracking transformations of a value through generic utility functions.
 - Tracking values through string manipulation.
@@ -499,7 +499,7 @@ Prefer data-flow configurations when:
 
 Lastly, depending on the code base being analyzed, some alternatives to consider are:
 
-- Using `static type information <codeql-library-for-typescript.html.html#static-type-information>`__,
+- Using `static type information <https://codeql.github.com/docs/codeql-language-guides/codeql-library-for-typescript/#static-type-information>`__,
   if analyzing TypeScript code.
 
 - Relying on local data flow.
@@ -511,14 +511,14 @@ Type tracking in the standard libraries
 
 Type tracking is used in a few places in the standard libraries:
 
-- The `DOM <https://help.semmle.com/qldoc/javascript/semmle/javascript/DOM.qll/module.DOM$DOM.html>`__ predicates,
-  `documentRef <https://help.semmle.com/qldoc/javascript/semmle/javascript/DOM.qll/predicate.DOM$DOM$documentRef.0.html>`__,
-  `locationRef <https://help.semmle.com/qldoc/javascript/semmle/javascript/DOM.qll/predicate.DOM$DOM$locationRef.0.html>`__, and
-  `domValueRef <https://help.semmle.com/qldoc/javascript/semmle/javascript/DOM.qll/predicate.DOM$DOM$domValueRef.0.html>`__,
+- The `DOM <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/DOM.qll/module.DOM$DOM.html>`__ predicates,
+  `documentRef <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/DOM.qll/predicate.DOM$DOM$documentRef.0.html>`__,
+  `locationRef <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/DOM.qll/predicate.DOM$DOM$locationRef.0.html>`__, and
+  `domValueRef <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/DOM.qll/predicate.DOM$DOM$domValueRef.0.html>`__,
   are implemented with type tracking.
-- The `HTTP <https://help.semmle.com/qldoc/javascript/semmle/javascript/frameworks/HTTP.qll/module.HTTP$HTTP.html>`__ server models, such as `Express <https://help.semmle.com/qldoc/javascript/semmle/javascript/frameworks/Express.qll/module.Express$Express.html>`__, use type tracking to track the installation of router handler functions.
-- The `Firebase <https://help.semmle.com/qldoc/javascript/semmle/javascript/frameworks/Firebase.qll/module.Firebase$Firebase.html>`__ and
-  `Socket.io <https://help.semmle.com/qldoc/javascript/semmle/javascript/frameworks/SocketIO.qll/module.SocketIO$SocketIO.html>`__ models use type tracking to track objects coming from their respective APIs.
+- The `HTTP <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/frameworks/HTTP.qll/module.HTTP$HTTP.html>`__ server models, such as `Express <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/frameworks/Express.qll/module.Express$Express.html>`__, use type tracking to track the installation of router handler functions.
+- The `Firebase <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/frameworks/Firebase.qll/module.Firebase$Firebase.html>`__ and
+  `Socket.io <https://codeql.github.com/codeql-standard-libraries/javascript/semmle/javascript/frameworks/SocketIO.qll/module.SocketIO$SocketIO.html>`__ models use type tracking to track objects coming from their respective APIs.
 
 Further reading
 ---------------

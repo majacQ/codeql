@@ -6,6 +6,12 @@ private import python
 private import semmle.python.dataflow.new.DataFlow
 private import semmle.python.dataflow.new.TaintTracking
 
+/**
+ * Provides models for the `Werkzeug` PyPI package.
+ * See
+ * - https://pypi.org/project/Werkzeug/
+ * - https://werkzeug.palletsprojects.com/en/1.0.x/#werkzeug
+ */
 module Werkzeug {
   /** Provides models for the `werkzeug` module. */
   module werkzeug {
@@ -18,13 +24,13 @@ module Werkzeug {
        */
       module MultiDict {
         /**
-         * A source of an instance of `werkzeug.datastructures.MultiDict`.
+         * A source of instances of `werkzeug.datastructures.MultiDict`, extend this class to model new instances.
          *
-         * This can include instantiation of the class, return value from function
-         * calls, or a special parameter that will be set when functions are call by external
+         * This can include instantiations of the class, return values from function
+         * calls, or a special parameter that will be set when functions are called by an external
          * library.
          *
-         * Use `MultiDict::instance()` predicate to get references to instances of `werkzeug.datastructures.MultiDict`.
+         * Use the predicate `MultiDict::instance()` to get references to instances of `werkzeug.datastructures.MultiDict`.
          */
         abstract class InstanceSource extends DataFlow::Node { }
 
@@ -66,13 +72,13 @@ module Werkzeug {
        */
       module FileStorage {
         /**
-         * A source of an instance of `werkzeug.datastructures.FileStorage`.
+         * A source of instances of `werkzeug.datastructures.FileStorage`, extend this class to model new instances.
          *
-         * This can include instantiation of the class, return value from function
+         * This can include instantiations of the class, return values from function
          * calls, or a special parameter that will be set when functions are called by an external
          * library.
          *
-         * Use `FileStorage::instance()` predicate to get references to instances of `werkzeug.datastructures.FileStorage`.
+         * Use the predicate `FileStorage::instance()` to get references to instances of `werkzeug.datastructures.FileStorage`.
          */
         abstract class InstanceSource extends DataFlow::Node { }
 
@@ -109,15 +115,16 @@ module Werkzeug {
     override predicate step(DataFlow::Node nodeFrom, DataFlow::Node nodeTo) {
       nodeFrom = werkzeug::datastructures::FileStorage::instance() and
       exists(DataFlow::AttrRead read | nodeTo = read |
-        read.getAttributeName() in ["filename",
-              // str
-              "name", "content_type", "mimetype",
-              // file-like
-              "stream",
-              // TODO: werkzeug.datastructures.Headers
-              "headers",
-              // dict[str, str]
-              "mimetype_params"] and
+        read.getAttributeName() in [
+            // str
+            "filename", "name", "content_type", "mimetype",
+            // file-like
+            "stream",
+            // TODO: werkzeug.datastructures.Headers
+            "headers",
+            // dict[str, str]
+            "mimetype_params"
+          ] and
         read.getObject() = nodeFrom
       )
     }
