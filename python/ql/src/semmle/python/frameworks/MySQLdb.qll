@@ -17,7 +17,7 @@ private import PEP249
  * - https://mysqlclient.readthedocs.io/index.html
  * - https://pypi.org/project/MySQL-python/
  */
-module MySQLdb {
+private module MySQLdb {
   // ---------------------------------------------------------------------------
   // MySQLdb
   // ---------------------------------------------------------------------------
@@ -32,6 +32,7 @@ module MySQLdb {
   /** Gets a reference to the `MySQLdb` module. */
   DataFlow::Node moduleMySQLdb() { result = moduleMySQLdb(DataFlow::TypeTracker::end()) }
 
+  /** MySQLdb implements PEP 249, providing ways to execute SQL statements against a database. */
   class MySQLdb extends PEP249Module {
     MySQLdb() { this = moduleMySQLdb() }
   }

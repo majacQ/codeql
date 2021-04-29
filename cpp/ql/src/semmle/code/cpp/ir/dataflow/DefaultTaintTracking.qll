@@ -36,24 +36,12 @@ private predicate predictableInstruction(Instruction instr) {
  * library's `returnArgument` predicate.
  */
 predicate predictableOnlyFlow(string name) {
-  name = "strcasestr" or
-  name = "strchnul" or
-  name = "strchr" or
-  name = "strchrnul" or
-  name = "strcmp" or
-  name = "strcspn" or
-  name = "strncmp" or
-  name = "strndup" or
-  name = "strnlen" or
-  name = "strrchr" or
-  name = "strspn" or
-  name = "strstr" or
-  name = "strtod" or
-  name = "strtof" or
-  name = "strtol" or
-  name = "strtoll" or
-  name = "strtoq" or
-  name = "strtoul"
+  name =
+    [
+      "strcasestr", "strchnul", "strchr", "strchrnul", "strcmp", "strcspn", "strncmp", "strndup",
+      "strnlen", "strrchr", "strspn", "strstr", "strtod", "strtof", "strtol", "strtoll", "strtoq",
+      "strtoul"
+    ]
 }
 
 private DataFlow::Node getNodeForSource(Expr source) {
@@ -83,7 +71,7 @@ private class DefaultTaintTrackingCfg extends DataFlow::Configuration {
   override predicate isSink(DataFlow::Node sink) { exists(adjustedSink(sink)) }
 
   override predicate isAdditionalFlowStep(DataFlow::Node n1, DataFlow::Node n2) {
-    instructionTaintStep(n1.asInstruction(), n2.asInstruction())
+    commonTaintStep(n1, n2)
   }
 
   override predicate isBarrier(DataFlow::Node node) { nodeIsBarrier(node) }
@@ -101,7 +89,7 @@ private class ToGlobalVarTaintTrackingCfg extends DataFlow::Configuration {
   }
 
   override predicate isAdditionalFlowStep(DataFlow::Node n1, DataFlow::Node n2) {
-    instructionTaintStep(n1.asInstruction(), n2.asInstruction())
+    commonTaintStep(n1, n2)
     or
     writesVariable(n1.asInstruction(), n2.asVariable().(GlobalOrNamespaceVariable))
     or
@@ -125,7 +113,7 @@ private class FromGlobalVarTaintTrackingCfg extends DataFlow2::Configuration {
   override predicate isSink(DataFlow::Node sink) { exists(adjustedSink(sink)) }
 
   override predicate isAdditionalFlowStep(DataFlow::Node n1, DataFlow::Node n2) {
-    instructionTaintStep(n1.asInstruction(), n2.asInstruction())
+    commonTaintStep(n1, n2)
     or
     // Additional step for flow out of variables. There is no flow _into_
     // variables in this configuration, so this step only serves to take flow
@@ -215,19 +203,62 @@ private predicate nodeIsBarrierIn(DataFlow::Node node) {
 }
 
 cached
-private predicate instructionTaintStep(Instruction i1, Instruction i2) {
+private predicate commonTaintStep(DataFlow::Node fromNode, DataFlow::Node toNode) {
+  instructionToInstructionTaintStep(fromNode.asInstruction(), toNode.asInstruction())
+  or
+  operandToInstructionTaintStep(fromNode.asOperand(), toNode.asInstruction())
+  or
+  operandToOperandTaintStep(fromNode.asOperand(), toNode.asOperand())
+}
+
+private predicate operandToOperandTaintStep(Operand fromOperand, Operand toOperand) {
+  exists(ReadSideEffectInstruction readInstr |
+    fromOperand = readInstr.getArgumentOperand() and
+    toOperand = readInstr.getSideEffectOperand()
+  )
+}
+
+private predicate operandToInstructionTaintStep(Operand fromOperand, Instruction toInstr) {
   // Expressions computed from tainted data are also tainted
-  exists(CallInstruction call, int argIndex | call = i2 |
+  exists(CallInstruction call, int argIndex | call = toInstr |
     isPureFunction(call.getStaticCallTarget().getName()) and
-    i1 = getACallArgumentOrIndirection(call, argIndex) and
-    forall(Instruction arg | arg = call.getAnArgument() |
-      arg = getACallArgumentOrIndirection(call, argIndex) or predictableInstruction(arg)
+    fromOperand = getACallArgumentOrIndirection(call, argIndex) and
+    forall(Operand argOperand | argOperand = call.getAnArgumentOperand() |
+      argOperand = getACallArgumentOrIndirection(call, argIndex) or
+      predictableInstruction(argOperand.getAnyDef())
     ) and
     // flow through `strlen` tends to cause dubious results, if the length is
     // bounded.
     not call.getStaticCallTarget().getName() = "strlen"
   )
   or
+  // Flow from argument to return value
+  toInstr =
+    any(CallInstruction call |
+      exists(int indexIn |
+        modelTaintToReturnValue(call.getStaticCallTarget(), indexIn) and
+        fromOperand = getACallArgumentOrIndirection(call, indexIn) and
+        not predictableOnlyFlow(call.getStaticCallTarget().getName())
+      )
+    )
+  or
+  // Flow from input argument to output argument
+  // TODO: This won't work in practice as long as all aliased memory is tracked
+  // together in a single virtual variable.
+  // TODO: Will this work on the test for `TaintedPath.ql`, where the output arg
+  // is a pointer addition expression?
+  toInstr =
+    any(WriteSideEffectInstruction outInstr |
+      exists(CallInstruction call, int indexIn, int indexOut |
+        modelTaintToParameter(call.getStaticCallTarget(), indexIn, indexOut) and
+        fromOperand = getACallArgumentOrIndirection(call, indexIn) and
+        outInstr.getIndex() = indexOut and
+        outInstr.getPrimaryInstruction() = call
+      )
+    )
+}
+
+private predicate instructionToInstructionTaintStep(Instruction i1, Instruction i2) {
   // Flow through pointer dereference
   i2.(LoadInstruction).getSourceAddress() = i1
   or
@@ -291,29 +322,6 @@ private predicate instructionTaintStep(Instruction i1, Instruction i2) {
     read.getAnOperand().(SideEffectOperand).getAnyDef() = i1 and
     read.getArgumentDef() = i2
   )
-  or
-  // Flow from argument to return value
-  i2 =
-    any(CallInstruction call |
-      exists(int indexIn |
-        modelTaintToReturnValue(call.getStaticCallTarget(), indexIn) and
-        i1 = getACallArgumentOrIndirection(call, indexIn) and
-        not predictableOnlyFlow(call.getStaticCallTarget().getName())
-      )
-    )
-  or
-  // Flow from input argument to output argument
-  // TODO: Will this work on the test for `TaintedPath.ql`, where the output arg
-  // is a pointer addition expression?
-  i2 =
-    any(WriteSideEffectInstruction outNode |
-      exists(CallInstruction call, int indexIn, int indexOut |
-        modelTaintToParameter(call.getStaticCallTarget(), indexIn, indexOut) and
-        i1 = getACallArgumentOrIndirection(call, indexIn) and
-        outNode.getIndex() = indexOut and
-        outNode.getPrimaryInstruction() = call
-      )
-    )
 }
 
 pragma[noinline]
@@ -329,15 +337,25 @@ private InitializeParameterInstruction getInitializeParameter(IRFunction f, Para
 }
 
 /**
- * Get an instruction that goes into argument `argumentIndex` of `call`. This
+ * Returns the index of the side effect instruction corresponding to the specified function output,
+ * if one exists.
+ */
+private int getWriteSideEffectIndex(FunctionOutput output) {
+  output.isParameterDeref(result)
+  or
+  output.isQualifierObject() and result = -1
+}
+
+/**
+ * Get an operand that goes into argument `argumentIndex` of `call`. This
  * can be either directly or through one pointer indirection.
  */
-private Instruction getACallArgumentOrIndirection(CallInstruction call, int argumentIndex) {
-  result = call.getPositionalArgument(argumentIndex)
+private Operand getACallArgumentOrIndirection(CallInstruction call, int argumentIndex) {
+  result = call.getPositionalArgumentOperand(argumentIndex)
   or
   exists(ReadSideEffectInstruction readSE |
     // TODO: why are read side effect operands imprecise?
-    result = readSE.getSideEffectOperand().getAnyDef() and
+    result = readSE.getSideEffectOperand() and
     readSE.getPrimaryInstruction() = call and
     readSE.getIndex() = argumentIndex
   )
@@ -351,7 +369,7 @@ private predicate modelTaintToParameter(Function f, int parameterIn, int paramet
       f.(TaintFunction).hasTaintFlow(modelIn, modelOut)
     ) and
     (modelIn.isParameter(parameterIn) or modelIn.isParameterDeref(parameterIn)) and
-    modelOut.isParameterDeref(parameterOut)
+    parameterOut = getWriteSideEffectIndex(modelOut)
   )
 }
 
@@ -540,7 +558,7 @@ module TaintedWithPath {
     }
 
     override predicate isAdditionalFlowStep(DataFlow::Node n1, DataFlow::Node n2) {
-      instructionTaintStep(n1.asInstruction(), n2.asInstruction())
+      commonTaintStep(n1, n2)
       or
       exists(TaintTrackingConfiguration cfg | cfg.taintThroughGlobals() |
         writesVariable(n1.asInstruction(), n2.asVariable().(GlobalOrNamespaceVariable))
@@ -622,8 +640,7 @@ module TaintedWithPath {
     override predicate hasLocationInfo(
       string filepath, int startline, int startcolumn, int endline, int endcolumn
     ) {
-      this
-          .inner()
+      this.inner()
           .getLocation()
           .hasLocationInfo(filepath, startline, startcolumn, endline, endcolumn)
     }
