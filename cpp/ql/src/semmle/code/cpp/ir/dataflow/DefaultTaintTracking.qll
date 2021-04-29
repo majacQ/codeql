@@ -1,10 +1,12 @@
 import cpp
 import semmle.code.cpp.security.Security
 private import semmle.code.cpp.ir.dataflow.DataFlow
+private import semmle.code.cpp.ir.dataflow.internal.DataFlowUtil
 private import semmle.code.cpp.ir.dataflow.DataFlow2
 private import semmle.code.cpp.ir.dataflow.DataFlow3
 private import semmle.code.cpp.ir.IR
 private import semmle.code.cpp.ir.dataflow.internal.DataFlowDispatch as Dispatch
+private import semmle.code.cpp.controlflow.IRGuards
 private import semmle.code.cpp.models.interfaces.Taint
 private import semmle.code.cpp.models.interfaces.DataFlow
 
@@ -31,8 +33,7 @@ private predicate predictableInstruction(Instruction instr) {
  * Note that the list itself is not very principled; it consists of all the
  * functions listed in the old security library's [default] `isPureFunction`
  * that have more than one argument, but are not in the old taint tracking
- * library's `returnArgument` predicate.  In addition, `strlen` is included
- * because it's also a special case in flow to return values.
+ * library's `returnArgument` predicate.
  */
 predicate predictableOnlyFlow(string name) {
   name = "strcasestr" or
@@ -41,7 +42,6 @@ predicate predictableOnlyFlow(string name) {
   name = "strchrnul" or
   name = "strcmp" or
   name = "strcspn" or
-  name = "strlen" or // special case
   name = "strncmp" or
   name = "strndup" or
   name = "strnlen" or
@@ -67,6 +67,9 @@ private DataFlow::Node getNodeForSource(Expr source) {
     // to `gets`. It's impossible here to tell which is which, but the "access
     // to argv" source is definitely not intended to match an output argument,
     // and it causes false positives if we let it.
+    //
+    // This case goes together with the similar (but not identical) rule in
+    // `nodeIsBarrierIn`.
     result = DataFlow::definitionByReferenceNode(source) and
     not argv(source.(VariableAccess).getTarget())
   )
@@ -170,16 +173,45 @@ private predicate hasUpperBoundsCheck(Variable var) {
   )
 }
 
+private predicate nodeIsBarrierEqualityCandidate(
+  DataFlow::Node node, Operand access, Variable checkedVar
+) {
+  readsVariable(node.asInstruction(), checkedVar) and
+  any(IRGuardCondition guard).ensuresEq(access, _, _, node.asInstruction().getBlock(), true)
+}
+
 private predicate nodeIsBarrier(DataFlow::Node node) {
   exists(Variable checkedVar |
     readsVariable(node.asInstruction(), checkedVar) and
     hasUpperBoundsCheck(checkedVar)
   )
+  or
+  exists(Variable checkedVar, Operand access |
+    /*
+     * This node is guarded by a condition that forces the accessed variable
+     * to equal something else.  For example:
+     * ```
+     * x = taintsource()
+     * if (x == 10) {
+     *   taintsink(x); // not considered tainted
+     * }
+     * ```
+     */
+
+    nodeIsBarrierEqualityCandidate(node, access, checkedVar) and
+    readsVariable(access.getDef(), checkedVar)
+  )
 }
 
 private predicate nodeIsBarrierIn(DataFlow::Node node) {
   // don't use dataflow into taint sources, as this leads to duplicate results.
-  node = getNodeForSource(any(Expr e))
+  exists(Expr source | isUserInput(source, _) |
+    node = DataFlow::exprNode(source)
+    or
+    // This case goes together with the similar (but not identical) rule in
+    // `getNodeForSource`.
+    node = DataFlow::definitionByReferenceNode(source)
+  )
 }
 
 cached
@@ -199,7 +231,27 @@ private predicate instructionTaintStep(Instruction i1, Instruction i2) {
   // Flow through pointer dereference
   i2.(LoadInstruction).getSourceAddress() = i1
   or
-  i2.(UnaryInstruction).getUnary() = i1
+  // Flow through partial reads of arrays and unions
+  i2.(LoadInstruction).getSourceValueOperand().getAnyDef() = i1 and
+  not i1.isResultConflated() and
+  (
+    i1.getResultType() instanceof ArrayType or
+    i1.getResultType() instanceof Union
+  )
+  or
+  // Unary instructions tend to preserve enough information in practice that we
+  // want taint to flow through.
+  // The exception is `FieldAddressInstruction`. Together with the rule for
+  // `LoadInstruction` above and for `ChiInstruction` below, flow through
+  // `FieldAddressInstruction` could cause flow into one field to come out an
+  // unrelated field. This would happen across function boundaries, where the IR
+  // would not be able to match loads to stores.
+  i2.(UnaryInstruction).getUnary() = i1 and
+  (
+    not i2 instanceof FieldAddressInstruction
+    or
+    i2.(FieldAddressInstruction).getField().getDeclaringType() instanceof Union
+  )
   or
   // Flow out of definition-by-reference
   i2.(ChiInstruction).getPartial() = i1.(WriteSideEffectInstruction) and
@@ -213,7 +265,7 @@ private predicate instructionTaintStep(Instruction i1, Instruction i2) {
     or
     t instanceof ArrayType
     or
-    // Buffers or unknown size
+    // Buffers of unknown size
     t instanceof UnknownType
   )
   or
