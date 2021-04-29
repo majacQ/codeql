@@ -173,6 +173,7 @@ private predicate foo(Expr e, Expr p) {
 1. Use [camelCase](https://en.wikipedia.org/wiki/Camel_case) for:
    - Predicate names
    - Variable names
+1. Acronyms *should* use normal PascalCase/camelCase. However, two-letter acronyms should have both letters capitalized.
 1. Newtype predicate names *should* begin with `T`.
 1. Predicates that have a result *should* be named `get...`
 1. Predicates that can return multiple results *should* be named `getA...` or `getAn...`
@@ -182,6 +183,7 @@ private predicate foo(Expr e, Expr p) {
 1. Short or single letter names for parameters and *quantifiers* *may* be used provided that they are sufficiently clear.
 1. Use names as they are used in the target-language specification.
 1. Use American English.
+
 
 ### Examples
 
@@ -209,84 +211,15 @@ class Type extends ... {
 
   /** ... */
   Type getATypeParameter() { ... }
+  
+  /** Gets the SSA variable ... */
+  predicate getSsaVariable() { ... }
 }
 ```
 
 ## Documentation
 
-General requirements:
-
-1. Documentation *must* adhere to the [QLDoc specification](https://help.semmle.com/QL/ql-handbook/qldoc.html).
-1. Use `/** ... */` for documentation, even for single line comments.
-1. For single-line documentation, the `/**` and `*/` are written on the same line as the comment.
-1. For multi-line documentation, the `/**` and `*/` are written on separate lines. There is a `*` preceding each comment line, aligned on the first `*`.
-1. Use full sentences, with capital letters and full stops.
-1. Use American English.
-1. Documentation comments *should* be appropriate for users of the code.
-1. Documentation for maintainers of the code *must* use normal comments.
-
-Documentation for specific items:
-
-1. Public declarations *must* be documented.
-1. Non-public declarations *should* be documented.
-1. Declarations in query files *should* be documented.
-1. Library files (`.qll` files) *should* be have a documentation comment at the top of the file.
-1. Query files, except for tests, *must* have a QLDoc query documentation comment at the top of the file.
-1. Predicates that do not have a result *should* be documented `/** Holds if ... */`
-1. Predicates that have a result *should* be documented `/** Gets ... */`
-1. All predicate parameters *should* be referred to in the predicate documentation.
-1. Reference names, such as types and parameters, using backticks `` ` ``.
-1. Give examples of code in the target language, enclosed in ```` ``` ````  or `` ` ``.
-1. Classes *should* be documented in the singular, for example `/* An expression. */`
-1. Where a class denotes a generic concept with subclasses, list those subclasses.
-1. Declarations that are deprecated *should* be documented as `DEPRECATED: ...`
-1. Declarations that are for internal use *should* be documented as `INTERNAL: Do not use`.
-
-### Examples
-
-```ql
-/** Provides logic for determining constant expressions. */
-```
-
-```ql
-/**
- * Holds if the qualifier of this call has type `qualifierType`.
- * `isExactType` indicates whether the type is exact, that is, whether
- * the qualifier is guaranteed not to be a subtype of `qualifierType`.
- */
-```
-```ql
-/**
- * A delegate declaration, for example
- * ```
- * delegate void Logger(string text);
- * ```
- */
-class Delegate extends ...
-```
-
-```ql
-/**
- * An element that can be called.
- *
- * Either a method (`Method`), a constructor (`Constructor`), a destructor
- * (`Destructor`), an operator (`Operator`), an accessor (`Accessor`),
- * an anonymous function (`AnonymousFunctionExpr`), or a local function
- * (`LocalFunction`).
- */
-class Callable extends ...
-```
-
-```ql
-/** DEPRECATED: Use `getAnExpr()` instead. */
-deprecated Expr getInitializer()
-```
-
-```ql
-/**
- * INTERNAL: Do not use.
- */
-```
+For more information about documenting the code that you contribute to this repository, see the [QLDoc style guide](qldoc-style-guide.md).
 
 ## Formulas
 1. *Prefer* one *conjunct* per line.
