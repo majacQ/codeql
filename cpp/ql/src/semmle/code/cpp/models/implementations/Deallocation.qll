@@ -1,5 +1,5 @@
 /**
- * Provides implementation classes  modelling various methods of deallocation
+ * Provides implementation classes  modeling various methods of deallocation
  * (`free`, `delete` etc). See `semmle.code.cpp.models.interfaces.Deallocation`
  * for usage information.
  */
@@ -19,6 +19,10 @@ class StandardDeallocationFunction extends DeallocationFunction {
         name = "free" and freedArg = 0
         or
         name = "realloc" and freedArg = 0
+        or
+        name = "CRYPTO_free" and freedArg = 0
+        or
+        name = "CRYPTO_secure_free" and freedArg = 0
       )
       or
       hasGlobalOrStdName(name) and
