@@ -1,6 +1,8 @@
 import semmle.code.java.frameworks.Kryo
 import semmle.code.java.frameworks.XStream
 import semmle.code.java.frameworks.SnakeYaml
+import semmle.code.java.frameworks.FastJson
+import semmle.code.java.frameworks.apache.Lang
 
 class ObjectInputStreamReadObjectMethod extends Method {
   ObjectInputStreamReadObjectMethod() {
@@ -51,7 +53,13 @@ class SafeKryo extends DataFlow2::Configuration {
 predicate unsafeDeserialization(MethodAccess ma, Expr sink) {
   exists(Method m | m = ma.getMethod() |
     m instanceof ObjectInputStreamReadObjectMethod and
-    sink = ma.getQualifier()
+    sink = ma.getQualifier() and
+    not exists(DataFlow::ExprNode node |
+      node.getExpr() = sink and
+      node.getTypeBound()
+          .(RefType)
+          .hasQualifiedName("org.apache.commons.io.serialization", "ValidatingObjectInputStream")
+    )
     or
     m instanceof XMLDecoderReadObjectMethod and
     sink = ma.getQualifier()
@@ -64,7 +72,14 @@ predicate unsafeDeserialization(MethodAccess ma, Expr sink) {
     sink = ma.getAnArgument() and
     not exists(SafeKryo sk | sk.hasFlowToExpr(ma.getQualifier()))
     or
+    m instanceof MethodApacheSerializationUtilsDeserialize and
+    sink = ma.getArgument(0)
+    or
     ma instanceof UnsafeSnakeYamlParse and
+    sink = ma.getArgument(0)
+    or
+    ma.getMethod() instanceof FastJsonParseMethod and
+    not fastJsonLooksSafe() and
     sink = ma.getArgument(0)
   )
 }

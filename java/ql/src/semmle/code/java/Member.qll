@@ -23,6 +23,14 @@ class Member extends Element, Annotatable, Modifiable, @member {
   /** Gets the qualified name of this member. */
   string getQualifiedName() { result = getDeclaringType().getName() + "." + getName() }
 
+  /**
+   * Holds if this member has the specified name and is declared in the
+   * specified package and type.
+   */
+  predicate hasQualifiedName(string package, string type, string name) {
+    this.getDeclaringType().hasQualifiedName(package, type) and this.hasName(name)
+  }
+
   /** Holds if this member is package protected, that is, neither public nor private nor protected. */
   predicate isPackageProtected() {
     not isPrivate() and
@@ -215,7 +223,7 @@ class Callable extends StmtParent, Member, @callable {
   Call getAReference() { result.getCallee() = this }
 
   /** Gets the body of this callable, if any. */
-  Block getBody() { result.getParent() = this }
+  BlockStmt getBody() { result.getParent() = this }
 
   /**
    * Gets the source declaration of this callable.
@@ -361,18 +369,23 @@ class Method extends Callable, @method {
   override MethodAccess getAReference() { result = Callable.super.getAReference() }
 
   override predicate isPublic() {
-    Callable.super.isPublic() or
-    // JLS 9.4: Every method declaration in the body of an interface is implicitly public.
-    getDeclaringType() instanceof Interface or
+    Callable.super.isPublic()
+    or
+    // JLS 9.4: Every method declaration in the body of an interface without an
+    // access modifier is implicitly public.
+    getDeclaringType() instanceof Interface and
+    not this.isPrivate()
+    or
     exists(FunctionalExpr func | func.asMethod() = this)
   }
 
   override predicate isAbstract() {
     Callable.super.isAbstract()
     or
-    // JLS 9.4: An interface method lacking a `default` modifier or a `static` modifier
+    // JLS 9.4: An interface method lacking a `private`, `default`, or `static` modifier
     // is implicitly abstract.
     this.getDeclaringType() instanceof Interface and
+    not this.isPrivate() and
     not this.isDefault() and
     not this.isStatic()
   }
@@ -406,6 +419,8 @@ class Method extends Callable, @method {
     not isFinal() and
     not getDeclaringType().isFinal()
   }
+
+  override string getAPrimaryQlClass() { result = "Method" }
 }
 
 /** A method that is the same as its source declaration. */
@@ -499,6 +514,8 @@ class Constructor extends Callable, @constructor {
   override Constructor getSourceDeclaration() { constrs(this, _, _, _, _, result) }
 
   override string getSignature() { constrs(this, _, result, _, _, _) }
+
+  override string getAPrimaryQlClass() { result = "Constructor" }
 }
 
 /**
@@ -543,6 +560,8 @@ class FieldDeclaration extends ExprParent, @fielddecl, Annotatable {
     then result = this.getTypeAccess() + " " + this.getField(0) + ";"
     else result = this.getTypeAccess() + " " + this.getField(0) + ", ...;"
   }
+
+  override string getAPrimaryQlClass() { result = "FieldDeclaration" }
 }
 
 /** A class or instance field. */
@@ -611,6 +630,8 @@ class Field extends Member, ExprParent, @field, Variable {
 
   /** Cast this field to a class that provides access to metrics information. */
   MetricField getMetrics() { result = this }
+
+  override string getAPrimaryQlClass() { result = "Field" }
 }
 
 /** An instance field. */

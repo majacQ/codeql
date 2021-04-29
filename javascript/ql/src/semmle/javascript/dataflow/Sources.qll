@@ -2,12 +2,13 @@
  * Provides support for intra-procedural tracking of a customizable
  * set of data flow nodes.
  *
- * Note that unlike `TrackedNodes`, this library only performs
+ * Note that unlike `TypeTracking.qll`, this library only performs
  * local tracking within a function.
  */
 
 private import javascript
 private import semmle.javascript.dataflow.TypeTracking
+private import semmle.javascript.internal.CachedStages
 
 /**
  * A source node for local data flow, that is, a node from which local data flow is tracked.
@@ -33,17 +34,17 @@ private import semmle.javascript.dataflow.TypeTracking
  * ```
  */
 class SourceNode extends DataFlow::Node {
-  SourceNode() { this instanceof SourceNode::Range }
+  SourceNode() {
+    this instanceof SourceNode::Range
+    or
+    none() and this instanceof SourceNode::Internal::RecursionGuard
+  }
 
   /**
    * Holds if this node flows into `sink` in zero or more local (that is,
    * intra-procedural) steps.
    */
-  cached
-  predicate flowsTo(DataFlow::Node sink) {
-    sink = this or
-    flowsTo(sink.getAPredecessor())
-  }
+  predicate flowsTo(DataFlow::Node sink) { Cached::hasLocalSource(sink, this) }
 
   /**
    * Holds if this node flows into `sink` in zero or more local (that is,
@@ -52,11 +53,15 @@ class SourceNode extends DataFlow::Node {
   predicate flowsToExpr(Expr sink) { flowsTo(DataFlow::valueNode(sink)) }
 
   /**
+   * Gets a node into which data may flow from this node in zero or more local steps.
+   */
+  DataFlow::Node getALocalUse() { flowsTo(result) }
+
+  /**
    * Gets a reference (read or write) of property `propName` on this node.
    */
   DataFlow::PropRef getAPropertyReference(string propName) {
-    result = getAPropertyReference() and
-    result.getPropertyName() = propName
+    Cached::namedPropRef(this, propName, result)
   }
 
   /**
@@ -75,6 +80,7 @@ class SourceNode extends DataFlow::Node {
    * Holds if there is an assignment to property `propName` on this node,
    * and the right hand side of the assignment is `rhs`.
    */
+  pragma[nomagic]
   predicate hasPropertyWrite(string propName, DataFlow::Node rhs) {
     rhs = getAPropertyWrite(propName).getRhs()
   }
@@ -82,7 +88,11 @@ class SourceNode extends DataFlow::Node {
   /**
    * Gets a reference (read or write) of any property on this node.
    */
-  DataFlow::PropRef getAPropertyReference() { flowsTo(result.getBase()) }
+  DataFlow::PropRef getAPropertyReference() {
+    Cached::namedPropRef(this, _, result)
+    or
+    Cached::dynamicPropRef(this, result)
+  }
 
   /**
    * Gets a read of any property on this node.
@@ -117,11 +127,8 @@ class SourceNode extends DataFlow::Node {
    * that is, `o.m(...)` or `o[p](...)`.
    */
   DataFlow::CallNode getAMethodCall(string methodName) {
-    exists(PropAccess pacc |
-      pacc = result.getCalleeNode().asExpr().getUnderlyingReference() and
-      flowsToExpr(pacc.getBase()) and
-      pacc.getPropertyName() = methodName
-    )
+    result = getAMemberInvocation(methodName) and
+    Cached::isSyntacticMethodCall(result)
   }
 
   /**
@@ -152,7 +159,7 @@ class SourceNode extends DataFlow::Node {
   /**
    * Gets an invocation (with our without `new`) of this node.
    */
-  DataFlow::InvokeNode getAnInvocation() { flowsTo(result.getCalleeNode()) }
+  DataFlow::InvokeNode getAnInvocation() { Cached::invocation(this, result) }
 
   /**
    * Gets a function call to this node.
@@ -192,6 +199,65 @@ class SourceNode extends DataFlow::Node {
   pragma[inline]
   DataFlow::SourceNode backtrack(TypeBackTracker t2, TypeBackTracker t) {
     t2 = t.step(result, this)
+  }
+}
+
+/**
+ * Cached predicates used by the member predicates in `SourceNode`.
+ */
+cached
+private module Cached {
+  /**
+   * Holds if `source` is a `SourceNode` that can reach `sink` via local flow steps.
+   *
+   * The slightly backwards parametering ordering is to force correct indexing.
+   */
+  cached
+  predicate hasLocalSource(DataFlow::Node sink, DataFlow::Node source) {
+    // Declaring `source` to be a `SourceNode` currently causes a redundant check in the
+    // recursive case, so instead we check it explicitly here.
+    source = sink and
+    source instanceof DataFlow::SourceNode
+    or
+    exists(DataFlow::Node mid |
+      hasLocalSource(mid, source) and
+      DataFlow::localFlowStep(mid, sink)
+    )
+  }
+
+  /**
+   * Holds if `base` flows to the base of `ref` and `ref` has property name `prop`.
+   */
+  cached
+  predicate namedPropRef(DataFlow::SourceNode base, string prop, DataFlow::PropRef ref) {
+    Stages::DataFlowStage::ref() and
+    hasLocalSource(ref.getBase(), base) and
+    ref.getPropertyName() = prop
+  }
+
+  /**
+   * Holds if `base` flows to the base of `ref` and `ref` has no known property name.
+   */
+  cached
+  predicate dynamicPropRef(DataFlow::SourceNode base, DataFlow::PropRef ref) {
+    hasLocalSource(ref.getBase(), base) and
+    not exists(ref.getPropertyName())
+  }
+
+  /**
+   * Holds if `func` flows to the callee of `invoke`.
+   */
+  cached
+  predicate invocation(DataFlow::SourceNode func, DataFlow::InvokeNode invoke) {
+    hasLocalSource(invoke.getCalleeNode(), func)
+  }
+
+  /**
+   * Holds if `invoke` has the syntactic shape of a method call.
+   */
+  cached
+  predicate isSyntacticMethodCall(DataFlow::CallNode call) {
+    call.getCalleeNode().asExpr().getUnderlyingReference() instanceof PropAccess
   }
 }
 
@@ -252,7 +318,10 @@ module SourceNode {
         astNode instanceof FunctionBindExpr or
         astNode instanceof DynamicImportExpr or
         astNode instanceof ImportSpecifier or
-        astNode instanceof ImportMetaExpr
+        astNode instanceof ImportMetaExpr or
+        astNode instanceof TaggedTemplateExpr or
+        astNode instanceof Angular2::PipeRefExpr or
+        astNode instanceof Angular2::TemplateVarRefExpr
       )
       or
       DataFlow::parameterNode(this, _)
@@ -264,7 +333,16 @@ module SourceNode {
       this = DataFlow::destructuredModuleImportNode(_)
       or
       this = DataFlow::globalAccessPathRootPseudoNode()
+      or
+      // Include return nodes because they model the implicit Promise creation in async functions.
+      DataFlow::functionReturnNode(this, _)
     }
+  }
+
+  /** INTERNAL. DO NOT USE. */
+  module Internal {
+    /** An empty class that some tests are using to enforce that SourceNode is non-recursive. */
+    abstract class RecursionGuard extends DataFlow::Node { }
   }
 }
 

@@ -461,6 +461,7 @@ class ComponentDirective extends CustomDirective, MkCustomComponent {
 
   override DataFlow::Node getDefinition() { result = comp }
 
+  pragma[nomagic]
   override DataFlow::ValueNode getMemberInit(string name) {
     comp.getConfig().hasPropertyWrite(name, result)
   }
@@ -635,7 +636,7 @@ private class LocationFlowSource extends RemoteFlowSource {
  *
  * See https://docs.angularjs.org/api/ngRoute/service/$routeParams for more details.
  */
-private class RouteParamSource extends RemoteFlowSource {
+private class RouteParamSource extends ClientSideRemoteFlowSource {
   RouteParamSource() {
     exists(ServiceReference service |
       service.getName() = "$routeParams" and
@@ -644,6 +645,8 @@ private class RouteParamSource extends RemoteFlowSource {
   }
 
   override string getSourceType() { result = "$routeParams" }
+
+  override ClientSideRemoteFlowKind getKind() { result.isPath() }
 }
 
 /**
@@ -818,27 +821,27 @@ class LinkFunction extends Function {
   /**
    * Gets the scope parameter of this function.
    */
-  SimpleParameter getScopeParameter() { result = getParameter(0) }
+  Parameter getScopeParameter() { result = getParameter(0) }
 
   /**
    * Gets the element parameter of this function (contains a jqLite-wrapped DOM element).
    */
-  SimpleParameter getElementParameter() { result = getParameter(1) }
+  Parameter getElementParameter() { result = getParameter(1) }
 
   /**
    * Gets the attributes parameter of this function.
    */
-  SimpleParameter getAttributesParameter() { result = getParameter(2) }
+  Parameter getAttributesParameter() { result = getParameter(2) }
 
   /**
    * Gets the controller parameter of this function.
    */
-  SimpleParameter getControllerParameter() { result = getParameter(3) }
+  Parameter getControllerParameter() { result = getParameter(3) }
 
   /**
    * Gets the transclude-function parameter of this function.
    */
-  SimpleParameter getTranscludeFnParameter() { result = getParameter(4) }
+  Parameter getTranscludeFnParameter() { result = getParameter(4) }
 }
 
 /**
@@ -867,7 +870,7 @@ class AngularScope extends TAngularScope {
    */
   Expr getAnAccess() {
     exists(CustomDirective d | this = d.getAScope() |
-      exists(SimpleParameter p |
+      exists(Parameter p |
         p = d.getController().getDependencyParameter("$scope") or
         p = d.getALinkFunction().getParameter(0)
       |
@@ -883,7 +886,7 @@ class AngularScope extends TAngularScope {
       d.hasIsolateScope() and result = d.getMember("scope").asExpr()
     )
     or
-    exists(DirectiveController c, DOM::ElementDefinition elem, SimpleParameter p |
+    exists(DirectiveController c, DOM::ElementDefinition elem, Parameter p |
       c.boundTo(elem) and
       this.mayApplyTo(elem) and
       p = c.getFactoryFunction().getDependencyParameter("$scope") and

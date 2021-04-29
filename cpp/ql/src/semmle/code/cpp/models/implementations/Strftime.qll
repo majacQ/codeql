@@ -1,7 +1,7 @@
 import semmle.code.cpp.models.interfaces.Taint
 import semmle.code.cpp.models.interfaces.ArrayFunction
 
-class Strftime extends TaintFunction, ArrayFunction {
+private class Strftime extends TaintFunction, ArrayFunction {
   Strftime() { hasGlobalName("strftime") }
 
   override predicate hasTaintFlow(FunctionInput input, FunctionOutput output) {
@@ -10,10 +10,7 @@ class Strftime extends TaintFunction, ArrayFunction {
       input.isParameterDeref(2) or
       input.isParameterDeref(3)
     ) and
-    (
-      output.isParameterDeref(0) or
-      output.isReturnValue()
-    )
+    output.isParameterDeref(0)
   }
 
   override predicate hasArrayWithNullTerminator(int bufParam) { bufParam = 2 }

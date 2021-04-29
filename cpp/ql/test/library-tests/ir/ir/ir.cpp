@@ -997,7 +997,7 @@ int PointerDecay(int a[], int fn(float)) {
   return a[0] + fn(1.0);
 }
 
-int ExprStmt(int b, int y, int z) {
+int StmtExpr(int b, int y, int z) {
   int x = ({
     int w;
     if (b) {
@@ -1249,10 +1249,10 @@ char *strcpy(char *destination, const char *source);
 char *strcat(char *destination, const char *source);
 
 void test_strings(char *s1, char *s2) {
-	char buffer[1024] = {0};
+    char buffer[1024] = {0};
 
-	strcpy(buffer, s1);
-	strcat(buffer, s2);
+    strcpy(buffer, s1);
+    strcat(buffer, s2);
 }
 
 struct A {
@@ -1284,6 +1284,167 @@ void test_static_member_functions(int int_arg, A* a_arg) {
     A::static_member_without_def();
 
     getAnInstanceOfA()->static_member_without_def();
+}
+
+int missingReturnValue(bool b, int x) {
+    if (b) {
+        return x;
+    }
+}
+
+void returnVoid(int x, int y) {
+    return IntegerOps(x, y);
+}
+
+void gccBinaryConditional(bool b, int x, long y) {
+    int z = x;
+    z = b ?: x;
+    z = b ?: y;
+    z = x ?: x;
+    z = x ?: y;
+    z = y ?: x;
+    z = y ?: y;
+
+    z = (x && b || y) ?: x;
+}
+
+bool predicateA();
+bool predicateB();
+
+int shortCircuitConditional(int x, int y) {
+    return predicateA() && predicateB() ? x : y;
+}
+
+void *operator new(size_t, void *) noexcept;
+
+void f(int* p)
+{
+  new (p) int;
+}
+
+template<typename T>
+T defaultConstruct() {
+    return T();
+}
+
+class constructor_only {
+public:
+    int x;
+
+public:
+    constructor_only(int x);
+};
+
+class copy_constructor {
+public:
+    int y;
+
+public:
+    copy_constructor();
+    copy_constructor(const copy_constructor&);
+
+    void method();
+};
+
+class destructor_only {
+public:
+    ~destructor_only();
+
+    void method();
+};
+
+template<typename T>
+void acceptRef(const T& v);
+
+template<typename T>
+void acceptValue(T v);
+
+template<typename T>
+T returnValue();
+
+void temporary_string() {
+    String s = returnValue<String>();  // No temporary
+    const String& rs = returnValue<String>();  // Binding a reference variable to a temporary
+
+    acceptRef(s);  // No temporary
+    acceptRef<String>("foo");  // Binding a const reference to a temporary
+    acceptValue(s);
+    acceptValue<String>("foo");
+    String().c_str();
+    returnValue<String>().c_str();  // Member access on a temporary
+
+    defaultConstruct<String>();
+}
+
+void temporary_destructor_only() {
+    destructor_only d = returnValue<destructor_only>();
+    const destructor_only& rd = returnValue<destructor_only>();
+    destructor_only d2;
+    acceptRef(d);
+    acceptValue(d);
+    destructor_only().method();
+    returnValue<destructor_only>().method();
+
+    defaultConstruct<destructor_only>();
+}
+
+void temporary_copy_constructor() {
+    copy_constructor d = returnValue<copy_constructor>();
+    const copy_constructor& rd = returnValue<copy_constructor>();
+    copy_constructor d2;
+    acceptRef(d);
+    acceptValue(d);
+    copy_constructor().method();
+    returnValue<copy_constructor>().method();
+    defaultConstruct<copy_constructor>();
+
+    int y = returnValue<copy_constructor>().y;
+}
+
+void temporary_point() {
+    Point p = returnValue<Point>();  // No temporary
+    const Point& rp = returnValue<Point>();  // Binding a reference variable to a temporary
+
+    acceptRef(p);  // No temporary
+    acceptValue(p);
+    Point().x;
+    int y = returnValue<Point>().y;
+
+    defaultConstruct<Point>();
+}
+
+struct UnusualFields {
+    int& r;
+    float a[10];
+};
+
+void temporary_unusual_fields() {
+    const int& rx = returnValue<UnusualFields>().r;
+    int x = returnValue<UnusualFields>().r;
+
+    const float& rf = returnValue<UnusualFields>().a[3];
+    float f = returnValue<UnusualFields>().a[5];
+}
+
+struct POD_Base {
+    int x;
+
+    float f() const;
+};
+
+struct POD_Middle : POD_Base {
+    int y;
+};
+
+struct POD_Derived : POD_Middle {
+    int z;
+};
+
+void temporary_hierarchy() {
+    POD_Base b = returnValue<POD_Middle>();
+    b = (returnValue<POD_Derived>());  // Multiple conversions plus parens
+    int x = returnValue<POD_Derived>().x;
+    float f = (returnValue<POD_Derived>()).f();
 }
 
 // semmle-extractor-options: -std=c++17 --clang

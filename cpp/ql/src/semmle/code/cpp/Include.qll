@@ -1,3 +1,8 @@
+/**
+ * Provides classes representing C/C++ `#include`, `#include_next`, and `#import` preprocessor
+ * directives.
+ */
+
 import semmle.code.cpp.Preprocessor
 
 /**
@@ -16,7 +21,7 @@ class Include extends PreprocessorDirective, @ppd_include {
 
   /**
    * Gets the token which occurs after `#include`, for example `"filename"`
-   * or `&lt;filename>`.
+   * or `<filename>`.
    */
   string getIncludeText() { result = getHead() }
 

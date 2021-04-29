@@ -2,10 +2,14 @@ private import AliasConfigurationInternal
 private import semmle.code.cpp.ir.implementation.unaliased_ssa.IR
 private import cpp
 private import AliasAnalysis
+private import semmle.code.cpp.ir.implementation.unaliased_ssa.internal.SimpleSSA as UnaliasedSSA
 
 private newtype TAllocation =
-  TVariableAllocation(IRVariable var) or
-  TIndirectParameterAllocation(IRAutomaticUserVariable var) {
+  TVariableAllocation(IRVariable var) {
+    // Only model variables that were not already handled in unaliased SSA.
+    not UnaliasedSSA::canReuseSSAForVariable(var)
+  } or
+  TIndirectParameterAllocation(IRAutomaticVariable var) {
     exists(InitializeIndirectionInstruction instr | instr.getIRVariable() = var)
   } or
   TDynamicAllocation(CallInstruction call) {
@@ -74,7 +78,7 @@ class VariableAllocation extends Allocation, TVariableAllocation {
 }
 
 class IndirectParameterAllocation extends Allocation, TIndirectParameterAllocation {
-  IRAutomaticUserVariable var;
+  IRAutomaticVariable var;
 
   IndirectParameterAllocation() { this = TIndirectParameterAllocation(var) }
 
@@ -90,7 +94,7 @@ class IndirectParameterAllocation extends Allocation, TIndirectParameterAllocati
 
   final override string getUniqueId() { result = var.getUniqueId() }
 
-  final override IRType getIRType() { result = var.getIRType() }
+  final override IRType getIRType() { result instanceof IRUnknownType }
 
   final override predicate isReadOnly() { none() }
 
@@ -105,7 +109,21 @@ class DynamicAllocation extends Allocation, TDynamicAllocation {
   DynamicAllocation() { this = TDynamicAllocation(call) }
 
   final override string toString() {
-    result = call.toString() + " at " + call.getLocation() // This isn't performant, but it's only used in test/dump code right now.
+    // This isn't performant, but it's only used in test/dump code right now.
+    // Dynamic allocations within a function are numbered in the order by start
+    // line number. This keeps them stable when the function moves within the
+    // file, or when non-allocating lines are added and removed within the
+    // function.
+    exists(int i |
+      result = "dynamic{" + i.toString() + "}" and
+      call =
+        rank[i](CallInstruction rangeCall |
+          exists(TDynamicAllocation(rangeCall)) and
+          rangeCall.getEnclosingIRFunction() = call.getEnclosingIRFunction()
+        |
+          rangeCall order by rangeCall.getLocation().getStartLine()
+        )
+    )
   }
 
   final override CallInstruction getABaseInstruction() { result = call }
@@ -123,4 +141,12 @@ class DynamicAllocation extends Allocation, TDynamicAllocation {
   final override predicate isAlwaysAllocatedOnStack() { none() }
 
   final override predicate alwaysEscapes() { none() }
+}
+
+class StageEscapeConfiguration extends string {
+  StageEscapeConfiguration() {
+    this = "StageEscapeConfiguration (aliased_ssa)"
+  }
+
+  predicate useSoundEscapeAnalysis() { none() }
 }

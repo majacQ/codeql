@@ -2,6 +2,7 @@
  * The default C# QL library.
  */
 
+import Customizations
 import semmle.code.csharp.Attribute
 import semmle.code.csharp.Callable
 import semmle.code.csharp.Comments
@@ -19,6 +20,7 @@ import semmle.code.csharp.Type
 import semmle.code.csharp.Using
 import semmle.code.csharp.Variable
 import semmle.code.csharp.XML
+import semmle.code.csharp.Preprocessor
 import semmle.code.csharp.exprs.Access
 import semmle.code.csharp.exprs.ArithmeticOperation
 import semmle.code.csharp.exprs.Assignment
@@ -34,12 +36,6 @@ import semmle.code.csharp.controlflow.ControlFlowGraph
 import semmle.code.csharp.dataflow.DataFlow
 import semmle.code.csharp.dataflow.TaintTracking
 import semmle.code.csharp.dataflow.SSA
-
-/** DEPRECATED: Use `ControlFlow` instead. */
-deprecated module ControlFlowGraph {
-  import semmle.code.csharp.controlflow.ControlFlowGraph
-  import ControlFlow
-}
 
 /** Whether the source was extracted without a build command. */
 predicate extractionIsStandalone() { exists(SourceFile f | f.extractedStandalone()) }
