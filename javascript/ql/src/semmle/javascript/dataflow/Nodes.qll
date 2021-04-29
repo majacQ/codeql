@@ -156,6 +156,7 @@ class InvokeNode extends DataFlow::SourceNode {
    * Holds if the `i`th argument of this invocation is an object literal whose property
    * `name` is set to `result`.
    */
+  pragma[nomagic]
   DataFlow::ValueNode getOptionArgument(int i, string name) {
     getOptionsArgument(i).hasPropertyWrite(name, result)
   }
@@ -696,6 +697,7 @@ module ModuleImportNode {
  *
  * This predicate can be extended by subclassing `ModuleImportNode::Range`.
  */
+cached
 ModuleImportNode moduleImport(string path) { result.getPath() = path }
 
 /**
@@ -724,6 +726,18 @@ DataFlow::SourceNode moduleMember(string path, string m) {
  */
 class MemberKind extends string {
   MemberKind() { this = "method" or this = "getter" or this = "setter" }
+
+  /** Holds if this is the `method` kind. */
+  predicate isMethod() { this = MemberKind::method() }
+
+  /** Holds if this is the `getter` kind. */
+  predicate isGetter() { this = MemberKind::getter() }
+
+  /** Holds if this is the `setter` kind. */
+  predicate isSetter() { this = MemberKind::setter() }
+
+  /** Holds if this is the `getter` or `setter` kind. */
+  predicate isAccessor() { this = MemberKind::accessor() }
 }
 
 module MemberKind {
@@ -1195,6 +1209,14 @@ module ClassNode {
       exists(DataFlow::NewNode newCall |
         getAPropertySource("prototype") = newCall and
         result = newCall.getCalleeNode()
+      )
+      or
+      // util.inherits(C, D);
+      exists(DataFlow::CallNode inheritsCall |
+        inheritsCall = DataFlow::moduleMember("util", "inherits").getACall()
+      |
+        this = inheritsCall.getArgument(0).getALocalSource() and
+        result = inheritsCall.getArgument(1)
       )
     }
   }
