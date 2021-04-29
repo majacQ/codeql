@@ -89,6 +89,7 @@ class SsaSourceVariable extends TSsaSourceVariable {
     this = TQualifiedField(result, _, _)
   }
 
+  /** Gets a textual representation of this `SsaSourceVariable`. */
   string toString() {
     exists(LocalScopeVariable v, Callable c | this = TLocalVar(c, v) |
       if c = v.getCallable()
@@ -105,12 +106,14 @@ class SsaSourceVariable extends TSsaSourceVariable {
    * not have a specific source code location.
    */
   private VarAccess getFirstAccess() {
-    result = min(this.getAnAccess() as a
+    result =
+      min(this.getAnAccess() as a
         order by
           a.getLocation().getStartLine(), a.getLocation().getStartColumn()
       )
   }
 
+  /** Gets the source location for this element. */
   Location getLocation() {
     exists(LocalScopeVariable v | this = TLocalVar(_, v) and result = v.getLocation())
     or
@@ -166,7 +169,7 @@ private module TrackedVariablesImpl {
   /** Holds if `f` is accessed inside a loop. */
   private predicate loopAccessed(SsaSourceField f) {
     exists(LoopStmt l, FieldRead fr | fr = f.getAnAccess() |
-      l.getBody() = fr.getEnclosingStmt().getParent*() or
+      l.getBody() = fr.getEnclosingStmt().getEnclosingStmt*() or
       l.getCondition() = fr.getParent*() or
       l.(ForStmt).getAnUpdate() = fr.getParent*()
     )
@@ -205,6 +208,7 @@ private module TrackedVariablesImpl {
 
   class TrackedField extends TrackedVar, SsaSourceField { }
 }
+
 private import TrackedVariablesImpl
 
 cached
@@ -449,7 +453,8 @@ private module SsaImpl {
    */
   private predicate callDefUseRank(TrackedField f, BasicBlock b, int rankix, int i) {
     updateCandidate(f, _, b, _) and
-    i = rank[rankix](int j |
+    i =
+      rank[rankix](int j |
         certainVariableUpdate(f, _, b, j) or
         variableUseOrCapture(f, b, j) or
         updateCandidate(f, _, b, j)
@@ -611,7 +616,8 @@ private module SsaImpl {
      * basic blocks.
      */
     private predicate defUseRank(TrackedVar v, BasicBlock b, int rankix, int i) {
-      i = rank[rankix](int j |
+      i =
+        rank[rankix](int j |
           any(TrackedSsaDef def).definesAt(v, b, j) or variableUseOrCapture(v, b, j)
         )
     }
@@ -764,7 +770,9 @@ private module SsaImpl {
 
     /** Holds if `v` occurs in `b` or one of `b`'s transitive successors. */
     private predicate blockPrecedesVar(TrackedVar v, BasicBlock b) {
-      varOccursInBlock(v, b.getABBSuccessor*())
+      varOccursInBlock(v, b)
+      or
+      ssaDefReachesEndOfBlock(v, _, b)
     }
 
     /**
@@ -773,7 +781,9 @@ private module SsaImpl {
      * between `b1` and `b2`.
      */
     private predicate varBlockReaches(TrackedVar v, BasicBlock b1, BasicBlock b2) {
-      varOccursInBlock(v, b1) and b2 = b1.getABBSuccessor()
+      varOccursInBlock(v, b1) and
+      b2 = b1.getABBSuccessor() and
+      blockPrecedesVar(v, b2)
       or
       exists(BasicBlock mid |
         varBlockReaches(v, b1, mid) and
@@ -808,6 +818,7 @@ private module SsaImpl {
       defUseRank(v, b2, 1, i2)
     }
   }
+
   private import AdjacentUsesImpl
 
   /**
@@ -868,6 +879,7 @@ private module SsaImpl {
     }
   }
 }
+
 private import SsaImpl
 private import SsaDefReaches
 import SsaPublic
@@ -929,8 +941,10 @@ class SsaVariable extends TSsaVariable {
     this = TSsaUntracked(_, result)
   }
 
+  /** Gets a textual representation of this SSA variable. */
   string toString() { none() }
 
+  /** Gets the source location for this element. */
   Location getLocation() { result = getCFGNode().getLocation() }
 
   /** Gets the `BasicBlock` in which this SSA variable is defined. */
@@ -964,7 +978,7 @@ class SsaVariable extends TSsaVariable {
    * includes inputs to phi nodes, the prior definition of uncertain updates,
    * and the captured ssa variable for a closure variable.
    */
-  private SsaVariable getAPhiInputOrPriorDef() {
+  SsaVariable getAPhiInputOrPriorDef() {
     result = this.(SsaPhiNode).getAPhiInput() or
     result = this.(SsaUncertainImplicitUpdate).getPriorDef() or
     this.(SsaImplicitInit).captures(result)
@@ -1107,7 +1121,7 @@ class SsaPhiNode extends SsaVariable, TSsaPhiNode {
   }
 }
 
-library class RefTypeCastExpr extends CastExpr {
+private class RefTypeCastExpr extends CastExpr {
   RefTypeCastExpr() { this.getType() instanceof RefType }
 }
 
@@ -1122,8 +1136,6 @@ Expr sameValue(SsaVariable v, VarAccess va) {
   result.(AssignExpr).getDest() = va and result = v.(SsaExplicitUpdate).getDefiningExpr()
   or
   result.(AssignExpr).getSource() = sameValue(v, va)
-  or
-  result.(ParExpr).getExpr() = sameValue(v, va)
   or
   result.(RefTypeCastExpr).getExpr() = sameValue(v, va)
 }

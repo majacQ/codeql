@@ -33,7 +33,7 @@ express().get('/some/path', function(req, res) {
         foo.indexOf(); //  OK
     }
     if (foo instanceof Array) {
-        foo.indexOf(); //  OK, but still flagged
+        foo.indexOf(); //  OK, but still flagged [INCONSISTENCY]
     }
 
     (foo + f()).indexOf(); // OK
@@ -68,4 +68,6 @@ express().get('/some/path/:foo', function(req, res) {
     while (p.length) { // OK
       p = p.substr(1);
     }
+
+    p.length < 1; // OK
 });

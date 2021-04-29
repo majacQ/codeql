@@ -32,7 +32,7 @@ class AspAttribute extends AspElement, @asp_attribute { }
 /**
  * An open tag, for example the tag on line 1 in
  *
- * ```
+ * ```html
  * <script runat="server">
  *   Label.Text = "Hello, World!";
  * </script>
@@ -67,7 +67,7 @@ class AspOpenTag extends AspElement, @asp_open_tag {
 /**
  * A close tag, for example the tag on line 3 in
  *
- * ```
+ * ```html
  * <script runat="server">
  *   Label.Text = "Hello, World!";
  * </script>
@@ -123,7 +123,7 @@ class AspServerComment extends AspComment {
 /**
  * A data-binding expression, for example `<%# myArray %>` in
  *
- * ```
+ * ```html
  * <asp:ListBox id="List1" datasource='<%# myArray %>' runat="server">
  * ```
  */
@@ -165,7 +165,9 @@ class AspQuotedString extends AspAttribute, @asp_quoted_string {
 }
 
 /** Arbitrary text. It will be inserted into the document as is. */
-class AspText extends AspElement, @asp_text { override string toString() { result = getBody() } }
+class AspText extends AspElement, @asp_text {
+  override string toString() { result = getBody() }
+}
 
 /** An XML directive, such as a `DOCTYPE` declaration. */
 class AspXmlDirective extends AspElement, @asp_xml_directive {

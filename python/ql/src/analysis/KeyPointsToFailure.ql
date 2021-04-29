@@ -8,23 +8,19 @@
  */
 
 import python
+import semmle.python.pointsto.PointsTo
 
 predicate points_to_failure(Expr e) {
-    exists(ControlFlowNode f | 
-        f = e.getAFlowNode() |
-        not f.refersTo(_)
-    )
+  exists(ControlFlowNode f | f = e.getAFlowNode() | not PointsTo::pointsTo(f, _, _, _))
 }
 
 predicate key_points_to_failure(Expr e) {
-    points_to_failure(e) and not points_to_failure(e.getASubExpression())
-    and
-    not exists(SsaVariable ssa |
-        ssa.getAUse() = e.getAFlowNode() |
-        points_to_failure(ssa.getAnUltimateDefinition().getDefinition().getNode())
-    )
-    and
-    not exists(Assign a | a.getATarget() = e)
+  points_to_failure(e) and
+  not points_to_failure(e.getASubExpression()) and
+  not exists(SsaVariable ssa | ssa.getAUse() = e.getAFlowNode() |
+    points_to_failure(ssa.getAnUltimateDefinition().getDefinition().getNode())
+  ) and
+  not exists(Assign a | a.getATarget() = e)
 }
 
 from Attribute e

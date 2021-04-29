@@ -1,32 +1,40 @@
-/** Provides class representing the `django.redirect` function.
+/**
+ * Provides class representing the `django.redirect` function.
  * This module is intended to be imported into a taint-tracking query
  * to extend `TaintSink`.
  */
-import python
 
-import semmle.python.security.TaintTracking
+import python
+import semmle.python.dataflow.TaintTracking
 import semmle.python.security.strings.Basic
 private import semmle.python.web.django.Shared
-
+private import semmle.python.web.Http
 
 /**
- * Represents an argument to the `django.redirect` function.
+ * The URL argument for a call to the `django.shortcuts.redirect` function.
  */
-class DjangoRedirect extends TaintSink {
+class DjangoShortcutsRedirectSink extends HttpRedirectTaintSink {
+  override string toString() { result = "DjangoShortcutsRedirectSink" }
 
-    override string toString() {
-        result = "django.redirect"
-    }
+  DjangoShortcutsRedirectSink() {
+    this = Value::named("django.shortcuts.redirect").(FunctionValue).getArgumentForCall(_, 0)
+  }
+}
 
-    DjangoRedirect() {
-        exists(CallNode call |
-            redirect().getACall() = call and
-            this = call.getAnArg() 
-        )
-    }
+/** DEPRECATED: Use `DjangoShortcutsRedirectSink` instead. */
+deprecated class DjangoRedirect = DjangoShortcutsRedirectSink;
 
-    override predicate sinks(TaintKind kind) {
-        kind instanceof StringKind
-    }
+/**
+ * The URL argument when instantiating a Django Redirect Response.
+ */
+class DjangoRedirectResponseSink extends HttpRedirectTaintSink {
+  DjangoRedirectResponseSink() {
+    exists(CallNode call | call = any(DjangoRedirectResponseClass cls).getACall() |
+      this = call.getArg(0)
+      or
+      this = call.getArgByName("redirect_to")
+    )
+  }
 
+  override string toString() { result = "DjangoRedirectResponseSink" }
 }

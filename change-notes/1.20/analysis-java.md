@@ -1,8 +1,5 @@
 # Improvements to Java analysis
 
-## General improvements
-
-
 ## New queries
 
 | **Query**                   | **Tags**  | **Purpose**                                                        |
@@ -14,7 +11,7 @@
 
 | **Query**                  | **Expected impact**    | **Change**                                                       |
 |----------------------------|------------------------|------------------------------------------------------------------|
-| Double-checked locking is not thread-safe (`java/unsafe-double-checked-locking`) | Fewer false positive results and more true positive results | Results that use safe publication through a `final` field are no longer reported. Results that initialize immutable types like `String` incorrectly are now reported. |
+| Arbitrary file write during archive extraction ("Zip Slip") (`java/zipslip`) | Fewer false positive results | Results involving a sanitization step that converts a destination `Path` to a `File` are no longer reported. |
 | Result of multiplication cast to wider type (`java/integer-multiplication-cast-to-long`) | Fewer results | Results involving conversions to `float` or `double` are no longer reported, as they were almost exclusively false positives. |
 
 ## Changes to QL libraries
@@ -27,5 +24,9 @@
 * Taint tracking now includes additional default data-flow steps through
   collections, maps, and iterators. This affects all security queries, which
   can report more results based on such paths.
+* The `FlowSources` and `TaintTracking` libraries are extended to cover additional remote user
+  input and taint steps from the following frameworks: Guice, Protobuf, Thrift and Struts.
+  This affects all security queries, which may yield additional results on projects
+  that use these frameworks.
 
 

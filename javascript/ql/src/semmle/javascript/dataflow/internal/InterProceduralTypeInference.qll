@@ -4,8 +4,9 @@
  * Provides classes implementing type inference across function calls.
  */
 
-import javascript
+private import javascript
 import AbstractValuesImpl
+private import semmle.javascript.dataflow.LocalObjects
 
 /**
  * Flow analysis for `this` expressions inside functions.
@@ -42,6 +43,19 @@ private class AnalyzedThisInBoundFunction extends AnalyzedThisExpr {
     result = thisSource.getALocalValue() or
     result = AnalyzedThisExpr.super.getALocalValue()
   }
+}
+
+/**
+ * Flow analysis for `this` expressions in node modules.
+ *
+ * These expressions are assumed to refer to the `module.exports` object.
+ */
+private class AnalyzedThisAsModuleExports extends DataFlow::AnalyzedNode, DataFlow::ThisNode {
+  NodeModule m;
+
+  AnalyzedThisAsModuleExports() { m = getBindingContainer() }
+
+  override AbstractValue getALocalValue() { result = TAbstractExportsObject(m) }
 }
 
 /**
@@ -173,8 +187,7 @@ private class IIFEWithAnalyzedReturnFlow extends CallWithAnalyzedReturnFlow {
  */
 private VarAccess getOnlyAccess(FunctionDeclStmt fn, LocalVariable v) {
   v = fn.getVariable() and
-  result = v.getAnAccess() and
-  strictcount(v.getAnAccess()) = 1
+  result = unique(VarAccess acc | acc = v.getAnAccess())
 }
 
 /** A function that only is used locally, making it amenable to type inference. */
@@ -229,4 +242,68 @@ private class TypeInferredCalleeWithAnalyzedReturnFlow extends CallWithNonLocalA
   }
 
   override AnalyzedFunction getACallee() { result = fun }
+}
+
+/**
+ * Holds if `call` uses `receiver` as its only receiver value.
+ */
+pragma[noinline]
+private predicate hasDefiniteReceiver(DataFlow::MethodCallNode call, LocalObject receiver) {
+  call = receiver.getAMethodCall() and
+  exists(DataFlow::AnalyzedNode receiverNode, AbstractValue abstractCapturedReceiver |
+    receiverNode = call.getReceiver() and
+    not receiverNode.getALocalValue().isIndefinite(_) and
+    abstractCapturedReceiver = receiver.analyze().getALocalValue() and
+    forall(DataFlow::AbstractValue v | receiverNode.getALocalValue() = v |
+      v = abstractCapturedReceiver
+    )
+  )
+}
+
+/**
+ * Enables inter-procedural type inference for the return value of a
+ * method call to a flow-insensitively type-inferred callee.
+ */
+private class TypeInferredMethodWithAnalyzedReturnFlow extends CallWithNonLocalAnalyzedReturnFlow {
+  DataFlow::FunctionNode fun;
+
+  TypeInferredMethodWithAnalyzedReturnFlow() {
+    exists(LocalObject obj, DataFlow::PropWrite write, string name |
+      this.(DataFlow::MethodCallNode).getMethodName() = name and
+      obj.hasOwnProperty(name) and
+      hasDefiniteReceiver(this, obj) and
+      // include all potential callees
+      // by construction, there are no unknown methods on `obj`
+      write = obj.getAPropertyWrite() and
+      fun.flowsTo(write.getRhs()) and
+      (
+        not exists(write.getPropertyName())
+        or
+        write.getPropertyName() = name
+      )
+    )
+  }
+
+  override AnalyzedFunction getACallee() { result = fun }
+}
+
+/**
+ * Propagates receivers into locally defined callbacks of partial invocations.
+ */
+private class AnalyzedThisInPartialInvokeCallback extends AnalyzedNode, DataFlow::ThisNode {
+  DataFlow::PartialInvokeNode call;
+  DataFlow::Node receiver;
+
+  AnalyzedThisInPartialInvokeCallback() {
+    exists(DataFlow::Node callbackArg |
+      receiver = call.getBoundReceiver(callbackArg) and
+      getBinder().flowsTo(callbackArg)
+    )
+  }
+
+  override AbstractValue getALocalValue() {
+    result = receiver.analyze().getALocalValue()
+    or
+    result = AnalyzedNode.super.getALocalValue()
+  }
 }

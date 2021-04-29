@@ -9,44 +9,36 @@
  *       external/cwe/cwe-131
  *       external/cwe/cwe-120
  */
+
 import cpp
+import semmle.code.cpp.dataflow.DataFlow
+import semmle.code.cpp.models.interfaces.Allocation
 
-class MallocCall extends FunctionCall
-{
-  MallocCall() { this.getTarget().hasQualifiedName("malloc") }
-
-  Expr getAllocatedSize() {
-    if this.getArgument(0) instanceof VariableAccess then
-      exists(LocalScopeVariable v, ControlFlowNode def |
-        definitionUsePair(v, def, this.getArgument(0)) and
-        exprDefinition(v, def, result))
-    else
-      result = this.getArgument(0)
-  }
-}
-
-predicate terminationProblem(MallocCall malloc, string msg)
-{
-  malloc.getAllocatedSize() instanceof StrlenCall and
-  msg = "This allocation does not include space to null-terminate the string."
-}
-
-predicate spaceProblem(FunctionCall append, string msg)
-{
-  exists(MallocCall malloc, StrlenCall strlen, AddExpr add, FunctionCall insert, Variable buffer |
-    add.getAChild() = strlen
-    and exists(add.getAChild().getValue())
-    and malloc.getAllocatedSize() = add
-    and buffer.getAnAccess() = strlen.getStringExpr()
-    and (insert.getTarget().hasQualifiedName("strcpy") or insert.getTarget().hasQualifiedName("strncpy"))
-    and (append.getTarget().hasQualifiedName("strcat") or append.getTarget().hasQualifiedName("strncat"))
-    and malloc.getASuccessor+() = insert
-    and insert.getArgument(1) = buffer.getAnAccess()
-    and insert.getASuccessor+() = append
-    and msg = "This buffer only contains enough room for '" + buffer.getName() +
-      "' (copied on line " + insert.getLocation().getStartLine().toString() + ")")
+predicate spaceProblem(FunctionCall append, string msg) {
+  exists(
+    AllocationExpr malloc, StrlenCall strlen, AddExpr add, FunctionCall insert, Variable buffer
+  |
+    add.getAChild() = strlen and
+    exists(add.getAChild().getValue()) and
+    DataFlow::localExprFlow(add, malloc.getSizeExpr()) and
+    buffer.getAnAccess() = strlen.getStringExpr() and
+    (
+      insert.getTarget().hasGlobalOrStdName("strcpy") or
+      insert.getTarget().hasGlobalOrStdName("strncpy")
+    ) and
+    (
+      append.getTarget().hasGlobalOrStdName("strcat") or
+      append.getTarget().hasGlobalOrStdName("strncat")
+    ) and
+    malloc.getASuccessor+() = insert and
+    insert.getArgument(1) = buffer.getAnAccess() and
+    insert.getASuccessor+() = append and
+    msg =
+      "This buffer only contains enough room for '" + buffer.getName() + "' (copied on line " +
+        insert.getLocation().getStartLine().toString() + ")"
+  )
 }
 
 from Expr problem, string msg
-where terminationProblem(problem, msg) or spaceProblem(problem, msg)
+where spaceProblem(problem, msg)
 select problem, msg

@@ -1,5 +1,12 @@
+/*
+ * Maintainer note: this file is one of several files that are similar but not
+ * identical. Many changes to this file will also apply to the others:
+ * - AddressConstantExpression.qll
+ * - AddressFlow.qll
+ * - EscapesTree.qll
+ */
+
 private import cpp
-private import semmle.code.cpp.dataflow.EscapesTree
 
 predicate addressConstantExpression(Expr e) {
   constantAddressPointer(e)
@@ -14,10 +21,7 @@ predicate addressConstantExpression(Expr e) {
 /** Holds if `v` is a constexpr variable initialized to a constant address. */
 private predicate addressConstantVariable(Variable v) {
   addressConstantExpression(v.getInitializer().getExpr().getFullyConverted()) and
-  // Here we should also require that `v` is constexpr, but we don't have that
-  // information in the db. See CPP-314. Instead, we require that the variable
-  // is never defined except in its initializer.
-  forall(Expr def | definition(v, def) | def = any(Initializer init).getExpr())
+  v.isConstexpr()
 }
 
 /**
@@ -25,7 +29,8 @@ private predicate addressConstantVariable(Variable v) {
  * expression_.
  */
 private predicate constantAddressLValue(Expr lvalue) {
-  lvalue.(VariableAccess).getTarget() = any(Variable v |
+  lvalue.(VariableAccess).getTarget() =
+    any(Variable v |
       v.(Variable).isStatic()
       or
       v instanceof GlobalOrNamespaceVariable
@@ -35,6 +40,11 @@ private predicate constantAddressLValue(Expr lvalue) {
   // to a function _pointer_ type. Instead, the type of a `FunctionAccess`
   // tells us how it's going to be used.
   lvalue.(FunctionAccess).getType() instanceof RoutineType
+  or
+  // Pointer-to-member literals in uninstantiated templates
+  lvalue instanceof Literal and
+  not exists(lvalue.getValue()) and
+  lvalue.isFromUninstantiatedTemplate(_)
   or
   // String literals have array types and undergo array-to-pointer conversion.
   lvalue instanceof StringLiteral
@@ -64,6 +74,10 @@ private predicate constantAddressPointer(Expr pointer) {
   // to a function _pointer_ type. Instead, the type of a `FunctionAccess`
   // tells us how it's going to be used.
   pointer.(FunctionAccess).getType() instanceof FunctionPointerType
+  or
+  // Pointer to member function. These accesses are always pointers even though
+  // their type is `RoutineType`.
+  pointer.(FunctionAccess).getTarget() instanceof MemberFunction
   or
   addressConstantVariable(pointer.(VariableAccess).getTarget()) and
   pointer.getType().getUnderlyingType() instanceof PointerType
@@ -113,7 +127,8 @@ private predicate lvalueToLvalueStep(Expr lvalueIn, Expr lvalueOut) {
 }
 
 private predicate pointerToLvalueStep(Expr pointerIn, Expr lvalueOut) {
-  lvalueOut = any(ArrayExpr ae |
+  lvalueOut =
+    any(ArrayExpr ae |
       pointerIn = ae.getArrayBase().getFullyConverted() and
       hasConstantValue(ae.getArrayOffset().getFullyConverted())
     )
@@ -136,7 +151,7 @@ private predicate pointerToPointerStep(Expr pointerIn, Expr pointerOut) {
     pointerOut instanceof PointerSubExpr
   ) and
   pointerIn = pointerOut.getAChild().getFullyConverted() and
-  pointerIn.getType().getUnspecifiedType() instanceof PointerType and
+  pointerIn.getUnspecifiedType() instanceof PointerType and
   // The pointer arg won't be constant in the sense of `hasConstantValue`, so
   // this will have to match the integer argument.
   hasConstantValue(pointerOut.getAChild().getFullyConverted())
@@ -147,7 +162,8 @@ private predicate pointerToPointerStep(Expr pointerIn, Expr pointerOut) {
   or
   pointerIn.getConversion() = pointerOut.(ParenthesisExpr)
   or
-  pointerOut = any(ConditionalExpr cond |
+  pointerOut =
+    any(ConditionalExpr cond |
       cond.getCondition().getFullyConverted().getValue().toInt() != 0 and
       pointerIn = cond.getThen().getFullyConverted()
       or
@@ -157,7 +173,8 @@ private predicate pointerToPointerStep(Expr pointerIn, Expr pointerOut) {
   or
   // The comma operator is allowed by C++17 but disallowed by C99. This
   // disjunct is a compromise that's chosen for being easy to implement.
-  pointerOut = any(CommaExpr comma |
+  pointerOut =
+    any(CommaExpr comma |
       hasConstantValue(comma.getLeftOperand()) and
       pointerIn = comma.getRightOperand().getFullyConverted()
     )

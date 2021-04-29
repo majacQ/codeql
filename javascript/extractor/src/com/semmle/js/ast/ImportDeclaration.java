@@ -2,6 +2,8 @@ package com.semmle.js.ast;
 
 import java.util.List;
 
+import com.semmle.ts.ast.INodeWithSymbol;
+
 /**
  * An import declaration, which can be of one of the following forms:
  *
@@ -14,29 +16,53 @@ import java.util.List;
  *   import "m";
  * </pre>
  */
-public class ImportDeclaration extends Statement {
-	/** List of import specifiers detailing how declarations are imported; may be empty. */
-	private final List<ImportSpecifier> specifiers;
+public class ImportDeclaration extends Statement implements INodeWithSymbol {
+  /** List of import specifiers detailing how declarations are imported; may be empty. */
+  private final List<ImportSpecifier> specifiers;
 
-	/** The module from which declarations are imported. */
-	private final Literal source;
+  /** The module from which declarations are imported. */
+  private final Literal source;
 
-	public ImportDeclaration(SourceLocation loc, List<ImportSpecifier> specifiers, Literal source) {
-		super("ImportDeclaration", loc);
-		this.specifiers = specifiers;
-		this.source = source;
-	}
+  private int symbol = -1;
 
-	public Literal getSource() {
-		return source;
-	}
+  private boolean hasTypeKeyword;
 
-	public List<ImportSpecifier> getSpecifiers() {
-		return specifiers;
-	}
+  public ImportDeclaration(SourceLocation loc, List<ImportSpecifier> specifiers, Literal source) {
+    this(loc, specifiers, source, false);
+  }
 
-	@Override
-	public <C, R> R accept(Visitor<C, R> v, C c) {
-		return v.visit(this, c);
-	}
+  public ImportDeclaration(SourceLocation loc, List<ImportSpecifier> specifiers, Literal source, boolean hasTypeKeyword) {
+    super("ImportDeclaration", loc);
+    this.specifiers = specifiers;
+    this.source = source;
+    this.hasTypeKeyword = hasTypeKeyword;
+  }
+
+  public Literal getSource() {
+    return source;
+  }
+
+  public List<ImportSpecifier> getSpecifiers() {
+    return specifiers;
+  }
+
+  @Override
+  public <C, R> R accept(Visitor<C, R> v, C c) {
+    return v.visit(this, c);
+  }
+
+  @Override
+  public int getSymbol() {
+    return this.symbol;
+  }
+
+  @Override
+  public void setSymbol(int symbol) {
+    this.symbol = symbol;
+  }
+
+  /** Returns true if this is an <code>import type</code> declaration. */
+  public boolean hasTypeKeyword() {
+    return hasTypeKeyword;
+  }
 }

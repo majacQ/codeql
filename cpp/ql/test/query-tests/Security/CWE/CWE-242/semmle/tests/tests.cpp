@@ -272,3 +272,39 @@ void test4()
 	sprintf(buffer8, "12345678"); // BAD: buffer overflow
 	sprintf(buffer8_ptr, "12345678"); // BAD: buffer overflow
 }
+
+typedef void *va_list;
+int vsprintf(char *s, const char *format, va_list arg);
+
+void test5(va_list args, float f)
+{
+	char buffer10[10], buffer64[64];
+	char *buffer4 = new char[4 * sizeof(char)];
+
+	vsprintf(buffer10, "123456789", args); // GOOD
+	vsprintf(buffer10, "1234567890", args); // BAD: buffer overflow [NOT DETECTED]
+
+	sprintf(buffer64, "%f", f); // BAD: potential buffer overflow
+
+	vsprintf(buffer4, "123", args); // GOOD
+	vsprintf(buffer4, "1234", args); // BAD: buffer overflow [NOT DETECTED]
+}
+
+namespace custom_sprintf_impl {
+	int sprintf(char *buf, const char *format, ...)
+	{
+		__builtin_va_list args;
+		int i;
+
+		__builtin_va_start(args, format);
+		i = vsprintf(buf, format, args);
+		__builtin_va_end(args);
+		return i;
+	}
+
+	void regression_test1()
+	{
+		char buffer8[8];
+		sprintf(buffer8, "12345678"); // BAD: potential buffer overflow
+	}
+}

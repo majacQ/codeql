@@ -130,13 +130,12 @@ where
   kind = getServiceKind(request, name) and
   exists(request.getAServiceDefinition(name)) and // ignore unknown/undefined services
   not isCompatibleRequestedService(request, kind) and
-  compatibleWithString = concat(string compatibleKind |
+  compatibleWithString =
+    concat(string compatibleKind |
       isCompatibleRequestedService(request, compatibleKind) and
       not isWildcardKind(compatibleKind)
     |
-      "'" + compatibleKind + "'", ", "
-      order by
-        compatibleKind
+      "'" + compatibleKind + "'", ", " order by compatibleKind
     ).regexpReplaceAll(",(?=[^,]+$)", " or") and
   (
     isServiceDirectiveOrFilterFunction(request) and

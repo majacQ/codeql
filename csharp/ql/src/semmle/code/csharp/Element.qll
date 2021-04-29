@@ -18,21 +18,14 @@ class Element extends DotNet::Element, @element {
   override string toStringWithTypes() { result = this.toString() }
 
   /**
-   * Gets the location of this element, if any.
-   * Where an element has multiple locations (for example a source file and an assembly),
-   * gets only the source location.
+   * Gets the location of this element. Where an element has locations in
+   * source and assemblies, choose the source location. If there are multiple
+   * assembly locations, choose only one.
    */
-  override Location getLocation() { result = ExprOrStmtParentCached::bestLocation(this) }
-
-  /** Gets the URL of this element. */
-  string getURL() { result = ExprOrStmtParentCached::getURL(this) }
+  final override Location getLocation() { result = bestLocation(this) }
 
   /** Gets a location of this element, including sources and assemblies. */
   override Location getALocation() { none() }
-
-  override File getFile() { result = getLocation().getFile() }
-
-  override predicate fromSource() { this.getFile().fromSource() }
 
   /** Holds if this element is from an assembly. */
   predicate fromLibrary() { this.getFile().fromLibrary() }
@@ -55,4 +48,17 @@ class Element extends DotNet::Element, @element {
    * other children (zero-based).
    */
   int getIndex() { exists(Element parent | parent.getChild(result) = this) }
+
+  /**
+   * Gets the name of a primary CodeQL class to which this element belongs.
+   *
+   * For most elements, this is simply the most precise syntactic category to
+   * which they belong; for example, `AddExpr` is a primary class, but
+   * `BinaryOperation` is not.
+   *
+   * This predicate always has a result. If no primary class can be
+   * determined, the result is `"???"`. If multiple primary classes match,
+   * this predicate can have multiple results.
+   */
+  string getAPrimaryQlClass() { result = "???" }
 }

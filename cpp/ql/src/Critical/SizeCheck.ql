@@ -17,28 +17,22 @@ import cpp
 class Allocation extends FunctionCall {
   Allocation() {
     exists(string name |
-      this.getTarget().hasQualifiedName(name) and
+      this.getTarget().hasGlobalOrStdName(name) and
       (name = "malloc" or name = "calloc" or name = "realloc")
     )
   }
 
-  string getName() { result = this.getTarget().getQualifiedName() }
+  private string getName() { this.getTarget().hasGlobalOrStdName(result) }
 
   int getSize() {
-    (
-      this.getName() = "malloc" and
-      this.getArgument(0).getValue().toInt() = result
-    )
+    this.getName() = "malloc" and
+    this.getArgument(0).getValue().toInt() = result
     or
-    (
-      this.getName() = "realloc" and
-      this.getArgument(1).getValue().toInt() = result
-    )
+    this.getName() = "realloc" and
+    this.getArgument(1).getValue().toInt() = result
     or
-    (
-      this.getName() = "calloc" and
-      result = this.getArgument(0).getValue().toInt() * this.getArgument(1).getValue().toInt()
-    )
+    this.getName() = "calloc" and
+    result = this.getArgument(0).getValue().toInt() * this.getArgument(1).getValue().toInt()
   }
 }
 

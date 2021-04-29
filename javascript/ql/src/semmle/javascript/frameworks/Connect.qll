@@ -118,8 +118,14 @@ module Connect {
     }
 
     override DataFlow::SourceNode getARouteHandler() {
-      result.(DataFlow::SourceNode).flowsTo(getARouteHandlerExpr().flow()) or
-      result.(DataFlow::TrackedNode).flowsTo(getARouteHandlerExpr().flow())
+      result = getARouteHandler(DataFlow::TypeBackTracker::end())
+    }
+
+    private DataFlow::SourceNode getARouteHandler(DataFlow::TypeBackTracker t) {
+      t.start() and
+      result = getARouteHandlerExpr().flow().getALocalSource()
+      or
+      exists(DataFlow::TypeBackTracker t2 | result = getARouteHandler(t2).backtrack(t2, t))
     }
 
     override Expr getServer() { result = server }
@@ -151,7 +157,6 @@ module Connect {
    */
   private class RequestInputAccess extends HTTP::RequestInputAccess {
     RequestExpr request;
-
     string kind;
 
     RequestInputAccess() {
@@ -169,25 +174,11 @@ module Connect {
   }
 
   /**
-   * Tracking for `RouteHandlerCandidate`.
-   */
-  private class TrackedRouteHandlerCandidate extends DataFlow::TrackedNode {
-    TrackedRouteHandlerCandidate() { this instanceof RouteHandlerCandidate }
-  }
-
-  /**
-   * A function that looks like a Connect route handler and flows to a route setup.
+   * A function that flows to a route setup.
    */
   private class TrackedRouteHandlerCandidateWithSetup extends RouteHandler,
-    HTTP::Servers::StandardRouteHandler, DataFlow::ValueNode {
-    override Function astNode;
-
-    TrackedRouteHandlerCandidateWithSetup() {
-      exists(TrackedRouteHandlerCandidate tracked |
-        tracked.flowsTo(any(RouteSetup s).getARouteHandlerExpr().flow()) and
-        this = tracked
-      )
-    }
+    HTTP::Servers::StandardRouteHandler, DataFlow::FunctionNode {
+    TrackedRouteHandlerCandidateWithSetup() { this = any(RouteSetup s).getARouteHandler() }
 
     override SimpleParameter getRouteHandlerParameter(string kind) {
       result = getRouteHandlerParameter(astNode, kind)

@@ -21,7 +21,7 @@ abstract class Module extends TopLevel {
   Import getAnImport() { result.getTopLevel() = this }
 
   /** Gets a module from which this module imports. */
-  abstract Module getAnImportedModule();
+  Module getAnImportedModule() { result = getAnImport().getImportedModule() }
 
   /** Gets a symbol exported by this module. */
   string getAnExportedSymbol() { exports(result, _) }
@@ -83,17 +83,22 @@ abstract class Module extends TopLevel {
         result = c.(Folder).getJavaScriptFile("index")
       )
       or
-      // handle the case where the import path is missing an extension
+      // handle the case where the import path is missing the extension
       exists(Folder f | f = path.resolveUpTo(path.getNumComponent() - 1) |
         result = f.getJavaScriptFile(path.getBaseName())
+        or
+        // If a js file was not found look for a file that compiles to js
+        path.getExtension() = ".js" and
+        not exists(f.getJavaScriptFile(path.getBaseName())) and
+        result = f.getJavaScriptFile(path.getStem())
       )
     )
   }
 }
 
 /**
- * An import in a module, which may either be an ECMAScript 2015-style
- * `import` statement or a CommonJS-style `require` import.
+ * An import in a module, which may be an ECMAScript 2015-style
+ * `import` statement, a CommonJS-style `require` import, or an AMD dependency.
  */
 abstract class Import extends ASTNode {
   /** Gets the module in which this import appears. */
@@ -135,12 +140,23 @@ abstract class Import extends ASTNode {
    * Gets a module in a `node_modules/@types/` folder that matches the imported module name.
    */
   private Module resolveFromTypeRoot() {
-    result.getFile() = min(TypeRootFolder typeRoot |
+    result.getFile() =
+      min(TypeRootFolder typeRoot |
         |
         typeRoot.getModuleFile(getImportedPath().getValue())
         order by
           typeRoot.getSearchPriority(getFile().getParentContainer())
       )
+  }
+
+  /**
+   * Gets the imported module, as determined by the TypeScript compiler, if any.
+   */
+  private Module resolveFromTypeScriptSymbol() {
+    exists(CanonicalName symbol |
+      ast_node_symbol(this, symbol) and
+      ast_node_symbol(result, symbol)
+    )
   }
 
   /**
@@ -157,18 +173,52 @@ abstract class Import extends ASTNode {
     else (
       result = resolveAsProvidedModule() or
       result = resolveImportedPath() or
-      result = resolveFromTypeRoot()
+      result = resolveFromTypeRoot() or
+      result = resolveFromTypeScriptSymbol() or
+      result = resolveNeighbourPackage(this.getImportedPath().getValue())
     )
+  }
+
+  /**
+   * Gets the data flow node that the default import of this import is available at.
+   */
+  abstract DataFlow::Node getImportedModuleNode();
+}
+
+/**
+ * DEPRECATED. Use `PathExpr` instead.
+ *
+ * A path expression that appears in a module and is resolved relative to it.
+ */
+abstract deprecated class PathExprInModule extends PathExpr {
+  PathExprInModule() {
+    this.(Expr).getTopLevel() instanceof Module
+    or
+    this.(Comment).getTopLevel() instanceof Module
   }
 }
 
 /**
- * A path expression that appears in a module and is resolved relative to it.
+ * Gets a module imported from another package in the same repository.
+ *
+ * No support for importing from folders inside the other package.
  */
-abstract class PathExprInModule extends PathExpr {
-  PathExprInModule() { exists(getEnclosingModule()) }
+private Module resolveNeighbourPackage(PathString importPath) {
+  exists(PackageJSON json | importPath = json.getPackageName() and result = json.getMainModule())
+  or
+  exists(string package |
+    result.getFile().getParentContainer() = getPackageFolder(package) and
+    importPath = package + "/" + [result.getFile().getBaseName(), result.getFile().getStem()]
+  )
+}
 
-  override Folder getSearchRoot(int priority) {
-    getEnclosingModule().searchRoot(this, result, priority)
-  }
+/**
+ * Gets the folder for a package that has name `package` according to a package.json file in the resulting folder.
+ */
+pragma[noinline]
+private Folder getPackageFolder(string package) {
+  exists(PackageJSON json |
+    json.getPackageName() = package and
+    result = json.getFile().getParentContainer()
+  )
 }

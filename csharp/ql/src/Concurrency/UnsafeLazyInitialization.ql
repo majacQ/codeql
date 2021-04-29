@@ -1,10 +1,10 @@
 /**
  * @name Double-checked lock is not thread-safe
- * @description A repeated check on a non-volatile field is not thread-safe, and
- *              could result in unexpected behavior.
+ * @description A repeated check on a non-volatile field is not thread-safe on some platforms,
+ *              and could result in unexpected behavior.
  * @kind problem
  * @problem.severity error
- * @precision high
+ * @precision medium
  * @id cs/unsafe-double-checked-lock
  * @tags correctness
  *       concurrency
@@ -17,12 +17,12 @@ import semmle.code.csharp.commons.StructuralComparison
 class DoubleCheckedLock extends StructuralComparisonConfiguration {
   DoubleCheckedLock() { this = "double checked lock" }
 
-  override predicate candidate(Element x, Element y) {
+  override predicate candidate(ControlFlowElement x, ControlFlowElement y) {
     exists(IfStmt unlockedIf, IfStmt lockedIf, LockStmt lock |
       x = unlockedIf.getCondition() and
       y = lockedIf.getCondition() and
       lock = unlockedIf.getThen().stripSingletonBlocks() and
-      lockedIf = lock.getBlock().stripSingletonBlocks()
+      lockedIf.getParent*() = lock.getBlock()
     )
   }
 }
@@ -38,5 +38,7 @@ predicate doubleCheckedLock(Field field, IfStmt ifs) {
 from Field field, IfStmt ifs
 where
   doubleCheckedLock(field, ifs) and
-  not field.isVolatile()
+  not field.isVolatile() and
+  exists(VariableWrite write | write = ifs.getThen().getAChild+() and write.getTarget() = field) and
+  field.getType() instanceof RefType
 select ifs, "Field $@ should be 'volatile' for this double-checked lock.", field, field.getName()

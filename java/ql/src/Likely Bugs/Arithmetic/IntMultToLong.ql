@@ -7,7 +7,6 @@
  * @precision very-high
  * @id java/integer-multiplication-cast-to-long
  * @tags reliability
- *       security
  *       correctness
  *       types
  *       external/cwe/cwe-190
@@ -18,15 +17,26 @@
 
 import java
 import semmle.code.java.dataflow.RangeUtils
+import semmle.code.java.dataflow.RangeAnalysis
 import semmle.code.java.Conversions
 
-/** An multiplication that does not overflow. */
+/** Gets an upper bound on the absolute value of `e`. */
+float exprBound(Expr e) {
+  result = e.(ConstantIntegerExpr).getIntValue().(float).abs()
+  or
+  exists(float lower, float upper |
+    bounded(e, any(ZeroBound zb), lower, false, _) and
+    bounded(e, any(ZeroBound zb), upper, true, _) and
+    result = upper.abs().maximum(lower.abs())
+  )
+}
+
+/** A multiplication that does not overflow. */
 predicate small(MulExpr e) {
   exists(NumType t, float lhs, float rhs, float res | t = e.getType() |
-    lhs = e.getLeftOperand().getProperExpr().(ConstantIntegerExpr).getIntValue() and
-    rhs = e.getRightOperand().getProperExpr().(ConstantIntegerExpr).getIntValue() and
+    lhs = exprBound(e.getLeftOperand()) and
+    rhs = exprBound(e.getRightOperand()) and
     lhs * rhs = res and
-    t.getOrdPrimitiveType().getMinValue() <= res and
     res <= t.getOrdPrimitiveType().getMaxValue()
   )
 }
@@ -36,7 +46,7 @@ predicate small(MulExpr e) {
  */
 Expr getRestrictedParent(Expr e) {
   result = e.getParent() and
-  (result instanceof ArithExpr or result instanceof ConditionalExpr or result instanceof ParExpr)
+  (result instanceof ArithExpr or result instanceof ConditionalExpr)
 }
 
 from ConversionSite c, MulExpr e, NumType sourceType, NumType destType

@@ -1,3 +1,8 @@
+/**
+ * Provides classes and predicates for reasoning about instances of
+ * `java.util.Collection` and their methods.
+ */
+
 import java
 
 /**
@@ -10,12 +15,11 @@ import java
  */
 predicate instantiates(RefType t, GenericType g, int i, RefType arg) {
   t = g.getAParameterizedType() and
+  arg = t.(ParameterizedType).getTypeArgument(i)
+  or
+  t = g.getRawType() and
   exists(g.getTypeParameter(i)) and
-  (
-    arg = t.(ParameterizedType).getTypeArgument(i)
-    or
-    t instanceof RawType and arg instanceof TypeObject
-  )
+  arg instanceof TypeObject
 }
 
 /**
@@ -32,42 +36,18 @@ predicate instantiates(RefType t, GenericType g, int i, RefType arg) {
  *   with the `0`-th type parameter being `Integer` and the `1`-th type parameter being `V`.
  */
 predicate indirectlyInstantiates(RefType t, GenericType g, int i, RefType arg) {
-  exists(RefType tsrc | tsrc = t.getSourceDeclaration() |
-    // base case: `t` directly instantiates `g`
-    tsrc = g and instantiates(t, g, i, arg)
-    or
-    // inductive step
-    exists(RefType sup, RefType suparg |
-      // follow `extends`/`implements`
-      (extendsReftype(tsrc, sup) or implInterface(tsrc, sup)) and
-      // check whether the subtype instantiates `g`
-      indirectlyInstantiates(sup, g, i, suparg)
-    |
-      // if `t` is itself an instantiation of `tsrc` and `sup` instantiates
-      // `g` to one of the type parameters of `tsrc`, we return the corresponding
-      // instantiation in `t`
-      exists(int j | suparg = tsrc.(GenericType).getTypeParameter(j) |
-        instantiates(t, tsrc, j, arg)
-      )
-      or
-      // otherwise, we directly return `suparg`
-      not (
-        t = tsrc.(GenericType).getAParameterizedType() and
-        suparg = tsrc.(GenericType).getATypeParameter()
-      ) and
-      arg = suparg
-    )
+  instantiates(t, g, i, arg)
+  or
+  exists(RefType sup |
+    t.extendsOrImplements(sup) and
+    indirectlyInstantiates(sup, g, i, arg)
   )
 }
 
 /** A reference type that extends a parameterization of `java.util.Collection`. */
 class CollectionType extends RefType {
   CollectionType() {
-    exists(ParameterizedInterface coll |
-      coll.getSourceDeclaration().hasQualifiedName("java.util", "Collection")
-    |
-      this.hasSupertype*(coll)
-    )
+    this.getSourceDeclaration().getASourceSupertype*().hasQualifiedName("java.util", "Collection")
   }
 
   /** Gets the type of elements stored in this collection. */
@@ -102,6 +82,7 @@ class CollectionMutator extends CollectionMethod {
 class CollectionMutation extends MethodAccess {
   CollectionMutation() { this.getMethod() instanceof CollectionMutator }
 
+  /** Holds if the result of this call is not immediately discarded. */
   predicate resultIsChecked() { not this.getParent() instanceof ExprStmt }
 }
 

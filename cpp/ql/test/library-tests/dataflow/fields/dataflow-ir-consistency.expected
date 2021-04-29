@@ -1,0 +1,24 @@
+uniqueEnclosingCallable
+uniqueType
+uniqueNodeLocation
+| file://:0:0:0:0 | p#0 | Node should have one location but has 0. |
+| file://:0:0:0:0 | p#0 | Node should have one location but has 0. |
+| file://:0:0:0:0 | p#0 | Node should have one location but has 0. |
+| file://:0:0:0:0 | p#0 | Node should have one location but has 0. |
+missingLocation
+| Nodes without location: 4 |
+uniqueNodeToString
+missingToString
+parameterCallable
+localFlowIsLocal
+compatibleTypesReflexive
+unreachableNodeCCtx
+localCallNodes
+postIsNotPre
+postHasUniquePre
+| simple.cpp:65:5:65:22 | Store | PostUpdateNode should have one pre-update node but has 0. |
+| simple.cpp:92:5:92:22 | Store | PostUpdateNode should have one pre-update node but has 0. |
+uniquePostUpdate
+postIsInSameCallable
+reverseRead
+argHasPostUpdate

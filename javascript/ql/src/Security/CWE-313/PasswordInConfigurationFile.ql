@@ -3,7 +3,7 @@
  * @description Storing unencrypted passwords in configuration files is unsafe.
  * @kind problem
  * @problem.severity warning
- * @precision high
+ * @precision medium
  * @id js/password-in-configuration-file
  * @tags security
  *       external/cwe/cwe-256
@@ -12,6 +12,8 @@
  */
 
 import javascript
+import semmle.javascript.RestrictedLocations
+import semmle.javascript.security.SensitiveActions
 
 /**
  * Holds if some JSON or YAML file contains a property with name `key`
@@ -35,21 +37,33 @@ predicate config(string key, string val, Locatable valElement) {
 
 /**
  * Holds if file `f` should be excluded because it looks like it may be
- * a dictionary file, or a test or example.
+ * an API specification, a dictionary file, or a test or example.
  */
 predicate exclude(File f) {
-  f.getRelativePath().regexpMatch(".*(^|/)(lang(uage)?s?|locales?|tests?|examples?)/.*")
+  f.getRelativePath().regexpMatch("(?i).*(^|/)(lang(uage)?s?|locales?|tests?|examples?|i18n)/.*")
+  or
+  f.getStem().regexpMatch("(?i)translations?")
+  or
+  f.getExtension().toLowerCase() = "raml"
 }
 
-from string key, string val, Locatable valElement
+from string key, string val, Locatable valElement, string pwd
 where
   config(key, val, valElement) and
   val != "" and
+  // exclude possible templates
+  not val.regexpMatch(Templating::getDelimiterMatchingRegexp()) and
   (
-    key.toLowerCase() = "password"
+    key.toLowerCase() = "password" and
+    pwd = val and
+    // exclude interpolations of environment variables
+    not val.regexpMatch("\\$.*|%.*%") and
+    not PasswordHeuristics::isDummyPassword(val)
     or
     key.toLowerCase() != "readme" and
-    val.regexpMatch("(?is).*password\\s*=(?!\\s*;).*")
+    // look for `password=...`, but exclude `password=;`, `password="$(...)"`,
+    // `password=%s` and `password==`
+    pwd = val.regexpCapture("(?is).*password\\s*=\\s*(?!;|\"?[$`]|%s|=)(\\S+).*", 1)
   ) and
   not exclude(valElement.getFile())
-select valElement, "Avoid plaintext passwords in configuration files."
+select valElement.(FirstLineOf), "Hard-coded password '" + pwd + "' in configuration file."

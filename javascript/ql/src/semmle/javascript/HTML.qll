@@ -6,10 +6,18 @@ module HTML {
   /**
    * An HTML file.
    */
-  class HtmlFile extends File { HtmlFile() { getFileType().isHtml() } }
+  class HtmlFile extends File {
+    HtmlFile() { getFileType().isHtml() }
+  }
 
   /**
-   * An HTML element like `<a href="semmle.com">Semmle</a>`.
+   * An HTML element.
+   *
+   * Example:
+   *
+   * ```
+   * <a href="semmle.com">Semmle</a>
+   * ```
    */
   class Element extends Locatable, @xmlelement {
     Element() { exists(HtmlFile f | xmlElements(this, _, _, _, f)) }
@@ -77,8 +85,14 @@ module HTML {
   /**
    * An attribute of an HTML element.
    *
-   * For example, the element `<a href ="semmle.com" target=_blank>Semmle</a>`
-   * has two attributes: `href ="semmle.com"` and `target=_blank`.
+   * Examples:
+   *
+   * ```
+   * <a
+   *   href ="semmle.com"  <!-- an attribute -->
+   *   target=_blank       <!-- also an attribute -->
+   * >Semmle</a>
+   * ```
    */
   class Attribute extends Locatable, @xmlattribute {
     Attribute() { exists(HtmlFile f | xmlAttrs(this, _, _, _, _, f)) }
@@ -114,11 +128,29 @@ module HTML {
 
   /**
    * An HTML `<html>` element.
+   *
+   * Example:
+   *
+   * ```
+   * <html>
+   * <body>
+   * This is a test.
+   * </body>
+   * </html>
+   * ```
    */
-  class DocumentElement extends Element { DocumentElement() { getName() = "html" } }
+  class DocumentElement extends Element {
+    DocumentElement() { getName() = "html" }
+  }
 
   /**
    * An HTML `<script>` element.
+   *
+   * Example:
+   *
+   * ```
+   * <script src="https://code.jquery.com/jquery-3.4.1.js"></script>
+   * ```
    */
   class ScriptElement extends Element {
     ScriptElement() { getName() = "script" }
@@ -159,6 +191,42 @@ module HTML {
      * if it can be determined.
      */
     Script resolveSource() { result.getFile().getAbsolutePath() = resolveSourcePath() }
+
+    /**
+     * Gets the inline script of this script element, if any.
+     */
+    private InlineScript getInlineScript() {
+      exists(
+        string f, Location l1, int sl1, int sc1, int el1, int ec1, Location l2, int sl2, int sc2,
+        int el2, int ec2
+      |
+        l1 = getLocation() and
+        l2 = result.getLocation() and
+        l1.hasLocationInfo(f, sl1, sc1, el1, ec1) and
+        l2.hasLocationInfo(f, sl2, sc2, el2, ec2)
+      |
+        (
+          sl1 = sl2 and sc1 < sc2
+          or
+          sl1 < sl2
+        ) and
+        (
+          el1 = el2 and ec1 > ec2
+          or
+          el1 > el2
+        )
+      ) and
+      // the src attribute has precedence
+      not exists(getSourcePath())
+    }
+
+    /**
+     * Gets the script of this element, if it can be determined.
+     */
+    Script getScript() {
+      result = getInlineScript() or
+      result = resolveSource()
+    }
   }
 
   /**
@@ -182,7 +250,15 @@ module HTML {
   }
 
   /**
-   * An HTML text node like `<div>this-is-the-node</div>`.
+   * An HTML text node.
+   *
+   * Example:
+   *
+   * ```
+   * <div>
+   *   This text is represented as a text node.
+   * </div>
+   * ```
    *
    * Note that instances of this class are only available if extraction is done with `--html all` or `--experimental`.
    */
@@ -217,7 +293,13 @@ module HTML {
   }
 
   /**
-   * An HTML comment like <code>&lt;!&hyphen;&hyphen; this &hyphen;&hyphen;&gt;</code>.
+   * An HTML comment.
+   *
+   * Example:
+   *
+   * ```
+   * <!-- this is a comment -->
+   * ```
    */
   class CommentNode extends Locatable, @xmlcomment {
     CommentNode() { exists(HtmlFile f | xmlComments(this, _, _, f)) }

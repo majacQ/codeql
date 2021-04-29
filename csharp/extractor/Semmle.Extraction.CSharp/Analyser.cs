@@ -1,14 +1,10 @@
 using System;
-using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.Diagnostics;
 using System.IO;
 using System.Linq;
 using Semmle.Extraction.CSharp.Populators;
-using System.Runtime.InteropServices;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using Semmle.Util.Logging;
@@ -29,38 +25,54 @@ namespace Semmle.Extraction.CSharp
 
         public readonly ILogger Logger;
 
-        public Analyser(IProgressMonitor pm, ILogger logger)
+        public readonly bool AddAssemblyTrapPrefix;
+
+        public readonly PathTransformer PathTransformer;
+
+        public Analyser(IProgressMonitor pm, ILogger logger, bool addAssemblyTrapPrefix, PathTransformer pathTransformer)
         {
             Logger = logger;
+            AddAssemblyTrapPrefix = addAssemblyTrapPrefix;
             Logger.Log(Severity.Info, "EXTRACTION STARTING at {0}", DateTime.Now);
             stopWatch.Start();
             progressMonitor = pm;
+            PathTransformer = pathTransformer;
         }
 
         CSharpCompilation compilation;
         Layout layout;
 
+        private bool init;
         /// <summary>
-        /// Initialize the analyser.
+        /// Start initialization of the analyser.
+        /// </summary>
+        /// <param name="roslynArgs">The arguments passed to Roslyn.</param>
+        /// <returns>A Boolean indicating whether to proceed with extraction.</returns>
+        public bool BeginInitialize(string[] roslynArgs)
+        {
+            return init = LogRoslynArgs(roslynArgs, Extraction.Extractor.Version);
+        }
+
+        /// <summary>
+        /// End initialization of the analyser.
         /// </summary>
         /// <param name="commandLineArguments">Arguments passed to csc.</param>
-        /// <param name="compilationIn">The Roslyn compilation.</param>
         /// <param name="options">Extractor options.</param>
-        /// <param name="roslynArgs">The arguments passed to Roslyn.</param>
-        public void Initialize(
-            CSharpCommandLineArguments commandLineArguments,
-            CSharpCompilation compilationIn,
-            Options options,
-            string[] roslynArgs)
+        /// <param name="compilation">The Roslyn compilation.</param>
+        /// <returns>A Boolean indicating whether to proceed with extraction.</returns>
+        public void EndInitialize(
+           CSharpCommandLineArguments commandLineArguments,
+           Options options,
+           CSharpCompilation compilation)
         {
-            compilation = compilationIn;
-
+            if (!init)
+                throw new InternalError("EndInitialize called without BeginInitialize returning true");
             layout = new Layout();
             this.options = options;
+            this.compilation = compilation;
+            extractor = new Extraction.Extractor(false, GetOutputName(compilation, commandLineArguments), Logger, PathTransformer);
+            LogDiagnostics();
 
-            extractor = new Extraction.Extractor(false, GetOutputName(compilation, commandLineArguments), Logger);
-
-            LogDiagnostics(roslynArgs);
             SetReferencePaths();
 
             CompilationErrors += FilteredDiagnostics.Count();
@@ -99,12 +111,7 @@ namespace Semmle.Extraction.CSharp
                 }
                 catch (Exception ex)  // lgtm[cs/catch-of-all-exceptions]
                 {
-                    extractor.Message(new Message
-                    {
-                        exception = ex,
-                        message = string.Format("Exception reading reference file {0}: {1}",
-                        reference.FilePath, ex)
-                    });
+                    extractor.Message(new Message("Exception reading reference file", reference.FilePath, null, ex.StackTrace));
                 }
             }
         }
@@ -113,9 +120,9 @@ namespace Semmle.Extraction.CSharp
         {
             compilation = compilationIn;
             layout = new Layout();
-            extractor = new Extraction.Extractor(true, null, Logger);
+            extractor = new Extraction.Extractor(true, null, Logger, PathTransformer);
             this.options = options;
-            LogDiagnostics(null);
+            LogExtractorInfo(Extraction.Extractor.Version);
             SetReferencePaths();
         }
 
@@ -210,10 +217,38 @@ namespace Semmle.Extraction.CSharp
                 File.GetLastWriteTime(dest) >= File.GetLastWriteTime(src);
         }
 
-        bool FileIsCached(string src, string dest)
+        /// <summary>
+        /// Extracts compilation-wide entities, such as compilations and compiler diagnostics.
+        /// </summary>
+        public void AnalyseCompilation(string cwd, string[] args)
         {
-            return options.Cache && FileIsUpToDate(src, dest);
+            extractionTasks.Add(() => DoAnalyseCompilation(cwd, args));
         }
+
+        Entities.Compilation compilationEntity;
+        IDisposable compilationTrapFile;
+
+        void DoAnalyseCompilation(string cwd, string[] args)
+        {
+            try
+            {
+                var assemblyPath = extractor.OutputPath;
+                var transformedAssemblyPath = PathTransformer.Transform(assemblyPath);
+                var assembly = compilation.Assembly;
+                var projectLayout = layout.LookupProjectOrDefault(transformedAssemblyPath);
+                var trapWriter = projectLayout.CreateTrapWriter(Logger, transformedAssemblyPath, true, options.TrapCompression);
+                compilationTrapFile = trapWriter;  // Dispose later
+                var cx = extractor.CreateContext(compilation.Clone(), trapWriter, new AssemblyScope(assembly, assemblyPath, true), AddAssemblyTrapPrefix);
+
+                compilationEntity = new Entities.Compilation(cx, cwd, args);
+            }
+            catch (Exception ex)  // lgtm[cs/catch-of-all-exceptions]
+            {
+                Logger.Log(Severity.Error, "  Unhandled exception analyzing {0}: {1}", "compilation", ex);
+            }
+        }
+
+        public void LogPerformance(Entities.PerformanceMetrics p) => compilationEntity.PopulatePerformance(p);
 
         /// <summary>
         ///     Extract an assembly to a new trap file.
@@ -229,10 +264,11 @@ namespace Semmle.Extraction.CSharp
                 stopwatch.Start();
 
                 var assemblyPath = r.FilePath;
-                var projectLayout = layout.LookupProjectOrDefault(assemblyPath);
-                using (var trapWriter = projectLayout.CreateTrapWriter(Logger, assemblyPath, true))
+                var transformedAssemblyPath = PathTransformer.Transform(assemblyPath);
+                var projectLayout = layout.LookupProjectOrDefault(transformedAssemblyPath);
+                using (var trapWriter = projectLayout.CreateTrapWriter(Logger, transformedAssemblyPath, true, options.TrapCompression))
                 {
-                    var skipExtraction = FileIsCached(assemblyPath, trapWriter.TrapFile);
+                    var skipExtraction = options.Cache && File.Exists(trapWriter.TrapFile);
 
                     if (!skipExtraction)
                     {
@@ -258,7 +294,7 @@ namespace Semmle.Extraction.CSharp
 
                         if (assembly != null)
                         {
-                            var cx = new Context(extractor, c, trapWriter, new AssemblyScope(assembly, assemblyPath));
+                            var cx = extractor.CreateContext(c, trapWriter, new AssemblyScope(assembly, assemblyPath, false), AddAssemblyTrapPrefix);
 
                             foreach (var module in assembly.Modules)
                             {
@@ -284,7 +320,7 @@ namespace Semmle.Extraction.CSharp
             stopwatch.Start();
             string trapFile;
             bool extracted;
-            CIL.Entities.Assembly.ExtractCIL(layout, r.FilePath, Logger, !options.Cache, options.PDB, out trapFile, out extracted);
+            CIL.Entities.Assembly.ExtractCIL(layout, r.FilePath, Logger, !options.Cache, options.PDB, options.TrapCompression, out trapFile, out extracted);
             stopwatch.Stop();
             ReportProgress(r.FilePath, trapFile, stopwatch.Elapsed, extracted ? AnalysisAction.Extracted : AnalysisAction.UpToDate);
         }
@@ -329,25 +365,27 @@ namespace Semmle.Extraction.CSharp
                 var stopwatch = new Stopwatch();
                 stopwatch.Start();
                 var sourcePath = tree.FilePath;
+                var transformedSourcePath = PathTransformer.Transform(sourcePath);
 
-                var projectLayout = layout.LookupProjectOrNull(sourcePath);
+                var projectLayout = layout.LookupProjectOrNull(transformedSourcePath);
                 bool excluded = projectLayout == null;
-                string trapPath = excluded ? "" : projectLayout.GetTrapPath(Logger, sourcePath);
+                string trapPath = excluded ? "" : projectLayout.GetTrapPath(Logger, transformedSourcePath, options.TrapCompression);
                 bool upToDate = false;
 
                 if (!excluded)
                 {
                     // compilation.Clone() is used to allow symbols to be garbage collected.
-                    using (var trapWriter = projectLayout.CreateTrapWriter(Logger, sourcePath, false))
+                    using (var trapWriter = projectLayout.CreateTrapWriter(Logger, transformedSourcePath, false, options.TrapCompression))
                     {
                         upToDate = options.Fast && FileIsUpToDate(sourcePath, trapWriter.TrapFile);
 
                         if (!upToDate)
                         {
-                            Context cx = new Context(extractor, compilation.Clone(), trapWriter, new SourceScope(tree));
+                            Context cx = extractor.CreateContext(compilation.Clone(), trapWriter, new SourceScope(tree), AddAssemblyTrapPrefix);
                             Populators.CompilationUnit.Extract(cx, tree.GetRoot());
                             cx.PopulateAll();
                             cx.ExtractComments(cx.CommentGenerator);
+                            cx.PopulateAll();
                         }
                     }
                 }
@@ -356,7 +394,7 @@ namespace Semmle.Extraction.CSharp
             }
             catch (Exception ex)  // lgtm[cs/catch-of-all-exceptions]
             {
-                extractor.Message(new Message { exception = ex, message = string.Format("Unhandled exception processing {0}: {1}", tree.FilePath, ex), severity = Severity.Error });
+                extractor.Message(new Message("Unhandled exception processing syntax tree", tree.FilePath, null, ex.StackTrace));
             }
         }
 
@@ -373,6 +411,8 @@ namespace Semmle.Extraction.CSharp
 
         public void Dispose()
         {
+            compilationTrapFile?.Dispose();
+
             stopWatch.Stop();
             Logger.Log(Severity.Info, "  Peak working set = {0} MB", Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024));
 
@@ -400,29 +440,73 @@ namespace Semmle.Extraction.CSharp
         public int TotalErrors => CompilationErrors + ExtractorErrors;
 
         /// <summary>
+        /// Logs information about the extractor.
+        /// </summary>
+        public void LogExtractorInfo(string extractorVersion)
+        {
+            Logger.Log(Severity.Info, "  Extractor: {0}", Environment.GetCommandLineArgs().First());
+            Logger.Log(Severity.Info, "  Extractor version: {0}", extractorVersion);
+            Logger.Log(Severity.Info, "  Current working directory: {0}", Directory.GetCurrentDirectory());
+        }
+
+        /// <summary>
+        /// Logs information about the extractor, as well as the arguments to Roslyn.
+        /// </summary>
+        /// <param name="roslynArgs">The arguments passed to Roslyn.</param>
+        /// <returns>A Boolean indicating whether the same arguments have been logged previously.</returns>
+        public bool LogRoslynArgs(string[] roslynArgs, string extractorVersion)
+        {
+            LogExtractorInfo(extractorVersion);
+            Logger.Log(Severity.Info, $"  Arguments to Roslyn: {string.Join(' ', roslynArgs)}");
+
+            var tempFile = Extractor.GetCSharpArgsLogPath(Path.GetRandomFileName());
+
+            bool argsWritten;
+            using (var streamWriter = new StreamWriter(new FileStream(tempFile, FileMode.Append, FileAccess.Write)))
+            {
+                streamWriter.WriteLine($"# Arguments to Roslyn: {string.Join(' ', roslynArgs.Where(arg => !arg.StartsWith('@')))}");
+                argsWritten = roslynArgs.WriteCommandLine(streamWriter);
+            }
+
+            var hash = FileUtils.ComputeFileHash(tempFile);
+            var argsFile = Extractor.GetCSharpArgsLogPath(hash);
+
+            if (argsWritten)
+                Logger.Log(Severity.Info, $"  Arguments have been written to {argsFile}");
+
+            if (File.Exists(argsFile))
+            {
+                try
+                {
+                    File.Delete(tempFile);
+                }
+                catch (IOException e)
+                {
+                    Logger.Log(Severity.Warning, $"  Failed to remove {tempFile}: {e.Message}");
+                }
+                return false;
+            }
+
+            try
+            {
+                File.Move(tempFile, argsFile);
+            }
+            catch (IOException e)
+            {
+                Logger.Log(Severity.Warning, $"  Failed to move {tempFile} to {argsFile}: {e.Message}");
+            }
+
+            return true;
+        }
+
+
+        /// <summary>
         /// Logs detailed information about this invocation,
         /// in the event that errors were detected.
         /// </summary>
-        /// <param name="roslynArgs">The arguments passed to Roslyn.</param>
-        public void LogDiagnostics(string[] roslynArgs)
+        /// <returns>A Boolean indicating whether to proceed with extraction.</returns>
+        public void LogDiagnostics()
         {
-            Logger.Log(Severity.Info, "  Extractor: {0}", Environment.GetCommandLineArgs().First());
-            if (extractor != null)
-                Logger.Log(Severity.Info, "  Extractor version: {0}", extractor.Version);
-
-            Logger.Log(Severity.Info, "  Current working directory: {0}", Directory.GetCurrentDirectory());
-
-            if (roslynArgs != null)
-            {
-                Logger.Log(Severity.Info, $"  Arguments to Roslyn: {string.Join(' ', roslynArgs)}");
-
-                // Create a new file in the log folder.
-                var argsFile = Path.Combine(Extractor.GetCSharpLogDirectory(), $"csharp.{Path.GetRandomFileName()}.txt");
-
-                if (roslynArgs.ArchiveCommandLine(argsFile))
-                    Logger.Log(Severity.Info, $"  Arguments have been written to {argsFile}");
-            }
-
             foreach (var error in FilteredDiagnostics)
             {
                 Logger.Log(Severity.Error, "  Compilation error: {0}", error);

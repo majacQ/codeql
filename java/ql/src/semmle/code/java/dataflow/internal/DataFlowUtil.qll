@@ -6,11 +6,15 @@ private import java
 private import DataFlowPrivate
 private import semmle.code.java.dataflow.SSA
 private import semmle.code.java.dataflow.TypeFlow
+private import semmle.code.java.controlflow.Guards
 import semmle.code.java.dataflow.InstanceAccess
 
 cached
 private newtype TNode =
-  TExprNode(Expr e) or
+  TExprNode(Expr e) {
+    not e.getType() instanceof VoidType and
+    not e.getParent*() instanceof Annotation
+  } or
   TExplicitParameterNode(Parameter p) { exists(p.getCallable().getBody()) } or
   TImplicitVarargsArray(Call c) {
     c.getCallee().isVarargs() and
@@ -19,13 +23,21 @@ private newtype TNode =
   TInstanceParameterNode(Callable c) { exists(c.getBody()) and not c.isStatic() } or
   TImplicitInstanceAccess(InstanceAccessExt ia) { not ia.isExplicit(_) } or
   TMallocNode(ClassInstanceExpr cie) or
-  TExplicitArgPostCall(Expr e) { explicitInstanceArgument(_, e) or e instanceof Argument } or
-  TImplicitArgPostCall(InstanceAccessExt ia) { implicitInstanceArgument(_, ia) } or
-  TExplicitStoreTarget(Expr e) {
-    exists(FieldAccess fa | instanceFieldAssign(_, fa) and e = fa.getQualifier())
+  TExplicitExprPostUpdate(Expr e) {
+    explicitInstanceArgument(_, e)
+    or
+    e instanceof Argument and not e.getType() instanceof ImmutableType
+    or
+    exists(FieldAccess fa | fa.getField() instanceof InstanceField and e = fa.getQualifier())
+    or
+    exists(ArrayAccess aa | e = aa.getArray())
   } or
-  TImplicitStoreTarget(InstanceAccessExt ia) {
-    exists(FieldAccess fa | instanceFieldAssign(_, fa) and ia.isImplicitFieldQualifier(fa))
+  TImplicitExprPostUpdate(InstanceAccessExt ia) {
+    implicitInstanceArgument(_, ia)
+    or
+    exists(FieldAccess fa |
+      fa.getField() instanceof InstanceField and ia.isImplicitFieldQualifier(fa)
+    )
   }
 
 /**
@@ -66,15 +78,19 @@ class Node extends TNode {
     result = this.(ImplicitPostUpdateNode).getPreUpdateNode().getType()
   }
 
-  /** Gets the callable in which this node occurs. */
-  Callable getEnclosingCallable() {
+  private Callable getEnclosingCallableImpl() {
     result = this.asExpr().getEnclosingCallable() or
     result = this.asParameter().getCallable() or
     result = this.(ImplicitVarargsArray).getCall().getEnclosingCallable() or
     result = this.(InstanceParameterNode).getCallable() or
     result = this.(ImplicitInstanceAccess).getInstanceAccess().getEnclosingCallable() or
     result = this.(MallocNode).getClassInstanceExpr().getEnclosingCallable() or
-    result = this.(ImplicitPostUpdateNode).getPreUpdateNode().getEnclosingCallable()
+    result = this.(ImplicitPostUpdateNode).getPreUpdateNode().getEnclosingCallableImpl()
+  }
+
+  /** Gets the callable in which this node occurs. */
+  Callable getEnclosingCallable() {
+    result = unique(DataFlowCallable c | c = this.getEnclosingCallableImpl() | c)
   }
 
   private Type getImprovedTypeBound() {
@@ -89,6 +105,19 @@ class Node extends TNode {
     result = getImprovedTypeBound()
     or
     result = getType() and not exists(getImprovedTypeBound())
+  }
+
+  /**
+   * Holds if this element is at the specified location.
+   * The location spans column `startcolumn` of line `startline` to
+   * column `endcolumn` of line `endline` in file `filepath`.
+   * For more information, see
+   * [Locations](https://help.semmle.com/QL/learn-ql/ql/locations.html).
+   */
+  predicate hasLocationInfo(
+    string filepath, int startline, int startcolumn, int endline, int endcolumn
+  ) {
+    getLocation().hasLocationInfo(filepath, startline, startcolumn, endline, endcolumn)
   }
 }
 
@@ -243,23 +272,13 @@ abstract private class ImplicitPostUpdateNode extends PostUpdateNode {
   override string toString() { result = getPreUpdateNode().toString() + " [post update]" }
 }
 
-private class ExplicitArgPostCall extends ImplicitPostUpdateNode, TExplicitArgPostCall {
-  override Node getPreUpdateNode() { this = TExplicitArgPostCall(result.asExpr()) }
+private class ExplicitExprPostUpdate extends ImplicitPostUpdateNode, TExplicitExprPostUpdate {
+  override Node getPreUpdateNode() { this = TExplicitExprPostUpdate(result.asExpr()) }
 }
 
-private class ImplicitArgPostCall extends ImplicitPostUpdateNode, TImplicitArgPostCall {
+private class ImplicitExprPostUpdate extends ImplicitPostUpdateNode, TImplicitExprPostUpdate {
   override Node getPreUpdateNode() {
-    this = TImplicitArgPostCall(result.(ImplicitInstanceAccess).getInstanceAccess())
-  }
-}
-
-private class ExplicitStoreTarget extends ImplicitPostUpdateNode, TExplicitStoreTarget {
-  override Node getPreUpdateNode() { this = TExplicitStoreTarget(result.asExpr()) }
-}
-
-private class ImplicitStoreTarget extends ImplicitPostUpdateNode, TImplicitStoreTarget {
-  override Node getPreUpdateNode() {
-    this = TImplicitStoreTarget(result.(ImplicitInstanceAccess).getInstanceAccess())
+    this = TImplicitExprPostUpdate(result.(ImplicitInstanceAccess).getInstanceAccess())
   }
 }
 
@@ -325,6 +344,12 @@ private module ThisFlow {
 predicate localFlow(Node node1, Node node2) { localFlowStep*(node1, node2) }
 
 /**
+ * Holds if data can flow from `e1` to `e2` in zero or more
+ * local (intra-procedural) steps.
+ */
+predicate localExprFlow(Expr e1, Expr e2) { localFlow(exprNode(e1), exprNode(e2)) }
+
+/**
  * Holds if the `FieldRead` is not completely determined by explicit SSA
  * updates.
  */
@@ -340,8 +365,16 @@ predicate hasNonlocalValue(FieldRead fr) {
 /**
  * Holds if data can flow from `node1` to `node2` in one local step.
  */
+predicate localFlowStep(Node node1, Node node2) { simpleLocalFlowStep(node1, node2) }
+
+/**
+ * INTERNAL: do not use.
+ *
+ * This is the local flow predicate that's used as a building block in global
+ * data flow. It may have less flow than the `localFlowStep` predicate.
+ */
 cached
-predicate localFlowStep(Node node1, Node node2) {
+predicate simpleLocalFlowStep(Node node1, Node node2) {
   // Variable flow steps through adjacent def-use and use-use pairs.
   exists(SsaExplicitUpdate upd |
     upd.getDefiningExpr().(VariableAssign).getSource() = node1.asExpr() or
@@ -366,15 +399,36 @@ predicate localFlowStep(Node node1, Node node2) {
   or
   ThisFlow::adjacentThisRefs(node1.(PostUpdateNode).getPreUpdateNode(), node2)
   or
-  node2.asExpr().(ParExpr).getExpr() = node1.asExpr()
-  or
   node2.asExpr().(CastExpr).getExpr() = node1.asExpr()
   or
-  node2.asExpr().(ConditionalExpr).getTrueExpr() = node1.asExpr()
-  or
-  node2.asExpr().(ConditionalExpr).getFalseExpr() = node1.asExpr()
+  node2.asExpr().(ChooseExpr).getAResultExpr() = node1.asExpr()
   or
   node2.asExpr().(AssignExpr).getSource() = node1.asExpr()
+  or
+  exists(MethodAccess ma, Method m |
+    ma = node2.asExpr() and
+    m = ma.getMethod() and
+    m.getDeclaringType().hasQualifiedName("java.util", "Objects") and
+    (
+      m.hasName(["requireNonNull", "requireNonNullElseGet"]) and node1.asExpr() = ma.getArgument(0)
+      or
+      m.hasName("requireNonNullElse") and node1.asExpr() = ma.getAnArgument()
+      or
+      m.hasName("toString") and node1.asExpr() = ma.getArgument(1)
+    )
+  )
+  or
+  exists(MethodAccess ma, Method m |
+    ma = node2.asExpr() and
+    m = ma.getMethod() and
+    m
+        .getDeclaringType()
+        .getSourceDeclaration()
+        .getASourceSupertype*()
+        .hasQualifiedName("java.util", "Stack") and
+    m.hasName("push") and
+    node1.asExpr() = ma.getArgument(0)
+  )
 }
 
 /**
@@ -402,4 +456,28 @@ Node getInstanceArgument(Call call) {
   result.(MallocNode).getClassInstanceExpr() = call or
   explicitInstanceArgument(call, result.asExpr()) or
   implicitInstanceArgument(call, result.(ImplicitInstanceAccess).getInstanceAccess())
+}
+
+/**
+ * A guard that validates some expression.
+ *
+ * To use this in a configuration, extend the class and provide a
+ * characteristic predicate precisely specifying the guard, and override
+ * `checks` to specify what is being validated and in which branch.
+ *
+ * It is important that all extending classes in scope are disjoint.
+ */
+class BarrierGuard extends Guard {
+  /** Holds if this guard validates `e` upon evaluating to `branch`. */
+  abstract predicate checks(Expr e, boolean branch);
+
+  /** Gets a node guarded by this guard. */
+  final Node getAGuardedNode() {
+    exists(SsaVariable v, boolean branch, RValue use |
+      this.checks(v.getAUse(), branch) and
+      use = v.getAUse() and
+      this.controls(use.getBasicBlock(), branch) and
+      result.asExpr() = use
+    )
+  }
 }

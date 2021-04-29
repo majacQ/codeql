@@ -16,7 +16,9 @@
 import java
 
 /** A comparison (using `==`) with `null`. */
-class NullEQExpr extends EQExpr { NullEQExpr() { exists(NullLiteral l | l.getParent() = this) } }
+class NullEQExpr extends EQExpr {
+  NullEQExpr() { exists(NullLiteral l | l.getParent() = this) }
+}
 
 /** An assignment to a static field. */
 class StaticFieldInit extends AssignExpr {
@@ -49,9 +51,8 @@ class LockObjectField extends Field {
 class ValidSynchStmt extends Stmt {
   ValidSynchStmt() {
     // It's OK to lock the enclosing class.
-    this.(SynchronizedStmt).getExpr().(TypeLiteral).getTypeName().getType() = this
-          .getEnclosingCallable()
-          .getDeclaringType()
+    this.(SynchronizedStmt).getExpr().(TypeLiteral).getTypeName().getType() =
+      this.getEnclosingCallable().getDeclaringType()
     or
     // It's OK to lock on a "lock object field".
     this.(SynchronizedStmt).getExpr().(FieldRead).getField() instanceof LockObjectField
@@ -92,14 +93,14 @@ where
   not method instanceof StaticInitializer and
   // There must be an unsynchronized read.
   exists(IfStmt unsyncNullCheck | unsyncNullCheck = init.getAnEnclosingNullCheck() |
-    not unsyncNullCheck.getParent+() instanceof ValidSynchStmt
+    not unsyncNullCheck.getEnclosingStmt+() instanceof ValidSynchStmt
   ) and
-  if i.getParent+() instanceof ValidSynchStmt
+  if i.getEnclosingStmt+() instanceof ValidSynchStmt
   then (
     not init.getField().isVolatile() and
     message = "The field must be volatile."
   ) else (
-    if i.getParent+() instanceof SynchronizedStmt
+    if i.getEnclosingStmt+() instanceof SynchronizedStmt
     then message = "Bad synchronization."
     else message = "Missing synchronization."
   )

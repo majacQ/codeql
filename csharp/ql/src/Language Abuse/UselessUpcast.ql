@@ -13,7 +13,9 @@
 import csharp
 
 /** A static callable. */
-class StaticCallable extends Callable { StaticCallable() { this.(Modifiable).isStatic() } }
+class StaticCallable extends Callable {
+  StaticCallable() { this.(Modifiable).isStatic() }
+}
 
 /** An instance callable, that is, a non-static callable. */
 class InstanceCallable extends Callable {
@@ -29,14 +31,14 @@ class StaticCall extends Call {
 }
 
 /** Holds `t` has instance callable `c` as a member, with name `name`. */
-pragma[noinline]
+pragma[nomagic]
 predicate hasInstanceCallable(ValueOrRefType t, InstanceCallable c, string name) {
   t.hasMember(c) and
   name = c.getName()
 }
 
 /** Holds if extension method `m` is a method on `t` with name `name`. */
-pragma[noinline]
+pragma[nomagic]
 predicate hasExtensionMethod(ValueOrRefType t, ExtensionMethod m, string name) {
   t.isImplicitlyConvertibleTo(m.getExtendedType()) and
   name = m.getName()
@@ -51,7 +53,8 @@ predicate hasStaticCallable(ValueOrRefType t, StaticCallable c, string name) {
 
 /** Gets the minimum number of arguments required to call `c`. */
 int getMinimumArguments(Callable c) {
-  result = count(Parameter p |
+  result =
+    count(Parameter p |
       p = c.getAParameter() and
       not p.hasDefaultValue()
     )
@@ -63,10 +66,16 @@ int getMaximumArguments(Callable c) {
   result = c.getNumberOfParameters()
 }
 
+private class ConstructorCall extends Call {
+  ConstructorCall() {
+    this instanceof ObjectCreation or
+    this instanceof ConstructorInitializer
+  }
+}
+
 /** An explicit upcast. */
 class ExplicitUpcast extends ExplicitCast {
   ValueOrRefType src;
-
   ValueOrRefType dest;
 
   ExplicitUpcast() {
@@ -138,6 +147,17 @@ class ExplicitUpcast extends ExplicitCast {
     )
   }
 
+  /** Holds if this upcast may be used to disambiguate the target of a constructor call. */
+  pragma[nomagic]
+  private predicate isDisambiguatingConstructorCall(Constructor other, int args) {
+    exists(ConstructorCall cc, Constructor target, ValueOrRefType t | this.isArgument(cc, target) |
+      t = target.getDeclaringType() and
+      t.hasMember(other) and
+      args = cc.getNumberOfArguments() and
+      other != target
+    )
+  }
+
   /** Holds if this upcast may be used to disambiguate the target of a call. */
   private predicate isDisambiguatingCall() {
     exists(Callable other, int args |
@@ -146,6 +166,8 @@ class ExplicitUpcast extends ExplicitCast {
       this.isDisambiguatingExtensionCall(other, args)
       or
       this.isDisambiguatingStaticCall(other, args)
+      or
+      this.isDisambiguatingConstructorCall(other, args)
     |
       args >= getMinimumArguments(other) and
       not args > getMaximumArguments(other)
@@ -161,7 +183,8 @@ class ExplicitUpcast extends ExplicitCast {
     or
     this = any(OperatorCall oc).getAnArgument()
     or
-    this = any(Operation o |
+    this =
+      any(Operation o |
         not o instanceof Assignment and
         not o instanceof UnaryBitwiseOperation and
         not o instanceof SizeofExpr and

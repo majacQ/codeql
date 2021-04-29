@@ -15,7 +15,9 @@ class WebControl extends RefType {
   WebControl() { this.getBaseClass*() instanceof SystemWebUIControlClass }
 }
 
-class WebPage extends RefType { WebPage() { this.getBaseClass*() instanceof SystemWebUIPageClass } }
+class WebPage extends RefType {
+  WebPage() { this.getBaseClass*() instanceof SystemWebUIPageClass }
+}
 
 /**
  * Holds if `f` is an auto-disposed web control.
@@ -28,7 +30,8 @@ class WebPage extends RefType { WebPage() { this.getBaseClass*() instanceof Syst
  */
 predicate isAutoDisposedWebControl(Field f) {
   f.getType() instanceof WebControl and
-  f.getDeclaringType() = any(RefType t |
+  f.getDeclaringType() =
+    any(RefType t |
       t instanceof WebControl or
       t instanceof WebPage
     )
@@ -55,24 +58,6 @@ class LocalScopeDisposableCreation extends Call {
         create.isStatic() and
         create.getDeclaringType().getSourceDeclaration() = t.getSourceDeclaration()
       )
-    )
-  }
-
-  /**
-   * Gets an expression that, if it is disposed of, will imply that the object
-   * created by this creation is disposed of as well.
-   */
-  Expr getADisposeTarget() { result = getADisposeTarget0().asExpr() }
-
-  private DataFlow::Node getADisposeTarget0() {
-    result = exprNode(this)
-    or
-    exists(DataFlow::Node mid | mid = this.getADisposeTarget0() |
-      localFlowStep(mid, result)
-      or
-      result.asExpr() = any(LocalScopeDisposableCreation other |
-          other.getAnArgument() = mid.asExpr()
-        )
     )
   }
 }

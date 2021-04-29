@@ -38,3 +38,14 @@ let emptyTuple: [];
 let tupleWithRestElement: [number, ...string[]];
 let tupleWithOptionalAndRestElements: [number, string?, ...number[]];
 let unknownType: unknown;
+
+let constArrayLiteral = [1, 2] as const;
+let constObjectLiteral = { foo: "foo" } as const;
+
+
+try { }
+catch (e: unknown) {
+  if (typeof e === "string") {
+      let b : string = e;
+  }
+}

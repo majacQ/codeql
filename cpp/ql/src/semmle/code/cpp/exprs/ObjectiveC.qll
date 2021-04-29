@@ -1,3 +1,7 @@
+/**
+ * DEPRECATED: Objective-C is no longer supported.
+ */
+
 import semmle.code.cpp.exprs.Expr
 import semmle.code.cpp.Class
 import semmle.code.cpp.ObjectiveC
@@ -10,9 +14,7 @@ private import semmle.code.cpp.internal.ResolveClass
 deprecated class MessageExpr extends Expr, Call {
   MessageExpr() { none() }
 
-  override string toString() {
-    none()
-  }
+  override string toString() { none() }
 
   /**
    * Gets the selector of this message expression, for example `-changeColorToRed:green:blue:`.
@@ -29,16 +31,12 @@ deprecated class MessageExpr extends Expr, Call {
    * In all cases, actual function dispatch isn't performed until runtime, but the
    * lack of a static target is often cause for concern.
    */
-  MemberFunction getStaticTarget() {
-    none()
-  }
+  MemberFunction getStaticTarget() { none() }
 
   /**
    * Provided for compatibility with Call. It is the same as the static target.
    */
-  override MemberFunction getTarget() {
-    none()
-  }
+  override MemberFunction getTarget() { none() }
 
   /**
    * Holds if the compiler could infer a function as the target of this message.
@@ -46,9 +44,7 @@ deprecated class MessageExpr extends Expr, Call {
    * In all cases, actual function dispatch isn't performed until runtime, but the
    * lack of a static target is often cause for concern.
    */
-  predicate hasStaticTarget() {
-    none()
-  }
+  predicate hasStaticTarget() { none() }
 
   /**
    * Gets the number of arguments passed by this message expression.
@@ -61,18 +57,14 @@ deprecated class MessageExpr extends Expr, Call {
   /**
    * Gets an argument passed by this message expression.
    */
-  override Expr getAnArgument() {
-    none()
-  }
+  override Expr getAnArgument() { none() }
 
   /**
    * Gets the nth argument passed by this message expression.
    *
    * The range of `n` is [`0` .. `getNumberOfArguments()`].
    */
-  override Expr getArgument(int n) {
-    none()
-  }
+  override Expr getArgument(int n) { none() }
 
   override int getPrecedence() { none() }
 }
@@ -111,9 +103,7 @@ deprecated class ExprMessageExpr extends MessageExpr {
   /**
    * Gets the expression which gives the receiver of this message.
    */
-  Expr getReceiver() {
-    none()
-  }
+  Expr getReceiver() { none() }
 
   /**
    * Gets the Objective C class of which the receiving expression is an instance.
@@ -122,9 +112,7 @@ deprecated class ExprMessageExpr extends MessageExpr {
    * then there will be no result. If the receiving expression has type `C*` or type
    * `C<P>*` for some protocol `P`, then the result will be the type `C`.
    */
-  ObjectiveClass getReceiverClass() {
-    none()
-  }
+  ObjectiveClass getReceiverClass() { none() }
 
   /**
    * Gets the Objective C classes and/or protocols which are statically implemented
@@ -135,9 +123,7 @@ deprecated class ExprMessageExpr extends MessageExpr {
    * If the receiving expression has type `C*`, then `C` will be the sole result.
    * If the receiving expression has type `C<P>*`, then `C` and `P` will both be results.
    */
-  Class getAReceiverClassOrProtocol() {
-    none()
-  }
+  Class getAReceiverClassOrProtocol() { none() }
 }
 
 /**
@@ -152,9 +138,7 @@ deprecated class PropertyAccess extends ExprMessageExpr {
   /**
    * Gets the property being accessed by this expression.
    */
-  Property getProperty() {
-    none()
-  }
+  Property getProperty() { none() }
 }
 
 /**
@@ -164,9 +148,7 @@ deprecated class PropertyAccess extends ExprMessageExpr {
 deprecated class AtSelectorExpr extends Expr {
   AtSelectorExpr() { none() }
 
-  override string toString() {
-    none()
-  }
+  override string toString() { none() }
 
   /**
    * Gets the selector of this `@selector` expression, for example `driveForDistance:`.
@@ -181,9 +163,7 @@ deprecated class AtSelectorExpr extends Expr {
 deprecated class AtProtocolExpr extends Expr {
   AtProtocolExpr() { none() }
 
-  override string toString() {
-    none()
-  }
+  override string toString() { none() }
 
   /**
    * Gets the protocol of this `@protocol` expression, for example `SomeProtocol`.
@@ -198,9 +178,7 @@ deprecated class AtProtocolExpr extends Expr {
 deprecated class AtEncodeExpr extends Expr {
   AtEncodeExpr() { none() }
 
-  override string toString() {
-    none()
-  }
+  override string toString() { none() }
 
   /**
    * Gets the type this `@encode` expression encodes, for example `int *`.
@@ -313,10 +291,7 @@ deprecated class CmdExpr extends Expr {
 
   override string toString() { none() }
 
-  override predicate mayBeImpure() {
-    none()
-  }
-  override predicate mayBeGloballyImpure() {
-    none()
-  }
+  override predicate mayBeImpure() { none() }
+
+  override predicate mayBeGloballyImpure() { none() }
 }

@@ -75,3 +75,25 @@ function withIndexOfCheckBad(x, y) {
   let index = x.indexOf(y);
   return index !== 0 && index === x.length - y.length - 1; // NOT OK
 }
+
+function plus(x, y) {
+  return x.indexOf("." + y) === x.length - (y.length + 1); // NOT OK
+}
+
+function withIndexOfCheckLower(x, y) {
+  let index = x.indexOf(y);
+  return !(index < 0) && index === x.length - y.length - 1; // OK
+}
+
+function withIndexOfCheckLowerEq(x, y) {
+  let index = x.indexOf(y);
+  return !(index <= -1) && index === x.length - y.length - 1; // OK
+}
+
+function lastIndexNeqMinusOne(x) {
+  return x.lastIndexOf("example.com") !== -1 && x.lastIndexOf("example.com") === x.length - "example.com".length; // OK
+}
+
+function lastIndexEqMinusOne(x) {
+  return x.lastIndexOf("example.com") === -1 || x.lastIndexOf("example.com") === x.length - "example.com".length; // OK
+}

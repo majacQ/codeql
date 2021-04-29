@@ -26,7 +26,7 @@ namespace Semmle.Extraction
         /// <summary>
         /// List of blocks in the layout file.
         /// </summary>
-        List<LayoutBlock> blocks;
+        readonly List<LayoutBlock> blocks;
 
         /// <summary>
         /// A subproject in the layout file.
@@ -36,14 +36,14 @@ namespace Semmle.Extraction
             /// <summary>
             /// The trap folder, or null for current directory.
             /// </summary>
-            public readonly string TRAP_FOLDER;
+            public readonly string? TRAP_FOLDER;
 
             /// <summary>
             /// The source archive, or null to skip.
             /// </summary>
-            public readonly string SOURCE_ARCHIVE;
+            public readonly string? SOURCE_ARCHIVE;
 
-            public SubProject(string traps, string archive)
+            public SubProject(string? traps, string? archive)
             {
                 TRAP_FOLDER = traps;
                 SOURCE_ARCHIVE = archive;
@@ -54,14 +54,16 @@ namespace Semmle.Extraction
             /// </summary>
             /// <param name="srcFile">The source file.</param>
             /// <returns>The full filepath of the trap file.</returns>
-            public string GetTrapPath(ILogger logger, string srcFile) => TrapWriter.TrapPath(logger, TRAP_FOLDER, srcFile);
+            public string GetTrapPath(ILogger logger, PathTransformer.ITransformedPath srcFile, TrapWriter.CompressionMode trapCompression) =>
+                TrapWriter.TrapPath(logger, TRAP_FOLDER, srcFile, trapCompression);
 
             /// <summary>
             /// Creates a trap writer for a given source/assembly file.
             /// </summary>
             /// <param name="srcFile">The source file.</param>
             /// <returns>A newly created TrapWriter.</returns>
-            public TrapWriter CreateTrapWriter(ILogger logger, string srcFile, bool discardDuplicates) => new TrapWriter(logger, srcFile, TRAP_FOLDER, SOURCE_ARCHIVE, discardDuplicates);
+            public TrapWriter CreateTrapWriter(ILogger logger, PathTransformer.ITransformedPath srcFile, bool discardDuplicates, TrapWriter.CompressionMode trapCompression) =>
+                new TrapWriter(logger, srcFile, TRAP_FOLDER, SOURCE_ARCHIVE, discardDuplicates, trapCompression);
         }
 
         readonly SubProject DefaultProject;
@@ -72,7 +74,7 @@ namespace Semmle.Extraction
         /// </summary>
         /// <param name="sourceFile">The file to look up.</param>
         /// <returns>The relevant subproject, or null if not found.</returns>
-        public SubProject LookupProjectOrNull(string sourceFile)
+        public SubProject? LookupProjectOrNull(PathTransformer.ITransformedPath sourceFile)
         {
             if (!useLayoutFile) return DefaultProject;
 
@@ -88,7 +90,7 @@ namespace Semmle.Extraction
         /// </summary>
         /// <param name="sourceFile">The file to look up.</param>
         /// <returns>The relevant subproject, or DefaultProject if not found.</returns>
-        public SubProject LookupProjectOrDefault(string sourceFile)
+        public SubProject LookupProjectOrDefault(PathTransformer.ITransformedPath sourceFile)
         {
             return LookupProjectOrNull(sourceFile) ?? DefaultProject;
         }
@@ -99,8 +101,8 @@ namespace Semmle.Extraction
         /// Default constructor reads parameters from the environment.
         /// </summary>
         public Layout() : this(
-            Environment.GetEnvironmentVariable("TRAP_FOLDER"),
-            Environment.GetEnvironmentVariable("SOURCE_ARCHIVE"),
+            Environment.GetEnvironmentVariable("CODEQL_EXTRACTOR_CSHARP_TRAP_DIR") ?? Environment.GetEnvironmentVariable("TRAP_FOLDER"),
+            Environment.GetEnvironmentVariable("CODEQL_EXTRACTOR_CSHARP_SOURCE_ARCHIVE_DIR") ?? Environment.GetEnvironmentVariable("SOURCE_ARCHIVE"),
             Environment.GetEnvironmentVariable("ODASA_CSHARP_LAYOUT"))
         {
         }
@@ -112,13 +114,14 @@ namespace Semmle.Extraction
         /// <param name="archive">Directory for source archive, or null for layout/no archive.</param>
         /// <param name="layout">Path of layout file, or null for no layout.</param>
         /// <exception cref="InvalidLayoutException">Failed to read layout file.</exception>
-        public Layout(string traps, string archive, string layout)
+        public Layout(string? traps, string? archive, string? layout)
         {
             useLayoutFile = string.IsNullOrEmpty(traps) && !string.IsNullOrEmpty(layout);
+            blocks = new List<LayoutBlock>();
 
             if (useLayoutFile)
             {
-                ReadLayoutFile(layout);
+                ReadLayoutFile(layout!);
                 DefaultProject = blocks[0].Directories;
             }
             else
@@ -132,7 +135,7 @@ namespace Semmle.Extraction
         /// </summary>
         /// <param name="path">The absolute path of the file to query.</param>
         /// <returns>True iff there is no layout file or the layout file specifies the file.</returns>
-        public bool FileInLayout(string path) => LookupProjectOrNull(path) != null;
+        public bool FileInLayout(PathTransformer.ITransformedPath path) => LookupProjectOrNull(path) != null;
 
         void ReadLayoutFile(string layout)
         {
@@ -140,15 +143,12 @@ namespace Semmle.Extraction
             {
                 var lines = File.ReadAllLines(layout);
 
-                blocks = new List<LayoutBlock>();
-
                 int i = 0;
                 while (!lines[i].StartsWith("#"))
                     i++;
                 while (i < lines.Length)
                 {
-                    LayoutBlock block = new LayoutBlock();
-                    i = block.Read(lines, i);
+                    LayoutBlock block = new LayoutBlock(lines, ref i);
                     blocks.Add(block);
                 }
 
@@ -168,37 +168,11 @@ namespace Semmle.Extraction
 
     sealed class LayoutBlock
     {
-        struct Condition
-        {
-            private readonly bool include;
-            private readonly string prefix;
+        private readonly List<FilePattern> filePatterns = new List<FilePattern>();
 
-            public bool Include => include;
+        public readonly Layout.SubProject Directories;
 
-            public string Prefix => prefix;
-
-            public Condition(string line)
-            {
-                include = false;
-                if (line.StartsWith("-"))
-                    line = line.Substring(1);
-                else
-                    include = true;
-                prefix = Normalise(line.Trim());
-            }
-
-            static public string Normalise(string path)
-            {
-                path = Path.GetFullPath(path);
-                return path.Replace('\\', '/');
-            }
-        }
-
-        private readonly List<Condition> conditions = new List<Condition>();
-
-        public Layout.SubProject Directories;
-
-        string ReadVariable(string name, string line)
+        string? ReadVariable(string name, string line)
         {
             string prefix = name + "=";
             if (!line.StartsWith(prefix))
@@ -206,37 +180,24 @@ namespace Semmle.Extraction
             return line.Substring(prefix.Length).Trim();
         }
 
-        public int Read(string[] lines, int start)
+        public LayoutBlock(string[] lines, ref int i)
         {
             // first line: #name
-            int i = start + 1;
-            var TRAP_FOLDER = ReadVariable("TRAP_FOLDER", lines[i++]);
+            i++;
+            string? TRAP_FOLDER = ReadVariable("TRAP_FOLDER", lines[i++]);
             // Don't care about ODASA_DB.
             ReadVariable("ODASA_DB", lines[i++]);
-            var SOURCE_ARCHIVE = ReadVariable("SOURCE_ARCHIVE", lines[i++]);
+            string? SOURCE_ARCHIVE = ReadVariable("SOURCE_ARCHIVE", lines[i++]);
 
-            Directories = new Extraction.Layout.SubProject(TRAP_FOLDER, SOURCE_ARCHIVE);
+            Directories = new Layout.SubProject(TRAP_FOLDER, SOURCE_ARCHIVE);
             // Don't care about ODASA_BUILD_ERROR_DIR.
             ReadVariable("ODASA_BUILD_ERROR_DIR", lines[i++]);
             while (i < lines.Length && !lines[i].StartsWith("#"))
             {
-                conditions.Add(new Condition(lines[i++]));
+                filePatterns.Add(new FilePattern(lines[i++]));
             }
-            return i;
         }
 
-        public bool Matches(string path)
-        {
-            bool matches = false;
-            path = Condition.Normalise(path);
-            foreach (Condition condition in conditions)
-            {
-                if (condition.Include)
-                    matches |= path.StartsWith(condition.Prefix);
-                else
-                    matches &= !path.StartsWith(condition.Prefix);
-            }
-            return matches;
-        }
+        public bool Matches(PathTransformer.ITransformedPath path) => FilePattern.Matches(filePatterns, path.Value, out var _);
     }
 }

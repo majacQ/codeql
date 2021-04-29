@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Entities;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
@@ -11,17 +12,27 @@ namespace Semmle.Extraction.CSharp.Entities
     {
         bool IExpressionParentEntity.IsTopLevelParent => true;
 
+        private readonly AttributeData AttributeData;
+        private readonly IEntity Entity;
+
         public Attribute(Context cx, AttributeData attribute, IEntity entity)
             : base(cx)
         {
-            if (attribute.ApplicationSyntaxReference != null)
+            AttributeData = attribute;
+            Entity = entity;
+            TryPopulate();
+        }
+
+        protected override void Populate(TextWriter trapFile)
+        {
+            if (AttributeData.ApplicationSyntaxReference != null)
             {
                 // !! Extract attributes from assemblies.
                 // This is harder because the "expression" entities presume the
                 // existence of a syntax tree. This is not the case for compiled
                 // attributes.
-                var syntax = attribute.ApplicationSyntaxReference.GetSyntax() as AttributeSyntax;
-                ExtractAttribute(syntax, attribute.AttributeClass, entity);
+                var syntax = AttributeData.ApplicationSyntaxReference.GetSyntax() as AttributeSyntax;
+                ExtractAttribute(cx.TrapWriter.Writer, syntax, AttributeData.AttributeClass, Entity);
             }
         }
 
@@ -29,18 +40,18 @@ namespace Semmle.Extraction.CSharp.Entities
             : base(cx)
         {
             var info = cx.GetSymbolInfo(attribute);
-            ExtractAttribute(attribute, info.Symbol.ContainingType, entity);
+            ExtractAttribute(cx.TrapWriter.Writer, attribute, info.Symbol.ContainingType, entity);
         }
 
-        void ExtractAttribute(AttributeSyntax syntax, ITypeSymbol attributeClass, IEntity entity)
+        void ExtractAttribute(System.IO.TextWriter trapFile, AttributeSyntax syntax, ITypeSymbol attributeClass, IEntity entity)
         {
             var type = Type.Create(cx, attributeClass);
-            cx.Emit(Tuples.attributes(this, type.TypeRef, entity));
+            trapFile.attributes(this, type.TypeRef, entity);
 
-            cx.Emit(Tuples.attribute_location(this, cx.Create(syntax.Name.GetLocation())));
+            trapFile.attribute_location(this, cx.Create(syntax.Name.GetLocation()));
 
             if (cx.Extractor.OutputPath != null)
-                cx.Emit(Tuples.attribute_location(this, Assembly.CreateOutputAssembly(cx)));
+                trapFile.attribute_location(this, Assembly.CreateOutputAssembly(cx));
 
             TypeMention.Create(cx, syntax.Name, this, type);
 
@@ -51,9 +62,12 @@ namespace Semmle.Extraction.CSharp.Entities
                     int child = 0;
                     foreach (var arg in syntax.ArgumentList.Arguments)
                     {
-                        Expression.Create(cx, arg.Expression, this, child++);
+                        var expr = Expression.Create(cx, arg.Expression, this, child++);
+                        if (!(arg.NameEquals is null))
+                        {
+                            trapFile.expr_argument_name(expr, arg.NameEquals.Name.Identifier.Text);
+                        }
                     }
-                    // !! Handle named arguments
                 });
             }
         }
@@ -63,14 +77,6 @@ namespace Semmle.Extraction.CSharp.Entities
             foreach (var attribute in symbol.GetAttributes())
             {
                 new Attribute(cx, attribute, entity);
-            }
-        }
-
-        public static void ExtractAttributes(Context cx, IEnumerable<AttributeListSyntax> attributes, IEntity entity)
-        {
-            foreach (var attributeSyntax in attributes.SelectMany(l => l.Attributes))
-            {
-                new Attribute(cx, attributeSyntax, entity);
             }
         }
 

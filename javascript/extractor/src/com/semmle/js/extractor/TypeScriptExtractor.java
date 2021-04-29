@@ -6,30 +6,32 @@ import com.semmle.js.extractor.ExtractorConfig.ECMAVersion;
 import com.semmle.js.extractor.ExtractorConfig.SourceType;
 import com.semmle.js.parser.JSParser.Result;
 import com.semmle.js.parser.ParseError;
-import com.semmle.js.parser.TypeScriptParser;
 
 public class TypeScriptExtractor implements IExtractor {
-	private final JSExtractor jsExtractor;
-	private final TypeScriptParser parser;
+  private final JSExtractor jsExtractor;
+  private final ExtractorState state;
 
-	public TypeScriptExtractor(ExtractorConfig config, TypeScriptParser parser) {
-		this.jsExtractor = new JSExtractor(config);
-		this.parser = parser;
-	}
+  public TypeScriptExtractor(ExtractorConfig config, ExtractorState state) {
+    this.jsExtractor = new JSExtractor(config);
+    this.state = state;
+  }
 
-	@Override
-	public LoCInfo extract(TextualExtractor textualExtractor) {
-		LocationManager locationManager = textualExtractor.getLocationManager();
-		String source = textualExtractor.getSource();
-		File sourceFile = locationManager.getSourceFile();
-		Result res = parser.parse(sourceFile, source);
-		ScopeManager scopeManager = new ScopeManager(textualExtractor.getTrapwriter(), ECMAVersion.ECMA2017);
-		try {
-			SourceType sourceType = jsExtractor.establishSourceType(source, false);
-			return jsExtractor.extract(textualExtractor, source, 0, scopeManager, sourceType, res).snd();
-		} catch (ParseError e) {
-			e.setPosition(locationManager.translatePosition(e.getPosition()));
-			throw e.asUserError();
-		}
-	}
+  @Override
+  public LoCInfo extract(TextualExtractor textualExtractor) {
+    LocationManager locationManager = textualExtractor.getLocationManager();
+    String source = textualExtractor.getSource();
+    File sourceFile = textualExtractor.getExtractedFile();
+    Result res = state.getTypeScriptParser().parse(sourceFile, source, textualExtractor.getMetrics());
+    ScopeManager scopeManager =
+        new ScopeManager(textualExtractor.getTrapwriter(), ECMAVersion.ECMA2017);
+    try {
+      FileSnippet snippet = state.getSnippets().get(sourceFile.toPath());
+      SourceType sourceType = snippet != null ? snippet.getSourceType() : jsExtractor.establishSourceType(source, false);
+      int toplevelKind = snippet != null ? snippet.getTopLevelKind() : 0;
+      return jsExtractor.extract(textualExtractor, source, toplevelKind, scopeManager, sourceType, res).snd();
+    } catch (ParseError e) {
+      e.setPosition(locationManager.translatePosition(e.getPosition()));
+      throw e.asUserError();
+    }
+  }
 }

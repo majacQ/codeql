@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Semmle.Util
 {
@@ -57,10 +59,10 @@ namespace Semmle.Util
         /// Finds the path for the program <paramref name="prog"/> based on the
         /// <code>PATH</code> environment variable, and in the case of Windows the
         /// <code>PATHEXT</code> environment variable.
-        /// 
+        ///
         /// Returns <code>null</code> of no path can be found.
         /// </summary>
-        public static string FindProgramOnPath(string prog)
+        public static string? FindProgramOnPath(string prog)
         {
             var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator);
             string[] exes;
@@ -77,6 +79,22 @@ namespace Semmle.Util
             }
             var candidates = paths?.Where(path => exes.Any(exe0 => File.Exists(Path.Combine(path, exe0))));
             return candidates?.FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Computes the hash of <paramref name="filePath"/>.
+        /// </summary>
+        public static string ComputeFileHash(string filePath)
+        {
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var shaAlg = new SHA256Managed())
+            {
+                var sha = shaAlg.ComputeHash(fileStream);
+                var hex = new StringBuilder(sha.Length * 2);
+                foreach (var b in sha)
+                    hex.AppendFormat("{0:x2}", b);
+                return hex.ToString();
+            }
         }
     }
 }

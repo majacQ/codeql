@@ -4,6 +4,7 @@
  */
 
 import javascript
+private import internal.StmtContainers
 
 /**
  * Holds if `nd` starts a new basic block.
@@ -95,6 +96,7 @@ private module Internal {
     exists(BasicBlock predBB | succBB(predBB, bb) | reachableBB(predBB))
   }
 }
+
 private import Internal
 
 /** Holds if `dom` is an immediate dominator of `bb`. */
@@ -113,7 +115,7 @@ private predicate bbIPostDominates(BasicBlock dom, BasicBlock bb) =
  *
  * At the database level, a basic block is represented by its first control flow node.
  */
-class BasicBlock extends @cfg_node, Locatable {
+class BasicBlock extends @cfg_node, NodeInStmtContainer {
   BasicBlock() { startsBB(this) }
 
   /** Gets a basic block succeeding this one. */
@@ -234,7 +236,8 @@ class BasicBlock extends @cfg_node, Locatable {
    */
   private int nextDefOrUseAfter(PurelyLocalVariable v, int i, VarDef d) {
     defAt(i, v, d) and
-    result = min(int j |
+    result =
+      min(int j |
         (defAt(j, v, _) or useAt(j, v, _) or j = length()) and
         j > i
       )
@@ -270,11 +273,6 @@ class BasicBlock extends @cfg_node, Locatable {
   }
 
   /**
-   * Gets the function or script to which this basic block belongs.
-   */
-  StmtContainer getContainer() { result = getFirstNode().getContainer() }
-
-  /**
    * Gets the basic block that immediately dominates this basic block.
    */
   ReachableBasicBlock getImmediateDominator() { bbIDominates(result, this) }
@@ -284,13 +282,17 @@ class BasicBlock extends @cfg_node, Locatable {
  * An unreachable basic block, that is, a basic block
  * whose first node is unreachable.
  */
-class UnreachableBlock extends BasicBlock { UnreachableBlock() { getFirstNode().isUnreachable() } }
+class UnreachableBlock extends BasicBlock {
+  UnreachableBlock() { getFirstNode().isUnreachable() }
+}
 
 /**
  * An entry basic block, that is, a basic block
  * whose first node is the entry node of a statement container.
  */
-class EntryBasicBlock extends BasicBlock { EntryBasicBlock() { entryBB(this) } }
+class EntryBasicBlock extends BasicBlock {
+  EntryBasicBlock() { entryBB(this) }
+}
 
 /**
  * A basic block that is reachable from an entry basic block.

@@ -22,10 +22,14 @@ class TypeProcessBuilder extends Class {
 }
 
 /** The class `java.lang.Runtime`. */
-class TypeRuntime extends Class { TypeRuntime() { hasQualifiedName("java.lang", "Runtime") } }
+class TypeRuntime extends Class {
+  TypeRuntime() { hasQualifiedName("java.lang", "Runtime") }
+}
 
 /** The class `java.lang.String`. */
-class TypeString extends Class { TypeString() { this.hasQualifiedName("java.lang", "String") } }
+class TypeString extends Class {
+  TypeString() { this.hasQualifiedName("java.lang", "String") }
+}
 
 /** The `length()` method of the class `java.lang.String`. */
 class StringLengthMethod extends Method {
@@ -43,7 +47,9 @@ class TypeStringBuilder extends Class {
 }
 
 /** The class `java.lang.System`. */
-class TypeSystem extends Class { TypeSystem() { this.hasQualifiedName("java.lang", "System") } }
+class TypeSystem extends Class {
+  TypeSystem() { this.hasQualifiedName("java.lang", "System") }
+}
 
 /** The class `java.lang.Throwable`. */
 class TypeThrowable extends Class {
@@ -56,7 +62,9 @@ class TypeException extends Class {
 }
 
 /** The class `java.lang.Error`. */
-class TypeError extends Class { TypeError() { this.hasQualifiedName("java.lang", "Error") } }
+class TypeError extends Class {
+  TypeError() { this.hasQualifiedName("java.lang", "Error") }
+}
 
 /** The class `java.lang.RuntimeException`. */
 class TypeRuntimeException extends Class {
@@ -89,7 +97,19 @@ class TypeConstructor extends Class {
 }
 
 /** The class `java.lang.Math`. */
-class TypeMath extends Class { TypeMath() { this.hasQualifiedName("java.lang", "Math") } }
+class TypeMath extends Class {
+  TypeMath() { this.hasQualifiedName("java.lang", "Math") }
+}
+
+/** The class `java.lang.Number`. */
+class TypeNumber extends RefType {
+  TypeNumber() { this.hasQualifiedName("java.lang", "Number") }
+}
+
+/** A (reflexive, transitive) subtype of `java.lang.Number`. */
+class NumberType extends RefType {
+  NumberType() { exists(TypeNumber number | hasSubtype*(number, this)) }
+}
 
 /** A numeric type, including both primitive and boxed types. */
 class NumericType extends Type {
@@ -131,10 +151,14 @@ class TypeObjectOutputStream extends RefType {
 }
 
 /** The class `java.nio.file.Paths`. */
-class TypePaths extends Class { TypePaths() { this.hasQualifiedName("java.nio.file", "Paths") } }
+class TypePaths extends Class {
+  TypePaths() { this.hasQualifiedName("java.nio.file", "Paths") }
+}
 
 /** The type `java.nio.file.Path`. */
-class TypePath extends RefType { TypePath() { this.hasQualifiedName("java.nio.file", "Path") } }
+class TypePath extends RefType {
+  TypePath() { this.hasQualifiedName("java.nio.file", "Path") }
+}
 
 /** The class `java.nio.file.FileSystem`. */
 class TypeFileSystem extends Class {
@@ -142,7 +166,9 @@ class TypeFileSystem extends Class {
 }
 
 /** The class `java.io.File`. */
-class TypeFile extends Class { TypeFile() { this.hasQualifiedName("java.io", "File") } }
+class TypeFile extends Class {
+  TypeFile() { this.hasQualifiedName("java.io", "File") }
+}
 
 // --- Standard methods ---
 /**
@@ -246,6 +272,22 @@ class MethodAbs extends Method {
   MethodAbs() {
     this.getDeclaringType() instanceof TypeMath and
     this.getName() = "abs"
+  }
+}
+
+/** The method `Math.min`. */
+class MethodMathMin extends Method {
+  MethodMathMin() {
+    this.getDeclaringType() instanceof TypeMath and
+    this.getName() = "min"
+  }
+}
+
+/** The method `Math.min`. */
+class MethodMathMax extends Method {
+  MethodMathMax() {
+    this.getDeclaringType() instanceof TypeMath and
+    this.getName() = "max"
   }
 }
 

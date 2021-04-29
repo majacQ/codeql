@@ -10,23 +10,7 @@
  */
 
 import javascript
-
-/**
- * A local variable that is neither used nor exported, and is not a parameter
- * or a function name.
- */
-class UnusedLocal extends LocalVariable {
-  UnusedLocal() {
-    not exists(getAnAccess()) and
-    not exists(Parameter p | this = p.getAVariable()) and
-    not exists(FunctionExpr fe | this = fe.getVariable()) and
-    not exists(ClassExpr ce | this = ce.getVariable()) and
-    not exists(ExportDeclaration ed | ed.exportsAs(this, _)) and
-    not exists(LocalVarTypeAccess type | type.getVariable() = this) and
-    // common convention: variables with leading underscore are intentionally unused
-    getName().charAt(0) != "_"
-  }
-}
+import UnusedVariable
 
 /**
  * Holds if `v` is mentioned in a JSDoc comment in the same file, and that file
@@ -109,7 +93,7 @@ predicate isEnumMember(VarDecl decl) { decl = any(EnumMember member).getIdentifi
  * "function f", "variable v" or "class c".
  */
 string describeVarDecl(VarDecl vd) {
-  if vd = any(Function f).getId()
+  if vd = any(Function f).getIdentifier()
   then result = "function " + vd.getName()
   else
     if vd = any(ClassDefinition c).getIdentifier()
@@ -131,7 +115,7 @@ class ImportVarDeclProvider extends Stmt {
    */
   VarDecl getAVarDecl() {
     result = this.(ImportDeclaration).getASpecifier().getLocal() or
-    result = this.(ImportEqualsDeclaration).getId()
+    result = this.(ImportEqualsDeclaration).getIdentifier()
   }
 
   /**
@@ -206,6 +190,10 @@ predicate unusedImports(ImportVarDeclProvider provider, string msg) {
 
 from ASTNode sel, string msg
 where
-  unusedNonImports(sel, msg) or
-  unusedImports(sel, msg)
+  (
+    unusedNonImports(sel, msg) or
+    unusedImports(sel, msg)
+  ) and
+  // avoid reporting if the definition is unreachable
+  sel.getFirstControlFlowNode().getBasicBlock() instanceof ReachableBasicBlock
 select sel, msg

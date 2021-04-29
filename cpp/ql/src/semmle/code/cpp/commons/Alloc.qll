@@ -1,118 +1,66 @@
 import cpp
+import semmle.code.cpp.models.interfaces.Allocation
+import semmle.code.cpp.models.interfaces.Deallocation
 
 /**
  * A library routine that allocates memory.
+ *
+ * DEPRECATED: Use the `AllocationFunction` class instead of this predicate.
  */
-predicate allocationFunction(Function f)
-{
-  exists(string name |
-    f.hasQualifiedName(name) and
-    (
-      name = "malloc" or
-      name = "calloc" or
-      name = "realloc" or
-      name = "strdup" or
-      name = "wcsdup" or
-      name = "_strdup" or
-      name = "_wcsdup" or
-      name = "_mbsdup"
-    )
-  )
-}
+deprecated predicate allocationFunction(Function f) { f instanceof AllocationFunction }
 
 /**
  * A call to a library routine that allocates memory.
+ *
+ * DEPRECATED: Use `AllocationExpr` instead (this also includes `new` expressions).
  */
-predicate allocationCall(FunctionCall fc)
-{
-  allocationFunction(fc.getTarget()) and
-  (
-    // realloc(ptr, 0) only frees the pointer
-    fc.getTarget().hasQualifiedName("realloc") implies
-    not fc.getArgument(1).getValue() = "0"
-  )
-}
+deprecated predicate allocationCall(FunctionCall fc) { fc instanceof AllocationExpr }
 
 /**
  * A library routine that frees memory.
  */
-predicate freeFunction(Function f, int argNum)
-{
-  exists(string name |
-    f.hasQualifiedName(name) and
-    (
-      (name = "free" and argNum = 0) or
-      (name = "realloc" and argNum = 0)
-    )
-  )
-}
+predicate freeFunction(Function f, int argNum) { argNum = f.(DeallocationFunction).getFreedArg() }
 
 /**
  * A call to a library routine that frees memory.
+ *
+ * DEPRECATED: Use `DeallocationExpr` instead (this also includes `delete` expressions).
  */
-predicate freeCall(FunctionCall fc, Expr arg)
-{
-  exists(int argNum |
-    freeFunction(fc.getTarget(), argNum) and
-    arg = fc.getArgument(argNum)
-  )
-}
+predicate freeCall(FunctionCall fc, Expr arg) { arg = fc.(DeallocationExpr).getFreedExpr() }
 
 /**
  * Is e some kind of allocation or deallocation (`new`, `alloc`, `realloc`, `delete`, `free` etc)?
  */
-predicate isMemoryManagementExpr(Expr e) {
-  isAllocationExpr(e) or isDeallocationExpr(e)
-}
+predicate isMemoryManagementExpr(Expr e) { isAllocationExpr(e) or e instanceof DeallocationExpr }
 
 /**
  * Is e an allocation from stdlib.h (`malloc`, `realloc` etc)?
+ *
+ * DEPRECATED: Use `AllocationExpr` instead (this also includes `new` expressions).
  */
-predicate isStdLibAllocationExpr(Expr e)
-{
-  allocationCall(e)
-}
+deprecated predicate isStdLibAllocationExpr(Expr e) { allocationCall(e) }
 
 /**
  * Is e some kind of allocation (`new`, `alloc`, `realloc` etc)?
  */
 predicate isAllocationExpr(Expr e) {
-  allocationCall(e)
+  e.(FunctionCall) instanceof AllocationExpr
   or
   e = any(NewOrNewArrayExpr new | not exists(new.getPlacementPointer()))
 }
 
 /**
  * Is e some kind of allocation (`new`, `alloc`, `realloc` etc) with a fixed size?
+ *
+ * DEPRECATED: Use `AllocationExpr.getSizeBytes()` instead.
  */
-predicate isFixedSizeAllocationExpr(Expr allocExpr, int size) {
-exists (FunctionCall fc, string name | fc = allocExpr and name = fc.getTarget().getName() |
-  (
-      name = "malloc" and
-      size = fc.getArgument(0).getValue().toInt()
-    ) or (
-      name = "alloca" and
-      size = fc.getArgument(0).getValue().toInt()
-    ) or (
-      name = "calloc" and
-      size = fc.getArgument(0).getValue().toInt() * fc.getArgument(1).getValue().toInt()
-    ) or (
-      name = "realloc" and
-      size = fc.getArgument(1).getValue().toInt() and
-      size > 0 // realloc(ptr, 0) only frees the pointer
-    )
-  ) or (
-    size = allocExpr.(NewExpr).getAllocatedType().getSize()
-  ) or (
-    size = allocExpr.(NewArrayExpr).getAllocatedType().getSize()
-  )
+deprecated predicate isFixedSizeAllocationExpr(Expr allocExpr, int size) {
+  size = allocExpr.(AllocationExpr).getSizeBytes()
 }
 
 /**
  * Is e some kind of deallocation (`delete`, `free`, `realloc` etc)?
+ *
+ * DEPRECATED: Use `DeallocationExpr` instead.
  */
-predicate isDeallocationExpr(Expr e) {
-  freeCall(e, _)
-  or e instanceof DeleteExpr
-  or e instanceof DeleteArrayExpr
-}
+deprecated predicate isDeallocationExpr(Expr e) { e instanceof DeallocationExpr }

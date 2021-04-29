@@ -8,7 +8,7 @@ import csharp
 module UserControlledBypassOfSensitiveMethod {
   import semmle.code.csharp.controlflow.Guards
   import semmle.code.csharp.controlflow.BasicBlocks
-  import semmle.code.csharp.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
   import semmle.code.csharp.frameworks.System
   import semmle.code.csharp.frameworks.system.Net
   import semmle.code.csharp.security.SensitiveActions
@@ -45,21 +45,30 @@ module UserControlledBypassOfSensitiveMethod {
   }
 
   /** A source of remote user input. */
-  class RemoteSource extends Source { RemoteSource() { this instanceof RemoteFlowSource } }
+  class RemoteSource extends Source {
+    RemoteSource() { this instanceof RemoteFlowSource }
+  }
 
   /** The result of a reverse dns may be user-controlled. */
   class ReverseDnsSource extends Source {
     ReverseDnsSource() {
-      this.asExpr().(MethodCall).getTarget() = any(SystemNetDnsClass dns)
-            .getGetHostByAddressMethod()
+      this.asExpr().(MethodCall).getTarget() =
+        any(SystemNetDnsClass dns).getGetHostByAddressMethod()
     }
+  }
+
+  pragma[noinline]
+  private predicate conditionControlsCall0(
+    SensitiveExecutionMethodCall call, Expr e, ControlFlow::SuccessorTypes::BooleanSuccessor s
+  ) {
+    forex(BasicBlock bb | bb = call.getAControlFlowNode().getBasicBlock() | e.controlsBlock(bb, s))
   }
 
   private predicate conditionControlsCall(
     SensitiveExecutionMethodCall call, SensitiveExecutionMethod def, Expr e, boolean cond
   ) {
     exists(ControlFlow::SuccessorTypes::BooleanSuccessor s | cond = s.getValue() |
-      e.controlsElement(call, s)
+      conditionControlsCall0(call, e, s)
     ) and
     def = call.getTarget()
   }

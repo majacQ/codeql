@@ -10,114 +10,80 @@ namespace Semmle.Extraction.Entities
         File(Context cx, string path)
             : base(cx, path)
         {
-            Path = path;
+            OriginalPath = path;
+            TransformedPathLazy = new Lazy<PathTransformer.ITransformedPath>(() => Context.Extractor.PathTransformer.Transform(OriginalPath));
         }
 
-        public string Path
+        readonly string OriginalPath;
+        readonly Lazy<PathTransformer.ITransformedPath> TransformedPathLazy;
+        PathTransformer.ITransformedPath TransformedPath => TransformedPathLazy.Value;
+
+        public override bool NeedsPopulation => Context.DefinesFile(OriginalPath) || OriginalPath == Context.Extractor.OutputPath;
+
+        public override void Populate(TextWriter trapFile)
         {
-            get;
-            private set;
-        }
+            trapFile.files(this, TransformedPath.Value, TransformedPath.NameWithoutExtension, TransformedPath.Extension);
 
-        public string DatabasePath => PathAsDatabaseId(Path);
+            if (TransformedPath.ParentDirectory is PathTransformer.ITransformedPath dir)
+                trapFile.containerparent(Folder.Create(Context, dir), this);
 
-        public override bool NeedsPopulation => Context.DefinesFile(Path) || Path == Context.Extractor.OutputPath;
-
-        public override void Populate()
-        {
-            if (Path == null)
+            var fromSource = TransformedPath.Extension.ToLowerInvariant().Equals("cs");
+            if (fromSource)
             {
-                Context.Emit(Tuples.files(this, "", "", ""));
-            }
-            else
-            {
-                var fi = new FileInfo(Path);
-
-                string extension = fi.Extension ?? "";
-                string name = fi.Name;
-                name = name.Substring(0, name.Length - extension.Length);
-                int fromSource = extension.ToLowerInvariant().Equals(".cs") ? 1 : 2;
-
-                // remove the dot from the extension
-                if (extension.Length > 0)
-                    extension = extension.Substring(1);
-                Context.Emit(Tuples.files(this, PathAsDatabaseString(Path), name, extension));
-
-                Context.Emit(Tuples.containerparent(Entities.Folder.Create(Context, fi.Directory), this));
-                if (fromSource == 1)
+                foreach (var text in Context.Compilation.SyntaxTrees.
+                    Where(t => t.FilePath == OriginalPath).
+                    Select(tree => tree.GetText()))
                 {
-                    foreach (var text in Context.Compilation.SyntaxTrees.
-                        Where(t => t.FilePath == Path).
-                        Select(tree => tree.GetText()))
-                    {
-                        var rawText = text.ToString();
-                        var lineCounts = LineCounter.ComputeLineCounts(rawText);
-                        if (rawText.Length > 0 && rawText[rawText.Length - 1] != '\n') lineCounts.Total++;
+                    var rawText = text.ToString() ?? "";
+                    var lineCounts = LineCounter.ComputeLineCounts(rawText);
+                    if (rawText.Length > 0 && rawText[rawText.Length - 1] != '\n') lineCounts.Total++;
 
-                        Context.Emit(Tuples.numlines(this, lineCounts));
-                        Context.TrapWriter.Archive(fi.FullName, text.Encoding);
-                    }
+                    trapFile.numlines(this, lineCounts);
+                    Context.TrapWriter.Archive(OriginalPath, TransformedPath, text.Encoding ?? System.Text.Encoding.Default);
                 }
-
-                Context.Emit(Tuples.file_extraction_mode(this, Context.Extractor.Standalone ? 1 : 0));
             }
+
+            trapFile.file_extraction_mode(this, Context.Extractor.Standalone ? 1 : 0);
         }
 
-        public override IId Id
+        public override void WriteId(System.IO.TextWriter trapFile)
         {
-            get
-            {
-                return Path == null ?
-                    new Key("GENERATED;sourcefile") :
-                    new Key(DatabasePath, ";sourcefile");
-            }
+            trapFile.Write(TransformedPath.DatabaseId);
+            trapFile.Write(";sourcefile");
         }
 
-        /// <summary>
-        /// Converts a path string into a string to use as an ID
-        /// in the QL database.
-        /// </summary>
-        /// <param name="path">An absolute path.</param>
-        /// <returns>The database ID.</returns>
-        public static string PathAsDatabaseId(string path)
-        {
-            if (path.Length >= 2 && path[1] == ':' && Char.IsLower(path[0]))
-                path = Char.ToUpper(path[0]) + "_" + path.Substring(2);
-            return path.Replace('\\', '/').Replace(":", "_");
-        }
-
-        public static string PathAsDatabaseString(string path) => path.Replace('\\', '/');
-
-        public static File Create(Context cx, string path) => FileFactory.Instance.CreateEntity(cx, path);
+        public static File Create(Context cx, string path) => FileFactory.Instance.CreateEntity(cx, (typeof(File), path), path);
 
         public static File CreateGenerated(Context cx) => GeneratedFile.Create(cx);
 
         class GeneratedFile : File
         {
-            GeneratedFile(Context cx)
-                : base(cx, "") { }
+            GeneratedFile(Context cx) : base(cx, "") { }
 
             public override bool NeedsPopulation => true;
 
-            public override void Populate()
+            public override void Populate(TextWriter trapFile)
             {
-                Context.Emit(Tuples.files(this, "", "", ""));
+                trapFile.files(this, "", "", "");
             }
 
-            public override IId Id => new Key("GENERATED;sourcefile");
+            public override void WriteId(TextWriter trapFile)
+            {
+                trapFile.Write("GENERATED;sourcefile");
+            }
 
             public static GeneratedFile Create(Context cx) =>
-                GeneratedFileFactory.Instance.CreateEntity(cx, null);
+                GeneratedFileFactory.Instance.CreateEntity(cx, typeof(GeneratedFile), null);
 
-            class GeneratedFileFactory : ICachedEntityFactory<string, GeneratedFile>
+            class GeneratedFileFactory : ICachedEntityFactory<string?, GeneratedFile>
             {
                 public static readonly GeneratedFileFactory Instance = new GeneratedFileFactory();
 
-                public GeneratedFile Create(Context cx, string init) => new GeneratedFile(cx);
+                public GeneratedFile Create(Context cx, string? init) => new GeneratedFile(cx);
             }
         }
 
-        public override Microsoft.CodeAnalysis.Location ReportingLocation => null;
+        public override Microsoft.CodeAnalysis.Location? ReportingLocation => null;
 
         class FileFactory : ICachedEntityFactory<string, File>
         {

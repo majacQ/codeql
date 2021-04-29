@@ -3,6 +3,9 @@ using System.Globalization;
 using System.Collections.Generic;
 using Semmle.Util.Logging;
 using System;
+using Semmle.Extraction.Entities;
+using System.IO;
+using Semmle.Util;
 
 namespace Semmle.Extraction.CIL.Entities
 {
@@ -19,8 +22,6 @@ namespace Semmle.Extraction.CIL.Entities
     /// </summary>
     public class Assembly : LabelledEntity, IAssembly
     {
-        public override Id IdSuffix => suffix;
-
         readonly File file;
         readonly AssemblyName assemblyName;
 
@@ -37,19 +38,33 @@ namespace Semmle.Extraction.CIL.Entities
             if (!def.PublicKey.IsNil)
                 assemblyName.SetPublicKey(cx.mdReader.GetBlobBytes(def.PublicKey));
 
-            ShortId = cx.GetId(assemblyName.FullName) + "#file:///" + cx.assemblyPath.Replace("\\", "/");
-
             file = new File(cx, cx.assemblyPath);
         }
 
-        static readonly Id suffix = new StringId(";assembly");
+        public override void WriteId(TextWriter trapFile)
+        {
+            trapFile.Write(FullName);
+            trapFile.Write("#file:///");
+            trapFile.Write(cx.assemblyPath.Replace("\\", "/"));
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return GetType() == obj?.GetType() && Equals(file, ((Assembly)obj).file);
+        }
+
+        public override int GetHashCode() => 7 * file.GetHashCode();
+
+        public override string IdSuffix => ";assembly";
+
+        string FullName => assemblyName.GetPublicKey() is null ? assemblyName.FullName + ", PublicKeyToken=null" : assemblyName.FullName;
 
         public override IEnumerable<IExtractionProduct> Contents
         {
             get
             {
                 yield return file;
-                yield return Tuples.assemblies(this, file, assemblyName.FullName, assemblyName.Name, assemblyName.Version.ToString());
+                yield return Tuples.assemblies(this, file, FullName, assemblyName.Name ?? string.Empty, assemblyName.Version?.ToString() ?? string.Empty);
 
                 if (cx.pdb != null)
                 {
@@ -61,19 +76,14 @@ namespace Semmle.Extraction.CIL.Entities
 
                 foreach (var handle in cx.mdReader.TypeDefinitions)
                 {
-                    IExtractionProduct product = null;
+                    IExtractionProduct? product = null;
                     try
                     {
                         product = cx.Create(handle);
                     }
                     catch (InternalError e)
                     {
-                        cx.cx.Extractor.Message(new Message
-                        {
-                            exception = e,
-                            message = "Error processing type definition",
-                            severity = Semmle.Util.Logging.Severity.Error
-                        });
+                        cx.cx.ExtractionError("Error processing type definition", e.Message, GeneratedLocation.Create(cx.cx), e.StackTrace);
                     }
 
                     // Limitation of C#: Cannot yield return inside a try-catch.
@@ -83,19 +93,14 @@ namespace Semmle.Extraction.CIL.Entities
 
                 foreach (var handle in cx.mdReader.MethodDefinitions)
                 {
-                    IExtractionProduct product = null;
+                    IExtractionProduct? product = null;
                     try
                     {
                         product = cx.Create(handle);
                     }
                     catch (InternalError e)
                     {
-                        cx.cx.Extractor.Message(new Message
-                        {
-                            exception = e,
-                            message = "Error processing bytecode",
-                            severity = Semmle.Util.Logging.Severity.Error
-                        });
+                        cx.cx.ExtractionError("Error processing bytecode", e.Message, GeneratedLocation.Create(cx.cx), e.StackTrace);
                     }
 
                     if (product != null)
@@ -124,20 +129,23 @@ namespace Semmle.Extraction.CIL.Entities
         /// <param name="extractPdbs">Whether to extract PDBs.</param>
         /// <param name="trapFile">The path of the trap file.</param>
         /// <param name="extracted">Whether the file was extracted (false=cached).</param>
-        public static void ExtractCIL(Layout layout, string assemblyPath, ILogger logger, bool nocache, bool extractPdbs, out string trapFile, out bool extracted)
+        public static void ExtractCIL(Layout layout, string assemblyPath, ILogger logger, bool nocache, bool extractPdbs, TrapWriter.CompressionMode trapCompression, out string trapFile, out bool extracted)
         {
             trapFile = "";
             extracted = false;
             try
             {
-                var extractor = new Extractor(false, assemblyPath, logger);
-                var project = layout.LookupProjectOrDefault(assemblyPath);
-                using (var trapWriter = project.CreateTrapWriter(logger, assemblyPath + ".cil", true))
+                var canonicalPathCache = CanonicalPathCache.Create(logger, 1000);
+                var pathTransformer = new PathTransformer(canonicalPathCache);
+                var extractor = new Extractor(false, assemblyPath, logger, pathTransformer);
+                var transformedAssemblyPath = pathTransformer.Transform(assemblyPath);
+                var project = layout.LookupProjectOrDefault(transformedAssemblyPath);
+                using (var trapWriter = project.CreateTrapWriter(logger, transformedAssemblyPath.WithSuffix(".cil"), true, trapCompression))
                 {
                     trapFile = trapWriter.TrapFile;
                     if (nocache || !System.IO.File.Exists(trapFile))
                     {
-                        var cx = new Extraction.Context(extractor, null, trapWriter, null);
+                        var cx = extractor.CreateContext(null, trapWriter, null, false);
                         ExtractCIL(cx, assemblyPath, extractPdbs);
                         extracted = true;
                     }

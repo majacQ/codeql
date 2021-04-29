@@ -6,7 +6,7 @@
  * @problem.severity recommendation
  * @precision high
  * @id cs/inefficient-containskey
- * @tag maintainability efficiency
+ * @tags maintainability efficiency
  */
 
 import csharp
@@ -16,7 +16,7 @@ import semmle.code.csharp.controlflow.Guards as G
 class SameElement extends StructuralComparisonConfiguration {
   SameElement() { this = "Same element" }
 
-  override predicate candidate(Element e1, Element e2) {
+  override predicate candidate(ControlFlowElement e1, ControlFlowElement e2) {
     exists(MethodCall mc, IndexerRead access |
       mc.getTarget().hasName("ContainsKey") and
       access.getQualifier().(G::GuardedExpr).isGuardedBy(mc, mc.getQualifier(), _) and

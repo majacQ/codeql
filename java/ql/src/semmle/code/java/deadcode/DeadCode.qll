@@ -93,8 +93,8 @@ class SuppressedConstructor extends Constructor {
     not isDefaultConstructor() and
     // Verify that there is only one statement, which is the `super()` call. This exists
     // even for empty constructors.
-    getBody().(Block).getNumStmt() = 1 and
-    getBody().(Block).getAStmt().(SuperConstructorInvocationStmt).getNumArgument() = 0 and
+    getBody().(BlockStmt).getNumStmt() = 1 and
+    getBody().(BlockStmt).getAStmt().(SuperConstructorInvocationStmt).getNumArgument() = 0 and
     // A constructor that is called is not acting to suppress the default constructor. We permit
     // calls from suppressed and default constructors - in both cases, they can only come from
     // sub-class constructors.
@@ -292,10 +292,16 @@ class RootdefCallable extends Callable {
     // a body that also doesn't.
     not hasUsefulBody(this) and
     not exists(Method m | hasUsefulBody(m) | m.overridesOrInstantiates+(this))
+    or
+    // Methods that are the target of a member reference need to implement
+    // the exact signature of the resulting functional interface.
+    exists(MemberRefExpr mre | mre.getReferencedCallable() = this)
+    or
+    this.getAnAnnotation() instanceof OverrideAnnotation
   }
 }
 
-pragma[noinline]
+pragma[nomagic]
 private predicate overrideAccess(Callable c, int i) {
   exists(Method m | m.overridesOrInstantiates+(c) | exists(m.getParameter(i).getAnAccess()))
 }

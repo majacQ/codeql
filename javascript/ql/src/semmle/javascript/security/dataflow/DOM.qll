@@ -1,5 +1,5 @@
 /**
- * Provides predicates for reasoning about DOM types.
+ * Provides predicates for reasoning about DOM types and methods.
  */
 
 import javascript
@@ -18,74 +18,26 @@ class DOMGlobalVariable extends GlobalVariable {
   }
 }
 
-private DataFlow::SourceNode domElementCollection() {
-  exists(string collectionName |
-    collectionName = "getElementsByClassName" or
-    collectionName = "getElementsByName" or
-    collectionName = "getElementsByTagName" or
-    collectionName = "getElementsByTagNameNS" or
-    collectionName = "querySelectorAll"
-  |
-    (
-      result = document().getAMethodCall(collectionName) or
-      result = DataFlow::globalVarRef(collectionName).getACall()
-    )
-  )
-}
-
-private DataFlow::SourceNode domElementCreationOrQuery() {
-  exists(string methodName |
-    methodName = "createElement" or
-    methodName = "createElementNS" or
-    methodName = "getElementById" or
-    methodName = "querySelector"
-  |
-    result = document().getAMethodCall(methodName) or
-    result = DataFlow::globalVarRef(methodName).getACall()
-  )
-}
-
-private DataFlow::SourceNode domValueSource() {
-  result.asExpr().(VarAccess).getVariable() instanceof DOMGlobalVariable or
-  result = domValueSource().getAPropertyRead(_) or
-  result = domElementCreationOrQuery() or
-  result = domElementCollection()
-}
-
 /** Holds if `e` could hold a value that comes from the DOM. */
-predicate isDomValue(Expr e) { domValueSource().flowsToExpr(e) }
+predicate isDomValue(Expr e) { DOM::domValueRef().flowsToExpr(e) }
 
 /** Holds if `e` could refer to the `location` property of a DOM node. */
 predicate isLocation(Expr e) {
-  e = domValueSource().getAPropertyReference("location").asExpr() or
+  e = DOM::domValueRef().getAPropertyReference("location").asExpr()
+  or
   e.accessesGlobal("location")
 }
 
 /**
  * Gets a reference to the 'document' object.
  */
-DataFlow::SourceNode document() { result = DataFlow::globalVarRef("document") }
+DataFlow::SourceNode document() { result = DOM::documentRef() }
 
 /** Holds if `e` could refer to the `document` object. */
-predicate isDocument(Expr e) { document().flowsToExpr(e) }
+predicate isDocument(Expr e) { DOM::documentRef().flowsToExpr(e) }
 
 /** Holds if `e` could refer to the document URL. */
-predicate isDocumentURL(Expr e) {
-  exists(Expr base, string propName | e.(PropAccess).accesses(base, propName) |
-    isDocument(base) and
-    (
-      propName = "documentURI" or
-      propName = "documentURIObject" or
-      propName = "location" or
-      propName = "referrer" or
-      propName = "URL"
-    )
-    or
-    isDomValue(base) and propName = "baseUri"
-  )
-  or
-  e.accessesGlobal("location")
-}
+predicate isDocumentURL(Expr e) { e.flow() = DOM::locationSource() }
 
 /**
  * Holds if `pacc` accesses a part of `document.location` that is
@@ -93,7 +45,7 @@ predicate isDocumentURL(Expr e) {
  * `href`, `hash` and `search`.
  */
 predicate isSafeLocationProperty(PropAccess pacc) {
-  exists(Expr loc, string prop | isLocation(loc) and pacc.accesses(loc, prop) |
+  exists(string prop | pacc = DOM::locationRef().getAPropertyRead(prop).asExpr() |
     prop != "href" and prop != "hash" and prop != "search"
   )
 }
@@ -117,9 +69,9 @@ class DomMethodCallExpr extends MethodCallExpr {
       or
       name = "writeln"
       or
-      name = "insertAdjacentHTML" and argPos = 0
+      name = "insertAdjacentHTML" and argPos = 1
       or
-      name = "insertAdjacentElement" and argPos = 0
+      name = "insertAdjacentElement" and argPos = 1
       or
       name = "insertBefore" and argPos = 0
       or
@@ -127,7 +79,22 @@ class DomMethodCallExpr extends MethodCallExpr {
       or
       name = "appendChild" and argPos = 0
       or
-      name = "setAttribute" and argPos = 0
+      (
+        name = "setAttribute" and argPos = 1
+        or
+        name = "setAttributeNS" and argPos = 2
+      ) and
+      // restrict to potentially dangerous attributes
+      exists(string attr |
+        attr = "action" or
+        attr = "formaction" or
+        attr = "href" or
+        attr = "src" or
+        attr = "xlink:href" or
+        attr = "data"
+      |
+        getArgument(argPos - 1).getStringValue().toLowerCase() = attr
+      )
     )
   }
 }
@@ -149,6 +116,17 @@ class DomPropWriteNode extends Assignment {
   predicate interpretsValueAsHTML() {
     lhs.getPropertyName() = "innerHTML" or
     lhs.getPropertyName() = "outerHTML"
+  }
+
+  /**
+   * Holds if the assigned value is interpreted as JavaScript via javascript: protocol.
+   */
+  predicate interpretsValueAsJavaScriptUrl() {
+    lhs.getPropertyName() = "action" or
+    lhs.getPropertyName() = "formaction" or
+    lhs.getPropertyName() = "href" or
+    lhs.getPropertyName() = "src" or
+    lhs.getPropertyName() = "data"
   }
 }
 
@@ -213,18 +191,25 @@ private module PersistentWebStorage {
  * An event handler that handles `postMessage` events.
  */
 class PostMessageEventHandler extends Function {
+  int paramIndex;
+
   PostMessageEventHandler() {
-    exists(CallExpr addEventListener |
-      addEventListener.getCallee().accessesGlobal("addEventListener") and
+    exists(DataFlow::CallNode addEventListener |
+      addEventListener = DataFlow::globalVarRef("addEventListener").getACall() and
       addEventListener.getArgument(0).mayHaveStringValue("message") and
-      addEventListener.getArgument(1).analyze().getAValue().(AbstractFunction).getFunction() = this
+      addEventListener.getArgument(1).getABoundFunctionValue(paramIndex).getFunction() = this
+    )
+    or
+    exists(DataFlow::Node rhs |
+      rhs = DataFlow::globalObjectRef().getAPropertyWrite("onmessage").getRhs() and
+      rhs.getABoundFunctionValue(paramIndex).getFunction() = this
     )
   }
 
   /**
    * Gets the parameter that contains the event.
    */
-  SimpleParameter getEventParameter() { result = getParameter(0) }
+  Parameter getEventParameter() { result = getParameter(paramIndex) }
 }
 
 /**
@@ -248,7 +233,7 @@ private class WindowNameAccess extends RemoteFlowSource {
     this = DataFlow::globalObjectRef().getAPropertyRead("name")
     or
     // Reference to `name` on a container that does not assign to it.
-    this.accessesGlobal("name") and
+    this.asExpr().(GlobalVarAccess).getName() = "name" and
     not exists(VarDef def |
       def.getAVariable().(GlobalVariable).getName() = "name" and
       def.getContainer() = this.asExpr().getContainer()

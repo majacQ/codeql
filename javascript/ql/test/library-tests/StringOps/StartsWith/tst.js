@@ -1,5 +1,6 @@
 import * as _ from 'lodash';
 import * as R from 'ramda';
+let strings = goog.require('goog.string');
 
 function f(A, B) {
     if (A.startsWith(B)) {}
@@ -27,4 +28,9 @@ function f(A, B) {
     if (A.indexOf(B, 2)) {}
     if (~A.indexOf(B)) {} // checks for existence, not startsWith
     if (A.substring(B.length) === 0) {}
+
+    if (strings.startsWith(A, B)) {}
+    if (strings.caseInsensitiveStartsWith(A, B)) {}
+    if (A.slice(0, B.length) !== B) {}
+    if (A.slice(0, B.foo.length) !== B.foo) {}
 }

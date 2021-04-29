@@ -2,7 +2,40 @@
 
 import javascript
 
-/** A function as defined either by a function declaration or a function expression. */
+/**
+ * A function as defined either by a function declaration or a function expression.
+ *
+ * Examples:
+ *
+ * ```
+ * function greet() {         // function declaration
+ *   console.log("Hi");
+ * }
+ *
+ * var greet =
+ *   function() {             // function expression
+ *     console.log("Hi");
+ *   };
+ *
+ * var greet2 =
+ *   () => console.log("Hi")  // arrow function expression
+ *
+ * var o = {
+ *   m() {                    // function expression in a method definition in an object literal
+ *     return 0;
+ *   },
+ *   get x() {                // function expression in a getter method definition in an object literal
+ *     return 1
+ *   }
+ * };
+ *
+ * class C {
+ *   m() {                    // function expression in a method definition in a class
+ *     return 0;
+ *   }
+ * }
+ * ```
+ */
 class Function extends @function, Parameterized, TypeParameterized, StmtContainer, Documentable,
   AST::ValueNode {
   /** Gets the `i`th parameter of this function. */
@@ -38,22 +71,67 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
    *
    * `this` parameter types are specific to TypeScript.
    */
-  TypeExpr getThisTypeAnnotation() { result = getChildTypeExpr(-4) }
+  TypeAnnotation getThisTypeAnnotation() {
+    result = getChildTypeExpr(-4)
+    or
+    result = getDocumentation().getATagByTitle("this").getType()
+  }
+
+  /**
+   * DEPRECATED: Use `getIdentifier()` instead.
+   *
+   * Gets the identifier specifying the name of this function, if any.
+   */
+  deprecated VarDecl getId() { result = getIdentifier() }
 
   /** Gets the identifier specifying the name of this function, if any. */
-  VarDecl getId() { result = getChildExpr(-1) }
+  VarDecl getIdentifier() { result = getChildExpr(-1) }
 
-  /** Gets the name of this function, if any. */
-  string getName() { result = getId().getName() }
+  /**
+   * Gets the name of this function if it has one, or a name inferred from its context.
+   *
+   * For named functions such as `function f() { ... }`, this is just the declared
+   * name. For functions assigned to variables or properties (including class
+   * members), this is the name of the variable or property. If no meaningful name
+   * can be inferred, there is no result.
+   */
+  string getName() {
+    result = getIdentifier().getName()
+    or
+    not exists(getIdentifier()) and
+    (
+      exists(VarDef vd | this = vd.getSource() | result = vd.getTarget().(VarRef).getName())
+      or
+      exists(Property p |
+        this = p.getInit() and
+        result = p.getName()
+      )
+      or
+      exists(AssignExpr assign, PropAccess prop |
+        this = assign.getRhs().getUnderlyingValue() and
+        prop = assign.getLhs() and
+        result = prop.getPropertyName()
+      )
+      or
+      exists(ClassOrInterface c | this = c.getMember(result).getInit())
+    )
+  }
 
   /** Gets the variable holding this function. */
-  Variable getVariable() { result = getId().getVariable() }
+  Variable getVariable() { result = getIdentifier().getVariable() }
 
   /** Gets the `arguments` variable of this function, if any. */
   ArgumentsVariable getArgumentsVariable() { result.getFunction() = this }
 
   /** Holds if the body of this function refers to the function's `arguments` variable. */
-  predicate usesArgumentsObject() { exists(getArgumentsVariable().getAnAccess()) }
+  predicate usesArgumentsObject() {
+    exists(getArgumentsVariable().getAnAccess())
+    or
+    exists(PropAccess read |
+      read.getBase() = getVariable().getAnAccess() and
+      read.getPropertyName() = "arguments"
+    )
+  }
 
   /**
    * Holds if this function declares a parameter or local variable named `arguments`.
@@ -76,13 +154,24 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
   int getNumBodyStmt() { result = count(getABodyStmt()) }
 
   /** Gets the return type annotation on this function, if any. */
-  TypeExpr getReturnTypeAnnotation() { typeexprs(result, _, this, -3, _) }
+  TypeAnnotation getReturnTypeAnnotation() {
+    typeexprs(result, _, this, -3, _)
+    or
+    exists(string title | title = "return" or title = "returns" |
+      result = getDocumentation().getATagByTitle(title).getType()
+    )
+  }
 
   /** Holds if this function is a generator function. */
-  predicate isGenerator() { isGenerator(this) }
+  predicate isGenerator() {
+    is_generator(this)
+    or
+    // we also support `yield` in non-generator functions
+    exists(YieldExpr yield | this = yield.getEnclosingFunction())
+  }
 
   /** Holds if the last parameter of this function is a rest parameter. */
-  predicate hasRestParameter() { hasRestParameter(this) }
+  predicate hasRestParameter() { has_rest_parameter(this) }
 
   /**
    * Gets the last token of this function's parameter list, not including
@@ -101,11 +190,11 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
     not exists(getAParameter()) and
     (
       // if the function has a name, the opening parenthesis comes right after it
-      result = getId().getLastToken().getNextToken()
+      result = getIdentifier().getLastToken().getNextToken()
       or
       // otherwise this must be an arrow function with no parameters, so the opening
       // parenthesis is the very first token of the function
-      not exists(getId()) and result = getFirstToken()
+      not exists(getIdentifier()) and result = getFirstToken()
     )
   }
 
@@ -113,7 +202,10 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
   predicate hasTrailingComma() { lastTokenOfParameterList().getNextToken().getValue() = "," }
 
   /** Holds if this function is an asynchronous function. */
-  predicate isAsync() { isAsync(this) }
+  predicate isAsync() { is_async(this) }
+
+  /** Holds if this function is asynchronous or a generator. */
+  predicate isAsyncOrGenerator() { isAsync() or isGenerator() }
 
   /** Gets the enclosing function or toplevel of this function. */
   override StmtContainer getEnclosingContainer() { result = getEnclosingStmt().getContainer() }
@@ -131,7 +223,8 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
 
   /** Gets the cyclomatic complexity of this function. */
   int getCyclomaticComplexity() {
-    result = 2 +
+    result =
+      2 +
         sum(Expr nd |
           nd.getContainer() = this and nd.isBranch()
         |
@@ -226,8 +319,8 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
    */
   private string inferNameFromVarDef() {
     // in ambiguous cases like `var f = function g() {}`, prefer `g` to `f`
-    if exists(getName())
-    then result = "function " + getName()
+    if exists(getIdentifier())
+    then result = "function " + getIdentifier().getName()
     else
       exists(VarDef vd | this = vd.getSource() |
         result = "function " + vd.getTarget().(VarRef).getName()
@@ -314,8 +407,6 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
    */
   predicate isAbstract() { exists(MethodDeclaration md | this = md.getBody() | md.isAbstract()) }
 
-  override predicate isAmbient() { getParent().isAmbient() or not hasBody() }
-
   /**
    * Holds if this function cannot be invoked using `new` because it
    * is of the given `kind`.
@@ -341,6 +432,11 @@ class Function extends @function, Parameterized, TypeParameterized, StmtContaine
    * This predicate is only populated for files extracted with full TypeScript extraction.
    */
   CanonicalFunctionName getCanonicalName() { ast_node_symbol(this, result) }
+
+  /**
+   * Gets the call signature of this function, as determined by the TypeScript compiler, if any.
+   */
+  CallSignatureType getCallSignature() { declared_function_signature(this, result) }
 }
 
 /**
@@ -457,6 +553,22 @@ private module LinesOfComments {
 
 /**
  * A method defined in a class or object expression.
+ *
+ * Examples:
+ *
+ * ```
+ * var o = {
+ *   m() {          // method defined in an object expression
+ *     return 0;
+ *   }
+ * };
+ *
+ * class C {
+ *   m() {          // method defined in a class
+ *     return 0;
+ *   }
+ * }
+ * ```
  */
 class Method extends FunctionExpr {
   Method() {
@@ -468,6 +580,16 @@ class Method extends FunctionExpr {
 
 /**
  * A constructor defined in a class.
+ *
+ * Example:
+ *
+ * ```
+ * class Point {
+ *   constructor(x, y) {  // constructor
+ *     this.x = x;
+ *     this.y = y;
+ *   }
+ * }
  */
 class Constructor extends FunctionExpr {
   Constructor() { exists(ConstructorDeclaration cd | this = cd.getBody()) }

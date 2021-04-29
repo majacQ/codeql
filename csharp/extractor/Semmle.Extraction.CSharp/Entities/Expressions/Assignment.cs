@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Kinds;
 using Microsoft.CodeAnalysis;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
@@ -20,7 +21,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateExpression(TextWriter trapFile)
         {
             var operatorKind = OperatorKind;
             if (operatorKind.HasValue)
@@ -31,7 +32,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                 var opexpr = new Expression(new ExpressionInfo(cx, Type, Location, operatorKind.Value, simpleAssignExpr, 0, false, null));
                 Create(cx, Syntax.Left, opexpr, 0);
                 Create(cx, Syntax.Right, opexpr, 1);
-                opexpr.OperatorCall(Syntax);
+                opexpr.OperatorCall(trapFile, Syntax);
             }
             else
             {
@@ -40,7 +41,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
 
                 if (Kind == ExprKind.ADD_EVENT || Kind == ExprKind.REMOVE_EVENT)
                 {
-                    OperatorCall(Syntax);
+                    OperatorCall(trapFile, Syntax);
                 }
             }
         }
@@ -71,6 +72,8 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     return ExprKind.ASSIGN_LSHIFT;
                 case SyntaxKind.GreaterThanGreaterThanEqualsToken:
                     return ExprKind.ASSIGN_RSHIFT;
+                case SyntaxKind.QuestionQuestionEqualsToken:
+                    return ExprKind.ASSIGN_COALESCE;
                 default:
                     cx.ModelError(syntax, "Unrecognised assignment type " + GetKind(cx, syntax));
                     return ExprKind.UNKNOWN;
@@ -84,7 +87,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             var kind = GetAssignmentOperation(cx, syntax);
             var leftType = cx.GetType(syntax.Left);
 
-            if (leftType != null && leftType.SpecialType != SpecialType.None)
+            if (leftType.Symbol != null && leftType.Symbol.SpecialType != SpecialType.None)
             {
                 // In Mono, the builtin types did not specify their operator invocation
                 // even though EVERY operator has an invocation in C#. (This is a flaw in the dbscheme and should be fixed).
@@ -142,6 +145,8 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                         return ExprKind.SUB;
                     case ExprKind.ASSIGN_XOR:
                         return ExprKind.BIT_XOR;
+                    case ExprKind.ASSIGN_COALESCE:
+                        return ExprKind.NULL_COALESCING;
                     default:
                         cx.ModelError(Syntax, "Couldn't unfold assignment of type " + kind);
                         return ExprKind.UNKNOWN;

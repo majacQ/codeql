@@ -21,10 +21,31 @@ struct tm {
 
 struct tm *gmtime(const time_t *timer);
 time_t time(time_t *timer);
+struct tm *localtime(const time_t *timer);
+char *ctime(const time_t *timer);
+char *asctime(const struct tm *timeptr);
 
 // Code under test
 
 int is_morning() {
     struct tm *now = gmtime(time(NULL)); // BAD: gmtime uses shared state
     return (now->tm_hour < 12);
+}
+
+char *gets(char *s);
+
+void testGets() {
+	char buf1[1024];
+	char buf2 = malloc(1024);
+	char *s;
+
+	gets(buf1); // BAD: use of gets
+	s = gets(buf2); // BAD: use of gets
+}
+
+void testTime()
+{
+	struct tm *now = localtime(time(NULL)); // BAD: localtime uses shared state
+	char *time_string = ctime(time(NULL)); // BAD: localtime uses shared state
+	char *time_string2 = asctime(now); // BAD: localtime uses shared state
 }

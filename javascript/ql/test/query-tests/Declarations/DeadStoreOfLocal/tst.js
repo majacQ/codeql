@@ -157,3 +157,20 @@ function v() {
 (function() {
 	for (var a = (x, -1) in v = a, o);
 });
+
+(function() {
+	let [x] = [0], // OK, but flagged due to destructuring limitations
+	    y = 0;
+	x = 42;
+	y = 87;
+	x;
+	y;
+});
+
+(function() {
+	if (something()) {
+		var nSign = foo;
+	} else {
+		console.log(nSign);
+	}
+})()

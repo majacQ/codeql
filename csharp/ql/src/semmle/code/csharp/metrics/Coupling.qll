@@ -196,7 +196,8 @@ predicate lackOfCohesionHS(/* this */ ValueOrRefType t, float locm) {
     // m = number of methods that access some field, property, indexer or event
     m = count(Method method | hasAccessingMethod(t, method)) and
     // r = average (over f) of number of methods that access field or property f
-    r = avg(Field f |
+    r =
+      avg(Field f |
         hasAccessedFieldOrProperty(t, f)
       |
         count(Method x | accessesLocalFieldOrProperty(x, f))
@@ -221,6 +222,10 @@ predicate shareFieldOrProperty(ValueOrRefType t, Method m1, Method m2) {
   )
 }
 
+/**
+ * Holds if the declaring type of method `m` is `t` and `m` accesses declaration
+ * `d`, which is either a field or a property.
+ */
 predicate methodUsesFieldOrProperty(ValueOrRefType t, Method m, Declaration d) {
   m.getDeclaringType() = t and
   (

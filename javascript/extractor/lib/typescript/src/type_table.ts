@@ -1,4 +1,5 @@
 import * as ts from "./typescript";
+import { VirtualSourceRoot } from "./virtual_source_root";
 
 interface AugmentedSymbol extends ts.Symbol {
   parent?: AugmentedSymbol;
@@ -21,6 +22,28 @@ function isTypeReference(type: ts.Type): type is ts.TypeReference {
 
 function isTypeVariable(type: ts.Type): type is ts.TypeVariable {
   return (type.flags & ts.TypeFlags.TypeVariable) !== 0;
+}
+
+/**
+ * Returns `true` if the properties of the given type can safely be extracted
+ * without restricting expansion depth.
+ *
+ * This predicate is very approximate, and considers all unions, intersections,
+ * named types, and mapped types as potentially unsafe.
+ */
+function isTypeAlwaysSafeToExpand(type: ts.Type): boolean {
+  let flags = type.flags;
+  if (flags & ts.TypeFlags.UnionOrIntersection) {
+    return false;
+  }
+  if (flags & ts.TypeFlags.Object) {
+    let objectType = type as ts.ObjectType;
+    let objectFlags = objectType.objectFlags;
+    if (objectFlags & (ts.ObjectFlags.Reference | ts.ObjectFlags.Mapped)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -71,6 +94,20 @@ function isTypeofCandidateSymbol(symbol: ts.Symbol) {
 const signatureKinds = [ts.SignatureKind.Call, ts.SignatureKind.Construct];
 
 /**
+ * Bitmask of flags set on a signature, but not exposed in the public API.
+ */
+const enum InternalSignatureFlags {
+  HasRestParameter = 1
+}
+
+/**
+ * Signature interface with some internal properties exposed.
+ */
+interface AugmentedSignature extends ts.Signature {
+  flags?: InternalSignatureFlags;
+}
+
+/**
  * Encodes property lookup tuples `(baseType, name, property)` as three
  * staggered arrays.
  */
@@ -78,6 +115,16 @@ interface PropertyLookupTable {
   baseTypes: number[];
   names: string[];
   propertyTypes: number[];
+}
+
+/**
+ * Encodes `(aliasType, underlyingType)` tuples as two staggered arrays.
+ *
+ * Such a tuple denotes that `aliasType` is an alias for `underlyingType`.
+ */
+interface TypeAliasTable {
+  aliasTypes: number[];
+  underlyingTypes: number[];
 }
 
 /**
@@ -229,8 +276,8 @@ export class TypeTable {
    * A symbol string is a `;`-separated string consisting of:
    * - a tag string, `root`, `member`, or `other`,
    * - an empty string or a `file:pos` string to distinguish this from symbols with other lexical roots,
-   * - the unqualified name of the symbol,
-   * - for non-root symbols, the ID of the parent symbol.
+   * - the ID of the parent symbol, or an empty string if this is a root symbol,
+   * - the unqualified name of the symbol.
    *
    * Symbol strings serve the same dual purpose as type strings (see `typeIds`).
    */
@@ -265,6 +312,11 @@ export class TypeTable {
     propertyTypes: [],
   };
 
+  private typeAliases: TypeAliasTable = {
+    aliasTypes: [],
+    underlyingTypes: [],
+  };
+
   private signatureMappings: SignatureTable = {
     baseTypes: [],
     kinds: [],
@@ -282,7 +334,7 @@ export class TypeTable {
     propertyTypes: [],
   };
 
-  private buildTypeWorklist: [ts.Type, number][] = [];
+  private buildTypeWorklist: [ts.Type, number, boolean][] = [];
 
   private expansiveTypes: Map<number, boolean> = new Map();
 
@@ -328,12 +380,15 @@ export class TypeTable {
    */
   public restrictedExpansion = false;
 
+  private virtualSourceRoot: VirtualSourceRoot;
+
   /**
    * Called when a new compiler instance has started.
    */
-  public setProgram(program: ts.Program) {
+  public setProgram(program: ts.Program, virtualSourceRoot: VirtualSourceRoot) {
     this.typeChecker = program.getTypeChecker();
     this.arbitraryAstNode = program.getSourceFiles()[0];
+    this.virtualSourceRoot = virtualSourceRoot;
   }
 
   /**
@@ -350,9 +405,9 @@ export class TypeTable {
   /**
    * Gets the canonical ID for the given type, generating a fresh ID if necessary.
    */
-  public buildType(type: ts.Type): number | null {
+  public buildType(type: ts.Type, unfoldAlias: boolean): number | null {
     this.isInShallowTypeContext = false;
-    let id = this.getId(type);
+    let id = this.getId(type, unfoldAlias);
     this.iterateBuildTypeWorklist();
     if (id == null) return null;
     return id;
@@ -363,7 +418,7 @@ export class TypeTable {
    *
    * Returns `null` if we do not support extraction of this type.
    */
-  public getId(type: ts.Type): number | null {
+  public getId(type: ts.Type, unfoldAlias: boolean): number | null {
     if (this.typeRecursionDepth > 100) {
       // Ignore infinitely nested anonymous types, such as `{x: {x: {x: ... }}}`.
       // Such a type can't be written directly with TypeScript syntax (as it would need to be named),
@@ -375,19 +430,19 @@ export class TypeTable {
       type = this.typeChecker.getBaseTypeOfLiteralType(type);
     }
     ++this.typeRecursionDepth;
-    let content = this.getTypeString(type);
+    let content = this.getTypeString(type, unfoldAlias);
     --this.typeRecursionDepth;
     if (content == null) return null; // Type not supported.
     let id = this.typeIds.get(content);
     if (id == null) {
-      let stringValue = this.stringifyType(type);
+      let stringValue = this.stringifyType(type, unfoldAlias);
       if (stringValue == null) {
         return null; // Type not supported.
       }
       id = this.typeIds.size;
       this.typeIds.set(content, id);
       this.typeToStringValues.push(stringValue);
-      this.buildTypeWorklist.push([type, id]);
+      this.buildTypeWorklist.push([type, id, unfoldAlias]);
       this.typeExtractionState.push(
         this.isInShallowTypeContext ? TypeExtractionState.PendingShallow : TypeExtractionState.PendingFull);
       // If the type is the self-type for a named type (not a generic instantiation of it),
@@ -404,17 +459,20 @@ export class TypeTable {
         this.typeExtractionState[id] = TypeExtractionState.PendingFull;
       } else if (state === TypeExtractionState.DoneShallow) {
         this.typeExtractionState[id] = TypeExtractionState.PendingFull;
-        this.buildTypeWorklist.push([type, id]);
+        this.buildTypeWorklist.push([type, id, unfoldAlias]);
       }
     }
     return id;
   }
 
-  private stringifyType(type: ts.Type): string {
+  private stringifyType(type: ts.Type, unfoldAlias: boolean): string {
+    let formatFlags = unfoldAlias
+        ? ts.TypeFormatFlags.InTypeAlias
+        : ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope;
     let toStringValue: string;
     // Some types can't be stringified. Just discard the type if we can't stringify it.
     try {
-      toStringValue = this.typeChecker.typeToString(type);
+      toStringValue = this.typeChecker.typeToString(type, undefined, formatFlags);
     } catch (e) {
       console.warn("Recovered from a compiler crash while stringifying a type. Discarding the type.");
       console.warn(e.stack);
@@ -432,7 +490,11 @@ export class TypeTable {
     // Some types can't be stringified. Just discard the type if we can't stringify it.
     try {
       toStringValue =
-          this.typeChecker.signatureToString(signature, signature.declaration, ts.TypeFormatFlags.None, kind);
+          this.typeChecker.signatureToString(
+              signature,
+              signature.declaration,
+              ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope,
+              kind);
     } catch (e) {
       console.warn("Recovered from a compiler crash while stringifying a signature. Discarding the signature.");
       console.warn(e.stack);
@@ -448,9 +510,9 @@ export class TypeTable {
   /**
    * Gets a string representing the kind and contents of the given type.
    */
-  private getTypeString(type: AugmentedType): string | null {
+  private getTypeString(type: AugmentedType, unfoldAlias: boolean): string | null {
     // Reference to a type alias.
-    if (type.aliasSymbol != null) {
+    if (!unfoldAlias && type.aliasSymbol != null) {
       let tag = "reference;" + this.getSymbolId(type.aliasSymbol);
       return type.aliasTypeArguments == null
           ? tag
@@ -470,7 +532,7 @@ export class TypeTable {
       if (flags & ts.TypeFlags.TypeVariable) {
         let enclosingType = getEnclosingTypeOfThisType(type);
         if (enclosingType != null) {
-          return "this;" + this.getId(enclosingType);
+          return "this;" + this.getId(enclosingType, false);
         } else if (symbol.parent == null) {
           // The type variable is bound on a call signature. Only extract it by name.
           return "lextypevar;" + symbol.name;
@@ -568,7 +630,7 @@ export class TypeTable {
       let tupleType = tupleReference.target;
       let minLength = tupleType.minLength != null
           ? tupleType.minLength
-          : tupleReference.typeArguments.length;
+          : this.typeChecker.getTypeArguments(tupleReference).length;
       let hasRestElement = tupleType.hasRestElement ? 't' : 'f';
       let prefix = `tuple;${minLength};${hasRestElement}`;
       return this.makeTypeStringVectorFromTypeReferenceArguments(prefix, type);
@@ -645,12 +707,19 @@ export class TypeTable {
   private getSymbolString(symbol: AugmentedSymbol): string {
     let parent = symbol.parent;
     if (parent == null || parent.escapedName === ts.InternalSymbolName.Global) {
-      return "root;" + this.getSymbolDeclarationString(symbol) + ";" + symbol.name;
+      return "root;" + this.getSymbolDeclarationString(symbol) + ";;" + this.rewriteSymbolName(symbol);
     } else if (parent.exports != null && parent.exports.get(symbol.escapedName) === symbol) {
-      return "member;;" + symbol.name + ";" + this.getSymbolId(parent);
+      return "member;;" + this.getSymbolId(parent) + ";" + this.rewriteSymbolName(symbol);
     } else {
-      return "other;" + this.getSymbolDeclarationString(symbol) + ";" + symbol.name + ";" + this.getSymbolId(parent);
+      return "other;" + this.getSymbolDeclarationString(symbol) + ";" + this.getSymbolId(parent) + ";" + this.rewriteSymbolName(symbol);
     }
+  }
+
+  private rewriteSymbolName(symbol: AugmentedSymbol) {
+    let { virtualSourceRoot, sourceRoot } = this.virtualSourceRoot;
+    let { name } = symbol;
+    if (virtualSourceRoot == null || sourceRoot == null) return name;
+    return name.replace(virtualSourceRoot, sourceRoot);
   }
 
   /**
@@ -685,11 +754,12 @@ export class TypeTable {
     // There can be an extra type argument at the end, denoting an explicit 'this' type argument.
     // We discard the extra argument in our model.
     let target = type.target;
-    if (type.typeArguments == null) return tag;
+    let typeArguments = this.typeChecker.getTypeArguments(type);
+    if (typeArguments == null) return tag;
     if (target.typeParameters != null) {
-      return this.makeTypeStringVector(tag, type.typeArguments, target.typeParameters.length);
+      return this.makeTypeStringVector(tag, typeArguments, target.typeParameters.length);
     } else {
-      return this.makeTypeStringVector(tag, type.typeArguments);
+      return this.makeTypeStringVector(tag, typeArguments);
     }
   }
 
@@ -700,11 +770,21 @@ export class TypeTable {
   private makeTypeStringVector(tag: string, types: ReadonlyArray<ts.Type>, length = types.length): string | null {
     let hash = tag;
     for (let i = 0; i < length; ++i) {
-      let id = this.getId(types[i]);
+      let id = this.getId(types[i], false);
       if (id == null) return null;
       hash += ";" + id;
     }
     return hash;
+  }
+
+  /** Returns the type of `symbol` or `null` if it could not be computed. */
+  private tryGetTypeOfSymbol(symbol: ts.Symbol) {
+    try {
+      return this.typeChecker.getTypeOfSymbolAtLocation(symbol, this.arbitraryAstNode)
+    } catch (e) {
+      console.warn(`Could not compute type of '${this.typeChecker.symbolToString(symbol)}'`);
+      return null;
+    }
   }
 
   /**
@@ -716,9 +796,9 @@ export class TypeTable {
   private makeStructuralTypeVector(tag: string, type: ts.ObjectType): string | null {
     let hash = tag;
     for (let property of type.getProperties()) {
-      let propertyType = this.typeChecker.getTypeOfSymbolAtLocation(property, this.arbitraryAstNode);
+      let propertyType = this.tryGetTypeOfSymbol(property);
       if (propertyType == null) return null;
-      let propertyTypeId = this.getId(propertyType);
+      let propertyTypeId = this.getId(propertyType, false);
       if (propertyTypeId == null) return null;
       hash += ";p" + this.getSymbolId(property) + ';' + propertyTypeId;
     }
@@ -731,13 +811,13 @@ export class TypeTable {
     }
     let indexType = type.getStringIndexType();
     if (indexType != null) {
-      let indexTypeId = this.getId(indexType);
+      let indexTypeId = this.getId(indexType, false);
       if (indexTypeId == null) return null;
       hash += ";s" + indexTypeId;
     }
     indexType = type.getNumberIndexType();
     if (indexType != null) {
-      let indexTypeId = this.getId(indexType);
+      let indexTypeId = this.getId(indexType, false);
       if (indexTypeId == null) return null;
       hash += ";i" + indexTypeId;
     }
@@ -759,6 +839,7 @@ export class TypeTable {
       typeStrings: Array.from(this.typeIds.keys()),
       typeToStringValues: this.typeToStringValues,
       propertyLookups: this.propertyLookups,
+      typeAliases: this.typeAliases,
       symbolStrings: Array.from(this.symbolIds.keys()),
       moduleMappings: this.moduleMappings,
       globalMappings: this.globalMappings,
@@ -782,10 +863,17 @@ export class TypeTable {
     let worklist = this.buildTypeWorklist;
     let typeExtractionState = this.typeExtractionState;
     while (worklist.length > 0) {
-      let [type, id] = worklist.pop();
+      let [type, id, unfoldAlias] = worklist.pop();
       let isShallowContext = typeExtractionState[id] === TypeExtractionState.PendingShallow;
-      if (isShallowContext && isTypeReference(type)) {
+      if (isShallowContext && !isTypeAlwaysSafeToExpand(type)) {
         typeExtractionState[id] = TypeExtractionState.DoneShallow;
+      } else if (type.aliasSymbol != null && !unfoldAlias) {
+        typeExtractionState[id] = TypeExtractionState.DoneFull;
+        let underlyingTypeId = this.getId(type, true);
+        if (underlyingTypeId != null) {
+          this.typeAliases.aliasTypes.push(id);
+          this.typeAliases.underlyingTypes.push(underlyingTypeId);
+        }
       } else {
         typeExtractionState[id] = TypeExtractionState.DoneFull;
         this.isInShallowTypeContext = isShallowContext || this.isExpansiveTypeReference(type);
@@ -797,11 +885,29 @@ export class TypeTable {
     this.isInShallowTypeContext = false;
   }
 
+  /**
+   * Returns the properties to extract for the given type or `null` if nothing should be extracted.
+   *
+   * For performance reasons we only extract properties needed to recognize promise types at the QL
+   * level.
+   */
+  private getPropertiesToExtract(type: ts.Type) {
+    if (this.getSelfType(type) === type) {
+      let thenSymbol = this.typeChecker.getPropertyOfType(type, "then");
+      if (thenSymbol != null) {
+        return [thenSymbol];
+      }
+    }
+    return null;
+  }
+
   private extractProperties(type: ts.Type, id: number) {
-    for (let symbol of type.getProperties()) {
-      let propertyType = this.typeChecker.getTypeOfSymbolAtLocation(symbol, this.arbitraryAstNode);
+    let props = this.getPropertiesToExtract(type);
+    if (props == null) return;
+    for (let symbol of props) {
+      let propertyType = this.tryGetTypeOfSymbol(symbol);
       if (propertyType == null) continue;
-      let propertyTypeId = this.getId(propertyType);
+      let propertyTypeId = this.getId(propertyType, false);
       if (propertyTypeId == null) continue;
       this.propertyLookups.baseTypes.push(id);
       this.propertyLookups.names.push(symbol.name);
@@ -833,7 +939,7 @@ export class TypeTable {
   /**
    * Returns a unique string for the given call/constructor signature.
    */
-  private getSignatureString(kind: ts.SignatureKind, signature: ts.Signature): string {
+  private getSignatureString(kind: ts.SignatureKind, signature: AugmentedSignature): string {
     let parameters = signature.getParameters();
     let numberOfTypeParameters = signature.typeParameters == null
         ? 0
@@ -846,27 +952,51 @@ export class TypeTable {
         break;
       }
     }
-    let returnTypeId = this.getId(signature.getReturnType());
+    let hasRestParam = (signature.flags & InternalSignatureFlags.HasRestParameter) !== 0;
+    let restParameterTag = '';
+    if (hasRestParam) {
+      if (requiredParameters === parameters.length) {
+        // Do not count the rest parameter as a required parameter
+        requiredParameters = parameters.length - 1;
+      }
+      if (parameters.length === 0) return null;
+      let restParameter = parameters[parameters.length - 1];
+      let restParameterType = this.tryGetTypeOfSymbol(restParameter);
+      if (restParameterType == null) return null;
+      let restParameterTypeId = this.getId(restParameterType, false);
+      if (restParameterTypeId == null) return null;
+      restParameterTag = '' + restParameterTypeId;
+    }
+    let returnTypeId = this.getId(signature.getReturnType(), false);
     if (returnTypeId == null) {
       return null;
     }
-    let tag = `${kind};${numberOfTypeParameters};${requiredParameters};${returnTypeId}`;
+    let tag = `${kind};${numberOfTypeParameters};${requiredParameters};${restParameterTag};${returnTypeId}`;
     for (let typeParameter of signature.typeParameters || []) {
       tag += ";" + typeParameter.symbol.name;
       let constraint = typeParameter.getConstraint();
       let constraintId: number;
-      if (constraint == null || (constraintId = this.getId(constraint)) == null) {
+      if (constraint == null || (constraintId = this.getId(constraint, false)) == null) {
         tag += ";";
       } else {
         tag += ";" + constraintId;
       }
     }
-    for (let parameter of parameters) {
-      let parameterType = this.typeChecker.getTypeOfSymbolAtLocation(parameter, this.arbitraryAstNode);
+    for (let paramIndex = 0; paramIndex < parameters.length; ++paramIndex) {
+      let parameter = parameters[paramIndex];
+      let parameterType = this.tryGetTypeOfSymbol(parameter);
       if (parameterType == null) {
         return null;
       }
-      let parameterTypeId = this.getId(parameterType);
+      let isRestParameter = hasRestParam && (paramIndex === parameters.length - 1);
+      if (isRestParameter) {
+        // The type of the rest parameter is the array type, but we wish to extract the non-array type.
+        if (!isTypeReference(parameterType)) return null;
+        let typeArguments = parameterType.typeArguments;
+        if (typeArguments == null || typeArguments.length === 0) return null;
+        parameterType = typeArguments[0];
+      }
+      let parameterTypeId = this.getId(parameterType, false);
       if (parameterTypeId == null) {
         return null;
       }
@@ -900,7 +1030,7 @@ export class TypeTable {
 
   private extractIndexer(baseType: number, indexType: ts.Type, table: IndexerTable) {
     if (indexType == null) return;
-    let indexTypeId = this.getId(indexType);
+    let indexTypeId = this.getId(indexType, false);
     if (indexTypeId == null) return;
     table.baseTypes.push(baseType);
     table.propertyTypes.push(indexTypeId);
@@ -929,8 +1059,10 @@ export class TypeTable {
             if (superType == null) continue;
             let baseTypeSymbol = superType.symbol;
             if (baseTypeSymbol == null) continue;
+            let baseId = this.getSymbolId(baseTypeSymbol);
+            // Note: take care not to perform a recursive call between the two `push` calls.
             this.baseTypes.symbols.push(symbolId);
-            this.baseTypes.baseTypeSymbols.push(this.getSymbolId(baseTypeSymbol));
+            this.baseTypes.baseTypeSymbols.push(baseId);
           }
         }
       }
@@ -945,7 +1077,7 @@ export class TypeTable {
    * `T` is the type parameter declared on the `Promise` interface.
    */
   private getSelfType(type: ts.Type): ts.TypeReference {
-    if (isTypeReference(type) && type.typeArguments != null && type.typeArguments.length > 0) {
+    if (isTypeReference(type) && this.typeChecker.getTypeArguments(type).length > 0) {
       return type.target;
     }
     return null;
@@ -969,7 +1101,7 @@ export class TypeTable {
     let selfType = this.getSelfType(type);
     if (selfType != null) {
       this.checkExpansiveness(selfType);
-      let id = this.getId(selfType);
+      let id = this.getId(selfType, false);
       return this.expansiveTypes.get(id);
     }
     return false;
@@ -1038,7 +1170,7 @@ export class TypeTable {
     search(type, 0);
 
     function search(type: ts.TypeReference, expansionDepth: number): number | null {
-      let id = typeTable.getId(type);
+      let id = typeTable.getId(type, false);
       if (id == null) return null;
 
       let index = indexTable.get(id);
@@ -1069,7 +1201,7 @@ export class TypeTable {
       stack.push(id);
 
       for (let symbol of type.getProperties()) {
-        let propertyType: ts.Type = typeTable.typeChecker.getTypeOfSymbolAtLocation(symbol, typeTable.arbitraryAstNode);
+        let propertyType = this.tryGetTypeOfSymbol(symbol);
         if (propertyType == null) continue;
         traverseType(propertyType);
       }
@@ -1134,8 +1266,9 @@ export class TypeTable {
     if (isTypeReference(type)) {
       // Note that this case also handles tuple types, since a tuple type is represented as
       // a reference to a synthetic generic interface.
-      if (type.typeArguments != null) {
-        type.typeArguments.forEach(callback);
+      let typeArguments = this.typeChecker.getTypeArguments(type);
+      if (typeArguments != null) {
+        typeArguments.forEach(callback);
       }
     } else if (type.flags & ts.TypeFlags.UnionOrIntersection) {
       (type as ts.UnionOrIntersectionType).types.forEach(callback);
@@ -1145,7 +1278,7 @@ export class TypeTable {
       if (objectFlags & ts.ObjectFlags.Anonymous) {
         // Anonymous interface type like `{ x: number }`.
         for (let symbol of type.getProperties()) {
-          let propertyType = this.typeChecker.getTypeOfSymbolAtLocation(symbol, this.arbitraryAstNode);
+          let propertyType = this.tryGetTypeOfSymbol(symbol);
           if (propertyType == null) continue;
           callback(propertyType);
         }
@@ -1170,7 +1303,7 @@ export class TypeTable {
   private forEachChildTypeOfSignature(signature: ts.Signature, callback: (type: ts.Type) => void): void {
     callback(signature.getReturnType());
     for (let parameter of signature.getParameters()) {
-      let paramType = this.typeChecker.getTypeOfSymbolAtLocation(parameter, this.arbitraryAstNode);
+      let paramType = this.tryGetTypeOfSymbol(parameter);
       if (paramType == null) continue;
       callback(paramType);
     }

@@ -8,7 +8,6 @@
  * @id cs/loss-of-precision
  * @tags reliability
  *       correctness
- *       security
  *       external/cwe/cwe-190
  *       external/cwe/cwe-192
  *       external/cwe/cwe-197
@@ -83,7 +82,8 @@ class MulLossOfPrecision extends LossOfPrecision, MulExpr {
   MulLossOfPrecision() { not small(this) }
 
   override string getMessage() {
-    result = "Possible overflow: result of integer multiplication cast to " +
+    result =
+      "Possible overflow: result of integer multiplication cast to " +
         convertedType.toStringWithTypes() + "."
   }
 }

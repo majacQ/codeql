@@ -1,6 +1,12 @@
+/**
+ * Provides classes and predicates for reasoning about guards and the control
+ * flow elements controlled by those guards.
+ */
+
 import java
 private import semmle.code.java.controlflow.Dominance
 private import semmle.code.java.controlflow.internal.GuardsLogic
+private import semmle.code.java.controlflow.internal.Preconditions
 
 /**
  * A basic block that terminates in a condition, splitting the subsequent control flow.
@@ -19,51 +25,49 @@ class ConditionBlock extends BasicBlock {
     result = this.getConditionNode().getABranchSuccessor(testIsTrue)
   }
 
+  /*
+   * For this block to control the block `controlled` with `testIsTrue` the following must be true:
+   * Execution must have passed through the test i.e. `this` must strictly dominate `controlled`.
+   * Execution must have passed through the `testIsTrue` edge leaving `this`.
+   *
+   * Although "passed through the true edge" implies that `this.getATrueSuccessor()` dominates `controlled`,
+   * the reverse is not true, as flow may have passed through another edge to get to `this.getATrueSuccessor()`
+   * so we need to assert that `this.getATrueSuccessor()` dominates `controlled` *and* that
+   * all predecessors of `this.getATrueSuccessor()` are either `this` or dominated by `this.getATrueSuccessor()`.
+   *
+   * For example, in the following java snippet:
+   * ```
+   * if (x)
+   *   controlled;
+   * false_successor;
+   * uncontrolled;
+   * ```
+   * `false_successor` dominates `uncontrolled`, but not all of its predecessors are `this` (`if (x)`)
+   *  or dominated by itself. Whereas in the following code:
+   * ```
+   * if (x)
+   *   while (controlled)
+   *     also_controlled;
+   * false_successor;
+   * uncontrolled;
+   * ```
+   * the block `while controlled` is controlled because all of its predecessors are `this` (`if (x)`)
+   * or (in the case of `also_controlled`) dominated by itself.
+   *
+   * The additional constraint on the predecessors of the test successor implies
+   * that `this` strictly dominates `controlled` so that isn't necessary to check
+   * directly.
+   */
+
   /**
    * Holds if `controlled` is a basic block controlled by this condition, that
    * is, a basic blocks for which the condition is `testIsTrue`.
    */
   predicate controls(BasicBlock controlled, boolean testIsTrue) {
-    /*
-     * For this block to control the block `controlled` with `testIsTrue` the following must be true:
-     * Execution must have passed through the test i.e. `this` must strictly dominate `controlled`.
-     * Execution must have passed through the `testIsTrue` edge leaving `this`.
-     *
-     * Although "passed through the true edge" implies that `this.getATrueSuccessor()` dominates `controlled`,
-     * the reverse is not true, as flow may have passed through another edge to get to `this.getATrueSuccessor()`
-     * so we need to assert that `this.getATrueSuccessor()` dominates `controlled` *and* that
-     * all predecessors of `this.getATrueSuccessor()` are either `this` or dominated by `this.getATrueSuccessor()`.
-     *
-     * For example, in the following java snippet:
-     * ```
-     * if (x)
-     *   controlled;
-     * false_successor;
-     * uncontrolled;
-     * ```
-     * `false_successor` dominates `uncontrolled`, but not all of its predecessors are `this` (`if (x)`)
-     *  or dominated by itself. Whereas in the following code:
-     * ```
-     * if (x)
-     *   while (controlled)
-     *     also_controlled;
-     * false_successor;
-     * uncontrolled;
-     * ```
-     * the block `while controlled` is controlled because all of its predecessors are `this` (`if (x)`)
-     * or (in the case of `also_controlled`) dominated by itself.
-     *
-     * The additional constraint on the predecessors of the test successor implies
-     * that `this` strictly dominates `controlled` so that isn't necessary to check
-     * directly.
-     */
-
     exists(BasicBlock succ |
       succ = this.getTestSuccessor(testIsTrue) and
-      succ.bbDominates(controlled) and
-      forall(BasicBlock pred | pred = succ.getABBPredecessor() and pred != this |
-        succ.bbDominates(pred)
-      )
+      dominatingEdge(this, succ) and
+      succ.bbDominates(controlled)
     )
   }
 }
@@ -71,7 +75,7 @@ class ConditionBlock extends BasicBlock {
 /**
  * A condition that can be evaluated to either true or false. This can either
  * be an `Expr` of boolean type that isn't a boolean literal, or a case of a
- * switch statement.
+ * switch statement, or a method access that acts as a precondition check.
  *
  * Evaluating a switch case to true corresponds to taking that switch case, and
  * evaluating it to false corresponds to taking some other branch.
@@ -81,6 +85,8 @@ class Guard extends ExprParent {
     this.(Expr).getType() instanceof BooleanType and not this instanceof BooleanLiteral
     or
     this instanceof SwitchCase
+    or
+    conditionCheck(this, _)
   }
 
   /** Gets the immediately enclosing callable whose body contains this guard. */
@@ -92,7 +98,18 @@ class Guard extends ExprParent {
   /** Gets the statement containing this guard. */
   Stmt getEnclosingStmt() {
     result = this.(Expr).getEnclosingStmt() or
-    result = this.(SwitchCase).getSwitch()
+    result = this.(SwitchCase).getSwitch() or
+    result = this.(SwitchCase).getSwitchExpr().getEnclosingStmt()
+  }
+
+  /**
+   * Gets the basic block containing this guard or the basic block containing
+   * the switch expression if the guard is a switch case.
+   */
+  BasicBlock getBasicBlock() {
+    result = this.(Expr).getBasicBlock() or
+    result = this.(SwitchCase).getSwitch().getExpr().getBasicBlock() or
+    result = this.(SwitchCase).getSwitchExpr().getExpr().getBasicBlock()
   }
 
   /**
@@ -103,9 +120,9 @@ class Guard extends ExprParent {
    */
   predicate isEquality(Expr e1, Expr e2, boolean polarity) {
     exists(Expr exp1, Expr exp2 | equalityGuard(this, exp1, exp2, polarity) |
-      e1 = exp1.getProperExpr() and e2 = exp2.getProperExpr()
+      e1 = exp1 and e2 = exp2
       or
-      e2 = exp1.getProperExpr() and e1 = exp2.getProperExpr()
+      e2 = exp1 and e1 = exp2
     )
   }
 
@@ -125,9 +142,11 @@ class Guard extends ExprParent {
       branch = true and
       bb2.getFirstNode() = sc.getControlFlowNode() and
       pred = sc.getControlFlowNode().getAPredecessor() and
-      pred.(Expr).getParent*() = sc.getSwitch().getExpr() and
+      pred.(Expr).getParent*() = sc.getSelectorExpr() and
       bb1 = pred.getBasicBlock()
     )
+    or
+    preconditionBranchEdge(this, bb1, bb2, branch)
   }
 
   /**
@@ -142,6 +161,8 @@ class Guard extends ExprParent {
     )
     or
     switchCaseControls(this, controlled) and branch = true
+    or
+    preconditionControls(this, controlled, branch)
   }
 
   /**
@@ -155,13 +176,29 @@ class Guard extends ExprParent {
 }
 
 private predicate switchCaseControls(SwitchCase sc, BasicBlock bb) {
-  exists(BasicBlock caseblock, SwitchStmt ss |
-    ss.getACase() = sc and
+  exists(BasicBlock caseblock, Expr selector |
+    selector = sc.getSelectorExpr() and
     caseblock.getFirstNode() = sc.getControlFlowNode() and
     caseblock.bbDominates(bb) and
     forall(ControlFlowNode pred | pred = sc.getControlFlowNode().getAPredecessor() |
-      pred.(Expr).getParent*() = ss.getExpr()
+      pred.(Expr).getParent*() = selector
     )
+  )
+}
+
+private predicate preconditionBranchEdge(
+  MethodAccess ma, BasicBlock bb1, BasicBlock bb2, boolean branch
+) {
+  conditionCheck(ma, branch) and
+  bb1.getLastNode() = ma.getControlFlowNode() and
+  bb2 = bb1.getLastNode().getANormalSuccessor()
+}
+
+private predicate preconditionControls(MethodAccess ma, BasicBlock controlled, boolean branch) {
+  exists(BasicBlock check, BasicBlock succ |
+    preconditionBranchEdge(ma, check, succ, branch) and
+    dominatingEdge(check, succ) and
+    succ.bbDominates(controlled)
   )
 }
 
@@ -233,7 +270,8 @@ private predicate equalityGuard(Guard g, Expr e1, Expr e2, boolean polarity) {
   exists(ConstCase cc |
     cc = g and
     polarity = true and
-    cc.getSwitch().getExpr().getProperExpr() = e1 and
-    cc.getValue() = e2
+    cc.getSelectorExpr() = e1 and
+    cc.getValue() = e2 and
+    strictcount(cc.getValue(_)) = 1
   )
 }

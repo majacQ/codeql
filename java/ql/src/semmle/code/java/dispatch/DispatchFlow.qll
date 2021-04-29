@@ -1,3 +1,11 @@
+/**
+ * INTERNAL: This is part of the virtual dispatch computation.
+ *
+ * Provides a strengthening of the virtual dispatch relation using a dedicated
+ * data flow check for lambdas, anonymous classes, and other sufficiently
+ * private classes where all object instantiations are accounted for.
+ */
+
 import java
 private import VirtualDispatch
 private import semmle.code.java.dataflow.internal.BaseSSA
@@ -112,7 +120,9 @@ private predicate relevant(RefType t) {
 }
 
 /** A node with a type that is relevant for dispatch flow. */
-private class RelevantNode extends Node { RelevantNode() { relevant(this.getType()) } }
+private class RelevantNode extends Node {
+  RelevantNode() { relevant(this.getType()) }
+}
 
 /**
  * Holds if `p` is the `i`th parameter of a viable dispatch target of `call`.
@@ -190,13 +200,9 @@ private predicate flowStep(RelevantNode n1, RelevantNode n2) {
     n2.asExpr().(MethodAccess).getMethod() = getValue
   )
   or
-  n2.asExpr().(ParExpr).getExpr() = n1.asExpr()
-  or
   n2.asExpr().(CastExpr).getExpr() = n1.asExpr()
   or
-  n2.asExpr().(ConditionalExpr).getTrueExpr() = n1.asExpr()
-  or
-  n2.asExpr().(ConditionalExpr).getFalseExpr() = n1.asExpr()
+  n2.asExpr().(ChooseExpr).getAResultExpr() = n1.asExpr()
   or
   n2.asExpr().(AssignExpr).getSource() = n1.asExpr()
   or

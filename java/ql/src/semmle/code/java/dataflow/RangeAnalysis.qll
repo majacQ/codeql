@@ -66,6 +66,7 @@
 import java
 private import SSA
 private import RangeUtils
+private import semmle.code.java.dataflow.internal.rangeanalysis.SsaReadPositionCommon
 private import semmle.code.java.controlflow.internal.GuardsLogic
 private import SignAnalysis
 private import ModulusAnalysis
@@ -89,7 +90,8 @@ private module RangeAnalysisCache {
      */
     cached
     predicate bounded(Expr e, Bound b, int delta, boolean upper, Reason reason) {
-      bounded(e, b, delta, upper, _, _, reason)
+      bounded(e, b, delta, upper, _, _, reason) and
+      bestBound(e, b, delta, upper)
     }
   }
 
@@ -101,8 +103,20 @@ private module RangeAnalysisCache {
     guard = boundFlowCond(_, _, _, _, _) or guard = eqFlowCond(_, _, _, _, _)
   }
 }
+
 private import RangeAnalysisCache
 import RangeAnalysisPublic
+
+/**
+ * Holds if `b + delta` is a valid bound for `e` and this is the best such delta.
+ * - `upper = true`  : `e <= b + delta`
+ * - `upper = false` : `e >= b + delta`
+ */
+private predicate bestBound(Expr e, Bound b, int delta, boolean upper) {
+  delta = min(int d | bounded(e, b, d, upper, _, _, _)) and upper = true
+  or
+  delta = max(int d | bounded(e, b, d, upper, _, _, _)) and upper = false
+}
 
 /**
  * Holds if `comp` corresponds to:
@@ -118,7 +132,7 @@ private predicate boundCondition(
   or
   exists(SubExpr sub, ConstantIntegerExpr c, int d |
     // (v - d) - e < c
-    comp.getLesserOperand().getProperExpr() = sub and
+    comp.getLesserOperand() = sub and
     comp.getGreaterOperand() = c and
     sub.getLeftOperand() = ssaRead(v, d) and
     sub.getRightOperand() = e and
@@ -126,7 +140,7 @@ private predicate boundCondition(
     delta = d + c.getIntValue()
     or
     // (v - d) - e > c
-    comp.getGreaterOperand().getProperExpr() = sub and
+    comp.getGreaterOperand() = sub and
     comp.getLesserOperand() = c and
     sub.getLeftOperand() = ssaRead(v, d) and
     sub.getRightOperand() = e and
@@ -134,7 +148,7 @@ private predicate boundCondition(
     delta = d + c.getIntValue()
     or
     // e - (v - d) < c
-    comp.getLesserOperand().getProperExpr() = sub and
+    comp.getLesserOperand() = sub and
     comp.getGreaterOperand() = c and
     sub.getLeftOperand() = e and
     sub.getRightOperand() = ssaRead(v, d) and
@@ -142,7 +156,7 @@ private predicate boundCondition(
     delta = d - c.getIntValue()
     or
     // e - (v - d) > c
-    comp.getGreaterOperand().getProperExpr() = sub and
+    comp.getGreaterOperand() = sub and
     comp.getLesserOperand() = c and
     sub.getLeftOperand() = e and
     sub.getRightOperand() = ssaRead(v, d) and
@@ -239,6 +253,15 @@ private Guard boundFlowCond(SsaVariable v, Expr e, int delta, boolean upper, boo
   or
   result = eqFlowCond(v, e, delta, true, testIsTrue) and
   (upper = true or upper = false)
+  or
+  // guard that tests whether `v2` is bounded by `e + delta + d1 - d2` and
+  // exists a guard `guardEq` such that `v = v2 - d1 + d2`.
+  exists(SsaVariable v2, Guard guardEq, boolean eqIsTrue, int d1, int d2 |
+    guardEq = eqFlowCond(v, ssaRead(v2, d1), d2, true, eqIsTrue) and
+    result = boundFlowCond(v2, e, delta + d1 - d2, upper, testIsTrue) and
+    // guardEq needs to control guard
+    guardEq.directlyControls(result.getBasicBlock(), eqIsTrue)
+  )
 }
 
 private newtype TReason =
@@ -250,11 +273,22 @@ private newtype TReason =
  * is due to a specific condition, or `NoReason` if the bound is inferred
  * without going through a bounding condition.
  */
-abstract class Reason extends TReason { abstract string toString(); }
+abstract class Reason extends TReason {
+  /** Gets a textual representation of this reason. */
+  abstract string toString();
+}
 
-class NoReason extends Reason, TNoReason { override string toString() { result = "NoReason" } }
+/**
+ * A reason for an inferred bound that indicates that the bound is inferred
+ * without going through a bounding condition.
+ */
+class NoReason extends Reason, TNoReason {
+  override string toString() { result = "NoReason" }
+}
 
+/** A reason for an inferred bound pointing to a condition. */
 class CondReason extends Reason, TCondReason {
+  /** Gets the condition that is the reason for the bound. */
   Guard getCond() { this = TCondReason(result) }
 
   override string toString() { result = getCond().toString() }
@@ -281,10 +315,11 @@ private predicate boundFlowStepSsa(
   )
 }
 
-/** Holds if `v != e + delta` at `pos`. */
-private predicate unequalFlowStepSsa(
+/** Holds if `v != e + delta` at `pos` and `v` is of integral type. */
+private predicate unequalFlowStepIntegralSsa(
   SsaVariable v, SsaReadPosition pos, Expr e, int delta, Reason reason
 ) {
+  v.getSourceVariable().getType() instanceof IntegralType and
   exists(Guard guard, boolean testIsTrue |
     pos.hasReadOfVar(v) and
     guard = eqFlowCond(v, e, delta, false, testIsTrue) and
@@ -357,6 +392,16 @@ private class NarrowingCastExpr extends CastExpr {
   int getUpperBound() { typeBound(getType(), _, result) }
 }
 
+/** Holds if `e >= 1` as determined by sign analysis. */
+private predicate strictlyPositiveIntegralExpr(Expr e) {
+  strictlyPositive(e) and e.getType() instanceof IntegralType
+}
+
+/** Holds if `e <= -1` as determined by sign analysis. */
+private predicate strictlyNegativeIntegralExpr(Expr e) {
+  strictlyNegative(e) and e.getType() instanceof IntegralType
+}
+
 /**
  * Holds if `e1 + delta` is a valid bound for `e2`.
  * - `upper = true`  : `e2 <= e1 + delta`
@@ -382,15 +427,18 @@ private predicate boundFlowStep(Expr e2, Expr e1, int delta, boolean upper) {
     // `x instanceof ConstantIntegerExpr` is covered by valueFlowStep
     not x instanceof ConstantIntegerExpr and
     not e1 instanceof ConstantIntegerExpr and
-    if strictlyPositive(x)
+    if strictlyPositiveIntegralExpr(x)
     then upper = false and delta = 1
     else
       if positive(x)
       then upper = false and delta = 0
       else
-        if strictlyNegative(x)
+        if strictlyNegativeIntegralExpr(x)
         then upper = true and delta = -1
-        else if negative(x) then upper = true and delta = 0 else none()
+        else
+          if negative(x)
+          then upper = true and delta = 0
+          else none()
   )
   or
   exists(Expr x |
@@ -408,15 +456,18 @@ private predicate boundFlowStep(Expr e2, Expr e1, int delta, boolean upper) {
   |
     // `x instanceof ConstantIntegerExpr` is covered by valueFlowStep
     not x instanceof ConstantIntegerExpr and
-    if strictlyPositive(x)
+    if strictlyPositiveIntegralExpr(x)
     then upper = true and delta = -1
     else
       if positive(x)
       then upper = true and delta = 0
       else
-        if strictlyNegative(x)
+        if strictlyNegativeIntegralExpr(x)
         then upper = false and delta = 1
-        else if negative(x) then upper = false and delta = 0 else none()
+        else
+          if negative(x)
+          then upper = false and delta = 0
+          else none()
   )
   or
   e2.(RemExpr).getRightOperand() = e1 and positive(e1) and delta = -1 and upper = true
@@ -532,7 +583,7 @@ private predicate boundedSsa(
     boundedSsa(v, pos, b, d, upper, fromBackEdge, origdelta, r2) or
     boundedPhi(v, b, d, upper, fromBackEdge, origdelta, r2)
   |
-    unequalSsa(v, pos, b, d, r1) and
+    unequalIntegralSsa(v, pos, b, d, r1) and
     (
       upper = true and delta = d - 1
       or
@@ -547,11 +598,13 @@ private predicate boundedSsa(
 }
 
 /**
- * Holds if `v != b + delta` at `pos`.
+ * Holds if `v != b + delta` at `pos` and `v` is of integral type.
  */
-private predicate unequalSsa(SsaVariable v, SsaReadPosition pos, Bound b, int delta, Reason reason) {
+private predicate unequalIntegralSsa(
+  SsaVariable v, SsaReadPosition pos, Bound b, int delta, Reason reason
+) {
   exists(Expr e, int d1, int d2 |
-    unequalFlowStepSsa(v, pos, e, d1, reason) and
+    unequalFlowStepIntegralSsa(v, pos, e, d1, reason) and
     bounded(e, b, d2, true, _, _, _) and
     bounded(e, b, d2, false, _, _, _) and
     delta = d2 + d1

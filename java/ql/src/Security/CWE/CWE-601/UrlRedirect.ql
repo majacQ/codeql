@@ -12,13 +12,13 @@
 
 import java
 import semmle.code.java.dataflow.FlowSources
-import UrlRedirect
+import semmle.code.java.security.UrlRedirect
 import DataFlow::PathGraph
 
 class UrlRedirectConfig extends TaintTracking::Configuration {
   UrlRedirectConfig() { this = "UrlRedirectConfig" }
 
-  override predicate isSource(DataFlow::Node source) { source instanceof RemoteUserInput }
+  override predicate isSource(DataFlow::Node source) { source instanceof RemoteFlowSource }
 
   override predicate isSink(DataFlow::Node sink) { sink instanceof UrlRedirectSink }
 }

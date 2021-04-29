@@ -8,6 +8,7 @@ import Type
 import Annotation
 import Exception
 import metrics.MetricField
+private import dispatch.VirtualDispatch
 
 /**
  * A common abstraction for type member declarations,
@@ -115,13 +116,20 @@ class Callable extends StmtParent, Member, @callable {
 
   /**
    * Holds if this callable may call the specified callable,
-   * taking overriding into account.
+   * taking virtual dispatch into account.
+   *
+   * This includes both static call targets and dynamic dispatch targets.
    */
-  predicate polyCalls(Callable m) {
-    this.calls(m)
-    or
-    exists(Method mSuper, VirtualMethodAccess c | c.getCaller() = this and c.getMethod() = mSuper |
-      m.(Method).overrides(mSuper)
+  predicate polyCalls(Callable m) { this.calls(m) or this.callsImpl(m) }
+
+  /**
+   * Holds if `c` is a viable implementation of a callable called by this
+   * callable, taking virtual dispatch resolution into account.
+   */
+  predicate callsImpl(Callable c) {
+    exists(Call call |
+      call.getCaller() = this and
+      viableCallable(call) = c
     )
   }
 
@@ -207,7 +215,7 @@ class Callable extends StmtParent, Member, @callable {
   Call getAReference() { result.getCallee() = this }
 
   /** Gets the body of this callable, if any. */
-  Block getBody() { result.getParent() = this }
+  BlockStmt getBody() { result.getParent() = this }
 
   /**
    * Gets the source declaration of this callable.
@@ -353,18 +361,23 @@ class Method extends Callable, @method {
   override MethodAccess getAReference() { result = Callable.super.getAReference() }
 
   override predicate isPublic() {
-    Callable.super.isPublic() or
-    // JLS 9.4: Every method declaration in the body of an interface is implicitly public.
-    getDeclaringType() instanceof Interface or
+    Callable.super.isPublic()
+    or
+    // JLS 9.4: Every method declaration in the body of an interface without an
+    // access modifier is implicitly public.
+    getDeclaringType() instanceof Interface and
+    not this.isPrivate()
+    or
     exists(FunctionalExpr func | func.asMethod() = this)
   }
 
   override predicate isAbstract() {
     Callable.super.isAbstract()
     or
-    // JLS 9.4: An interface method lacking a `default` modifier or a `static` modifier
+    // JLS 9.4: An interface method lacking a `private`, `default`, or `static` modifier
     // is implicitly abstract.
     this.getDeclaringType() instanceof Interface and
+    not this.isPrivate() and
     not this.isDefault() and
     not this.isStatic()
   }
@@ -398,6 +411,8 @@ class Method extends Callable, @method {
     not isFinal() and
     not getDeclaringType().isFinal()
   }
+
+  override string getAPrimaryQlClass() { result = "Method" }
 }
 
 /** A method that is the same as its source declaration. */
@@ -473,13 +488,13 @@ class GetterMethod extends Method {
 
 /**
  * A finalizer method, with name `finalize`,
- * return type `void` and modifier `protected`.
+ * return type `void` and no parameters.
  */
 class FinalizeMethod extends Method {
   FinalizeMethod() {
     this.hasName("finalize") and
     this.getReturnType().hasName("void") and
-    this.isProtected()
+    this.hasNoParameters()
   }
 }
 
@@ -491,6 +506,8 @@ class Constructor extends Callable, @constructor {
   override Constructor getSourceDeclaration() { constrs(this, _, _, _, _, result) }
 
   override string getSignature() { constrs(this, _, result, _, _, _) }
+
+  override string getAPrimaryQlClass() { result = "Constructor" }
 }
 
 /**
@@ -504,7 +521,9 @@ abstract class InitializerMethod extends Method { }
  * A static initializer is a method that contains all static
  * field initializations and static initializer blocks.
  */
-class StaticInitializer extends InitializerMethod { StaticInitializer() { hasName("<clinit>") } }
+class StaticInitializer extends InitializerMethod {
+  StaticInitializer() { hasName("<clinit>") }
+}
 
 /**
  * An instance initializer is a method that contains field initializations
@@ -533,6 +552,8 @@ class FieldDeclaration extends ExprParent, @fielddecl, Annotatable {
     then result = this.getTypeAccess() + " " + this.getField(0) + ";"
     else result = this.getTypeAccess() + " " + this.getField(0) + ", ...;"
   }
+
+  override string getAPrimaryQlClass() { result = "FieldDeclaration" }
 }
 
 /** A class or instance field. */
@@ -601,7 +622,11 @@ class Field extends Member, ExprParent, @field, Variable {
 
   /** Cast this field to a class that provides access to metrics information. */
   MetricField getMetrics() { result = this }
+
+  override string getAPrimaryQlClass() { result = "Field" }
 }
 
 /** An instance field. */
-class InstanceField extends Field { InstanceField() { not this.isStatic() } }
+class InstanceField extends Field {
+  InstanceField() { not this.isStatic() }
+}

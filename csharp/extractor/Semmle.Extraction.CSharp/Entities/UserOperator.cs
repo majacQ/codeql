@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.IO;
 using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
@@ -9,21 +10,21 @@ namespace Semmle.Extraction.CSharp.Entities
         protected UserOperator(Context cx, IMethodSymbol init)
             : base(cx, init) { }
 
-        public override void Populate()
+        public override void Populate(TextWriter trapFile)
         {
-            PopulateMethod();
-            ExtractModifiers();
+            PopulateMethod(trapFile);
+            PopulateModifiers(trapFile);
 
             var returnType = Type.Create(Context, symbol.ReturnType);
-            Context.Emit(Tuples.operators(this,
+            trapFile.operators(this,
                 symbol.Name,
                 OperatorSymbol(Context, symbol.Name),
                 ContainingType,
                 returnType.TypeRef,
-                (UserOperator)OriginalDefinition));
+                (UserOperator)OriginalDefinition);
 
             foreach (var l in Locations)
-                Context.Emit(Tuples.operator_location(this, l));
+                trapFile.operator_location(this, l);
 
             if (IsSourceDeclaration)
             {
@@ -34,7 +35,7 @@ namespace Semmle.Extraction.CSharp.Entities
                     TypeMention.Create(Context, declaration.Type, this, returnType);
             }
 
-            ContainingType.ExtractGenerics();
+            ContainingType.PopulateGenerics();
         }
 
         public override bool NeedsPopulation => Context.Defines(symbol) || IsImplicitOperator(out _);
@@ -45,19 +46,6 @@ namespace Semmle.Extraction.CSharp.Entities
             {
                 IsImplicitOperator(out var containingType);
                 return Type.Create(Context, containingType);
-            }
-        }
-
-        public override IId Id
-        {
-            get
-            {
-                return new Key(tb =>
-                {
-                    AddSignatureTypeToId(Context, tb, symbol, symbol.ReturnType); // Needed for op_explicit(), which differs only by return type.
-                    tb.Append(" ");
-                    BuildMethodId(this, tb);
-                });
             }
         }
 
@@ -73,7 +61,7 @@ namespace Semmle.Extraction.CSharp.Entities
             if (containingType != null)
             {
                 var containingNamedType = containingType as INamedTypeSymbol;
-                return containingNamedType == null || !containingNamedType.MemberNames.Contains(symbol.Name);
+                return containingNamedType == null || !containingNamedType.GetMembers(symbol.Name).Contains(symbol);
             }
 
             var pointerType = symbol.Parameters.Select(p => p.Type).OfType<IPointerTypeSymbol>().FirstOrDefault();
@@ -191,11 +179,11 @@ namespace Semmle.Extraction.CSharp.Entities
         {
             string result;
             if (!OperatorSymbol(methodName, out result))
-                cx.ModelError("Unhandled operator name in OperatorSymbol(): '{0}'", methodName);
+                cx.ModelError($"Unhandled operator name in OperatorSymbol(): '{methodName}'");
             return result;
         }
 
-        public new static UserOperator Create(Context cx, IMethodSymbol symbol) => UserOperatorFactory.Instance.CreateEntity(cx, symbol);
+        public new static UserOperator Create(Context cx, IMethodSymbol symbol) => UserOperatorFactory.Instance.CreateEntityFromSymbol(cx, symbol);
 
         class UserOperatorFactory : ICachedEntityFactory<IMethodSymbol, UserOperator>
         {

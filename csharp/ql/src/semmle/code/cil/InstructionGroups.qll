@@ -52,7 +52,9 @@ class ConditionalBranch extends Branch, @cil_conditional_jump {
 }
 
 /** An expression with two operands. */
-class BinaryExpr extends Expr, @cil_binary_expr { override int getPopCount() { result = 2 } }
+class BinaryExpr extends Expr, @cil_binary_expr {
+  override int getPopCount() { result = 2 }
+}
 
 /** An expression with one operand. */
 class UnaryExpr extends Expr, @cil_unary_expr {
@@ -124,6 +126,9 @@ class FloatLiteral extends Literal, @cil_ldc_r { }
 
 /** An expression that pushes a `null` value onto the stack. */
 class NullLiteral extends Literal, @cil_ldnull { }
+
+/** An expression that pushes a string onto the stack. */
+class StringLiteral extends Literal, @cil_ldstr { }
 
 /** A branch with one operand. */
 class UnaryBranch extends ConditionalBranch, @cil_unary_jump {
@@ -200,10 +205,14 @@ class TailCall extends Call {
 }
 
 /** A call to a static target. */
-class StaticCall extends Call { StaticCall() { not this.isVirtual() } }
+class StaticCall extends Call {
+  StaticCall() { not this.isVirtual() }
+}
 
 /** A call to a virtual target. */
-class VirtualCall extends Call { VirtualCall() { this.isVirtual() } }
+class VirtualCall extends Call {
+  VirtualCall() { this.isVirtual() }
+}
 
 /** A read of an array element. */
 class ReadArrayElement extends BinaryExpr, @cil_read_array {

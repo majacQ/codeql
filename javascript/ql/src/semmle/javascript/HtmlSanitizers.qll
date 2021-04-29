@@ -48,12 +48,18 @@ private class DefaultHtmlSanitizerCall extends HtmlSanitizerCall {
       or
       callee = LodashUnderscore::member("escape")
       or
+      exists(DataFlow::PropRead read | read = callee |
+        read.getPropertyName() = "sanitize" and
+        read.getBase().asExpr().(VarAccess).getName() = "DOMPurify"
+      )
+      or
       exists(string name | name = "encode" or name = "encodeNonUTF" |
-        callee = DataFlow::moduleMember("html-entities", _)
-              .getAnInstantiation()
-              .getAPropertyRead(name) or
+        callee =
+          DataFlow::moduleMember("html-entities", _).getAnInstantiation().getAPropertyRead(name) or
         callee = DataFlow::moduleMember("html-entities", _).getAPropertyRead(name)
       )
+      or
+      callee = Closure::moduleImport("goog.string.htmlEscape")
     )
     or
     // Match home-made sanitizers by name.

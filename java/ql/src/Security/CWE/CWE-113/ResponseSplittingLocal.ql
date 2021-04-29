@@ -12,7 +12,7 @@
 
 import java
 import semmle.code.java.dataflow.FlowSources
-import ResponseSplitting
+import semmle.code.java.security.ResponseSplitting
 import DataFlow::PathGraph
 
 class ResponseSplittingLocalConfig extends TaintTracking::Configuration {
@@ -21,6 +21,11 @@ class ResponseSplittingLocalConfig extends TaintTracking::Configuration {
   override predicate isSource(DataFlow::Node source) { source instanceof LocalUserInput }
 
   override predicate isSink(DataFlow::Node sink) { sink instanceof HeaderSplittingSink }
+
+  override predicate isSanitizer(DataFlow::Node node) {
+    node.getType() instanceof PrimitiveType or
+    node.getType() instanceof BoxedType
+  }
 }
 
 from DataFlow::PathNode source, DataFlow::PathNode sink, ResponseSplittingLocalConfig conf

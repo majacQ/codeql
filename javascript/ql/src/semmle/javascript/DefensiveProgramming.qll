@@ -14,9 +14,9 @@ abstract class DefensiveExpressionTest extends DataFlow::ValueNode {
 }
 
 /**
- * INTERNAL: Do not use directly; use `DefensiveExpressionTest` instead.
+ * Provides classes for specific kinds of defensive programming patterns.
  */
-module Internal {
+module DefensiveExpressionTest {
   /**
    * A defensive truthiness check that may be worth keeping, even if it
    * is strictly speaking useless.
@@ -84,7 +84,6 @@ module Internal {
    */
   private class CompositeUndefinedNullTestPart extends DefensiveExpressionTest {
     UndefinedNullTest test;
-
     boolean polarity;
 
     CompositeUndefinedNullTestPart() {
@@ -112,12 +111,11 @@ module Internal {
    *
    * Example: `if (x === null) ...`.
    */
-  private class SanityCheckingUndefinedNullGuard extends DefensiveExpressionTest {
+  private class ConsistencyCheckingUndefinedNullGuard extends DefensiveExpressionTest {
     UndefinedNullTest test;
-
     boolean polarity;
 
-    SanityCheckingUndefinedNullGuard() {
+    ConsistencyCheckingUndefinedNullGuard() {
       exists(IfStmt c |
         this = c.getCondition().flow() and
         test = stripNotsAndParens(c.getCondition(), polarity) and
@@ -152,7 +150,6 @@ module Internal {
    */
   private class NullUndefinedComparison extends UndefinedNullTest {
     Expr operand;
-
     InferredType op2type;
 
     NullUndefinedComparison() {
@@ -191,6 +188,13 @@ module Internal {
   }
 
   /**
+   * Comparison against `undefined`, such as `x === undefined`.
+   */
+  class UndefinedComparison extends NullUndefinedComparison {
+    UndefinedComparison() { op2type = TTUndefined() }
+  }
+
+  /**
    * An expression that throws an exception if one of its subexpressions evaluates to `null` or `undefined`.
    *
    * Examples: `sub.p` or `sub()`.
@@ -199,8 +203,7 @@ module Internal {
     Expr target;
 
     UndefinedNullCrashUse() {
-      exists (Expr thrower |
-        stripNotsAndParens(this, _) = thrower |
+      exists(Expr thrower | stripNotsAndParens(this, _) = thrower |
         thrower.(InvokeExpr).getCallee().getUnderlyingValue() = target
         or
         thrower.(PropAccess).getBase().getUnderlyingValue() = target
@@ -224,7 +227,8 @@ module Internal {
     Expr target;
 
     NonFunctionCallCrashUse() {
-      stripNotsAndParens(this, _).(InvokeExpr).getCallee().getUnderlyingValue() = target }
+      stripNotsAndParens(this, _).(InvokeExpr).getCallee().getUnderlyingValue() = target
+    }
 
     /**
      * Gets the subexpression that will cause an exception to be thrown if it is not a `function`.
@@ -268,7 +272,6 @@ module Internal {
    */
   private class UndefinedNullTruthinessGuard extends DefensiveExpressionTest {
     VarRef guardVar;
-
     boolean polarity;
 
     UndefinedNullTruthinessGuard() {
@@ -276,9 +279,7 @@ module Internal {
         guardVar = stripNotsAndParens(this.asExpr(), polarity) and
         guardVar.getVariable() = useVar.getVariable()
       |
-        getAGuardedExpr(this.asExpr())
-            .(UndefinedNullCrashUse)
-            .getVulnerableSubexpression() = useVar and
+        getAGuardedExpr(this.asExpr()).(UndefinedNullCrashUse).getVulnerableSubexpression() = useVar and
         // exclude types whose truthiness depend on the value
         not isStringOrNumOrBool(guardVar.analyze().getAType())
       )
@@ -298,7 +299,6 @@ module Internal {
    */
   private class UndefinedNullTypeGuard extends DefensiveExpressionTest {
     UndefinedNullTest test;
-
     boolean polarity;
 
     UndefinedNullTypeGuard() {
@@ -308,9 +308,7 @@ module Internal {
         test.getOperand() = guardVar and
         guardVar.getVariable() = useVar.getVariable()
       |
-        getAGuardedExpr(guard)
-            .(UndefinedNullCrashUse)
-            .getVulnerableSubexpression() = useVar
+        getAGuardedExpr(guard).(UndefinedNullCrashUse).getVulnerableSubexpression() = useVar
       )
     }
 
@@ -328,7 +326,6 @@ module Internal {
    */
   private class TypeofTest extends EqualityTest {
     Expr operand;
-
     TypeofTag tag;
 
     TypeofTest() {
@@ -366,7 +363,6 @@ module Internal {
    */
   private class FunctionTypeGuard extends DefensiveExpressionTest {
     TypeofTest test;
-
     boolean polarity;
 
     FunctionTypeGuard() {
@@ -376,9 +372,7 @@ module Internal {
         test.getOperand() = guardVar and
         guardVar.getVariable() = useVar.getVariable()
       |
-        getAGuardedExpr(guard)
-            .(NonFunctionCallCrashUse)
-            .getVulnerableSubexpression() = useVar
+        getAGuardedExpr(guard).(NonFunctionCallCrashUse).getVulnerableSubexpression() = useVar
       ) and
       test.getTag() = "function"
     }
@@ -393,7 +387,7 @@ module Internal {
   /**
    * A test for `undefined` using a `typeof` expression.
    *
-   * Example: `typeof x === undefined'.
+   * Example: `typeof x === "undefined"'.
    */
   class TypeofUndefinedTest extends UndefinedNullTest {
     TypeofTest test;

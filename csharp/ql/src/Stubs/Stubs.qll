@@ -5,7 +5,7 @@
  * This will generate stubs for all the required dependencies as well.
  *
  * Use
- * ```
+ * ```ql
  * select generatedCode()
  * ```
  * to retrieve the generated C# code.
@@ -74,7 +74,8 @@ abstract private class GeneratedType extends ValueOrRefType, GeneratedElement {
   }
 
   private string stubComment() {
-    result = "// Generated from `" + this.getQualifiedName() + "` in `" +
+    result =
+      "// Generated from `" + this.getQualifiedName() + "` in `" +
         min(this.getLocation().toString()) + "`\n"
   }
 
@@ -87,10 +88,11 @@ abstract private class GeneratedType extends ValueOrRefType, GeneratedElement {
     if this.isDuplicate()
     then result = ""
     else
-      result = this.stubComment() + this.stubAttributes() + this.stubAbstractModifier() +
+      result =
+        this.stubComment() + this.stubAttributes() + this.stubAbstractModifier() +
           this.stubStaticModifier() + this.stubAccessibilityModifier() + this.stubKeyword() + " " +
-          this.getUndecoratedName() + stubGenericArguments(this) + stubBaseTypesString() + "\n{\n" +
-          stubMembers() + "}\n\n"
+          this.getUndecoratedName() + stubGenericArguments(this) + stubBaseTypesString() +
+          stubTypeParametersConstraints(this) + "\n{\n" + stubMembers() + "}\n\n"
   }
 
   private ValueOrRefType getAnInterestingBaseType() {
@@ -105,14 +107,13 @@ abstract private class GeneratedType extends ValueOrRefType, GeneratedElement {
     else
       if exists(getAnInterestingBaseType())
       then
-        result = " : " +
+        result =
+          " : " +
             concat(int i, ValueOrRefType t |
               t = this.getAnInterestingBaseType() and
               (if t instanceof Class then i = 0 else i = 1)
             |
-              stubClassName(t), ", "
-              order by
-                i
+              stubClassName(t), ", " order by i
             )
       else result = ""
   }
@@ -213,11 +214,8 @@ private class GeneratedNamespace extends Namespace, GeneratedElement {
   pragma[nomagic]
   final GeneratedNamespace getChildNamespace(int n) {
     result.getParentNamespace() = this and
-    result.getName() = rank[n + 1](GeneratedNamespace g |
-        g.getParentNamespace() = this
-      |
-        g.getName()
-      )
+    result.getName() =
+      rank[n + 1](GeneratedNamespace g | g.getParentNamespace() = this | g.getName())
   }
 
   final int getChildNamespaceCount() {
@@ -230,9 +228,8 @@ private class GeneratedNamespace extends Namespace, GeneratedElement {
   }
 
   private string getTypeStubs() {
-    result = concat(string s |
-        s = any(GeneratedType gt | gt.getDeclaringNamespace() = this).getStub()
-      )
+    result =
+      concat(string s | s = any(GeneratedType gt | gt.getDeclaringNamespace() = this).getStub())
   }
 }
 
@@ -265,15 +262,23 @@ private string stubAccessibility(Member m) {
       else
         if m.isPrivate()
         then result = "private "
-        else if m.isInternal() then result = "internal " else result = "unknown-accessibility"
+        else
+          if m.isInternal()
+          then result = "internal "
+          else result = "unknown-accessibility"
 }
 
 private string stubModifiers(Member m) {
-  result = stubAccessibility(m) + stubStatic(m) + stubOverride(m)
+  result = stubAccessibility(m) + stubStaticOrConst(m) + stubOverride(m)
 }
 
-private string stubStatic(Member m) {
-  if m.(Modifiable).isStatic() then result = "static " else result = ""
+private string stubStaticOrConst(Member m) {
+  if m.(Modifiable).isStatic()
+  then result = "static "
+  else
+    if m.(Modifiable).isConst()
+    then result = "const "
+    else result = ""
 }
 
 private string stubOverride(Member m) {
@@ -285,7 +290,10 @@ private string stubOverride(Member m) {
     else
       if m.(Virtualizable).isAbstract()
       then result = "abstract "
-      else if m.(Virtualizable).isOverride() then result = "override " else result = ""
+      else
+        if m.(Virtualizable).isOverride()
+        then result = "override "
+        else result = ""
 }
 
 private string stubQualifiedNamePrefix(ValueOrRefType t) {
@@ -334,18 +342,18 @@ private string stubClassName(Type t) {
                       else
                         if t instanceof TupleType
                         then
-                          result = "(" +
+                          result =
+                            "(" +
                               concat(int i, Type element |
                                 element = t.(TupleType).getElementType(i)
                               |
-                                stubClassName(element), ","
-                                order by
-                                  i
+                                stubClassName(element), "," order by i
                               ) + ")"
                         else
                           if t instanceof ValueOrRefType
                           then
-                            result = stubQualifiedNamePrefix(t) + t.getUndecoratedName() +
+                            result =
+                              stubQualifiedNamePrefix(t) + t.getUndecoratedName() +
                                 stubGenericArguments(t)
                           else result = "<error>"
 }
@@ -354,24 +362,22 @@ language[monotonicAggregates]
 private string stubGenericArguments(ValueOrRefType t) {
   if t instanceof UnboundGenericType
   then
-    result = "<" +
+    result =
+      "<" +
         concat(int n |
           exists(t.(UnboundGenericType).getTypeParameter(n))
         |
-          t.(UnboundGenericType).getTypeParameter(n).getName(), ","
-          order by
-            n
+          t.(UnboundGenericType).getTypeParameter(n).getName(), "," order by n
         ) + ">"
   else
     if t instanceof ConstructedType
     then
-      result = "<" +
+      result =
+        "<" +
           concat(int n |
             exists(t.(ConstructedType).getTypeArgument(n))
           |
-            stubClassName(t.(ConstructedType).getTypeArgument(n)), ","
-            order by
-              n
+            stubClassName(t.(ConstructedType).getTypeArgument(n)), "," order by n
           ) + ">"
     else result = ""
 }
@@ -379,14 +385,48 @@ private string stubGenericArguments(ValueOrRefType t) {
 private string stubGenericMethodParams(Method m) {
   if m instanceof UnboundGenericMethod
   then
-    result = "<" +
+    result =
+      "<" +
         concat(int n, TypeParameter param |
           param = m.(UnboundGenericMethod).getTypeParameter(n)
         |
-          param.getName(), ","
-          order by
-            n
+          param.getName(), "," order by n
         ) + ">"
+  else result = ""
+}
+
+private string stubConstraints(TypeParameterConstraints tpc) {
+  tpc.hasConstructorConstraint() and result = "new()"
+  or
+  tpc.hasUnmanagedTypeConstraint() and result = "unmanaged"
+  or
+  tpc.hasValueTypeConstraint() and result = "struct"
+  or
+  tpc.hasRefTypeConstraint() and result = "class"
+  or
+  result = tpc.getATypeConstraint().(TypeParameter).getName()
+  or
+  result = stubClassName(tpc.getATypeConstraint().(Interface))
+  or
+  result = stubClassName(tpc.getATypeConstraint().(Class))
+}
+
+private string stubTypeParameterConstraints(TypeParameter tp) {
+  exists(TypeParameterConstraints tpc | tpc = tp.getConstraints() |
+    result =
+      " where " + tp.getName() + ": " + strictconcat(string s | s = stubConstraints(tpc) | s, ", ")
+  )
+}
+
+private string stubTypeParametersConstraints(Declaration d) {
+  if d instanceof UnboundGeneric
+  then
+    result =
+      concat(TypeParameter tp |
+        tp = d.(UnboundGeneric).getATypeParameter()
+      |
+        stubTypeParameterConstraints(tp), " "
+      )
   else result = ""
 }
 
@@ -396,12 +436,96 @@ private string stubImplementation(Virtualizable c) {
   else result = " => throw null"
 }
 
+private predicate isKeyword(string s) {
+  s = "abstract" or
+  s = "as" or
+  s = "base" or
+  s = "bool" or
+  s = "break" or
+  s = "byte" or
+  s = "case" or
+  s = "catch" or
+  s = "char" or
+  s = "checked" or
+  s = "class" or
+  s = "const" or
+  s = "continue" or
+  s = "decimal" or
+  s = "default" or
+  s = "delegate" or
+  s = "do" or
+  s = "double" or
+  s = "else" or
+  s = "enum" or
+  s = "event" or
+  s = "explicit" or
+  s = "extern" or
+  s = "false" or
+  s = "finally" or
+  s = "fixed" or
+  s = "float" or
+  s = "for" or
+  s = "foreach" or
+  s = "goto" or
+  s = "if" or
+  s = "implicit" or
+  s = "in" or
+  s = "int" or
+  s = "interface" or
+  s = "internal" or
+  s = "is" or
+  s = "lock" or
+  s = "long" or
+  s = "namespace" or
+  s = "new" or
+  s = "null" or
+  s = "object" or
+  s = "operator" or
+  s = "out" or
+  s = "override" or
+  s = "params" or
+  s = "private" or
+  s = "protected" or
+  s = "public" or
+  s = "readonly" or
+  s = "ref" or
+  s = "return" or
+  s = "sbyte" or
+  s = "sealed" or
+  s = "short" or
+  s = "sizeof" or
+  s = "stackalloc" or
+  s = "static" or
+  s = "string" or
+  s = "struct" or
+  s = "switch" or
+  s = "this" or
+  s = "throw" or
+  s = "true" or
+  s = "try" or
+  s = "typeof" or
+  s = "uint" or
+  s = "ulong" or
+  s = "unchecked" or
+  s = "unsafe" or
+  s = "ushort" or
+  s = "using" or
+  s = "virtual" or
+  s = "void" or
+  s = "volatile" or
+  s = "while"
+}
+
+bindingset[s]
+private string escapeIfKeyword(string s) { if isKeyword(s) then result = "@" + s else result = s }
+
 private string stubParameters(Parameterizable p) {
-  result = concat(int i, Parameter param |
+  result =
+    concat(int i, Parameter param |
       param = p.getParameter(i) and not param.getType() instanceof ArglistType
     |
-      stubParameterModifiers(param) + stubClassName(param.getType()) + " " + param.getName() +
-          stubDefaultValue(param), ", "
+      stubParameterModifiers(param) + stubClassName(param.getType()) + " " +
+          escapeIfKeyword(param.getName()) + stubDefaultValue(param), ", "
       order by
         i
     )
@@ -419,7 +543,10 @@ private string stubParameterModifiers(Parameter p) {
       else
         if p.isIn()
         then result = "" // Only C# 7.1 so ignore
-        else if p.hasExtensionMethodModifier() then result = "this " else result = ""
+        else
+          if p.hasExtensionMethodModifier()
+          then result = "this "
+          else result = ""
 }
 
 private string stubDefaultValue(Parameter p) {
@@ -436,42 +563,49 @@ private string stubExplicitImplementation(Member c) {
 
 private string stubMember(Member m) {
   exists(Method c | m = c and not m.getDeclaringType() instanceof Enum |
-    result = "    " + stubModifiers(c) + stubClassName(c.getReturnType()) + " " +
+    result =
+      "    " + stubModifiers(c) + stubClassName(c.getReturnType()) + " " +
         stubExplicitImplementation(c) + c.getName() + stubGenericMethodParams(c) + "(" +
-        stubParameters(c) + ")" + stubImplementation(c) + ";\n"
+        stubParameters(c) + ")" + stubTypeParametersConstraints(c) + stubImplementation(c) + ";\n"
   )
   or
   exists(Operator op |
     m = op and not m.getDeclaringType() instanceof Enum and not op instanceof ConversionOperator
   |
-    result = "    " + stubModifiers(op) + stubClassName(op.getReturnType()) + " operator " +
-        op.getName() + "(" + stubParameters(op) + ") => throw null;\n"
+    result =
+      "    " + stubModifiers(op) + stubClassName(op.getReturnType()) + " operator " + op.getName() +
+        "(" + stubParameters(op) + ") => throw null;\n"
   )
   or
   exists(ConversionOperator op | m = op |
-    result = "    " + stubModifiers(op) + stubExplicit(op) + "operator " +
+    result =
+      "    " + stubModifiers(op) + stubExplicit(op) + "operator " +
         stubClassName(op.getReturnType()) + "(" + stubParameters(op) + ") => throw null;\n"
   )
   or
   result = "    " + m.(EnumConstant).getName() + ",\n"
   or
   exists(Property p | m = p |
-    result = "    " + stubModifiers(m) + stubClassName(p.getType()) + " " +
-        stubExplicitImplementation(p) + p.getName() + " { " + stubGetter(p) + stubSetter(p) + "}\n"
+    result =
+      "    " + stubModifiers(m) + stubClassName(p.getType()) + " " + stubExplicitImplementation(p) +
+        p.getName() + " { " + stubGetter(p) + stubSetter(p) + "}\n"
   )
   or
   exists(Constructor c | m = c and not c.getDeclaringType() instanceof Enum |
-    result = "    " + stubModifiers(m) + c.getName() + "(" + stubParameters(c) +
-        ") => throw null;\n"
+    result =
+      "    " + stubModifiers(m) + c.getName() + "(" + stubParameters(c) + ") => throw null;\n"
   )
   or
   exists(Indexer i | m = i |
-    result = "    " + stubModifiers(m) + stubClassName(i.getType()) + " this[" + stubParameters(i) +
-        "] { " + stubGetter(i) + stubSetter(i) + "}\n"
+    result =
+      "    " + stubModifiers(m) + stubClassName(i.getType()) + " this[" + stubParameters(i) + "] { "
+        + stubGetter(i) + stubSetter(i) + "}\n"
   )
   or
-  exists(Field f | f = m and not f instanceof EnumConstant |
-    result = "    " + stubModifiers(m) + stubClassName(f.getType()) + " " + f.getName() + ";\n"
+  exists(Field f, string impl | f = m and not f instanceof EnumConstant |
+    (if f.isConst() then impl = " = throw null" else impl = "") and
+    result =
+      "    " + stubModifiers(m) + stubClassName(f.getType()) + " " + f.getName() + impl + ";\n"
   )
 }
 
@@ -500,9 +634,11 @@ private string stubSetter(DeclarationWithGetSetAccessors p) {
 }
 
 private string stubSemmleExtractorOptions() {
-  result = concat(string s |
+  result =
+    concat(string s |
       exists(CommentLine comment |
-        s = "// original-extractor-options:" +
+        s =
+          "// original-extractor-options:" +
             comment.getText().regexpCapture("\\w*semmle-extractor-options:(.*)", 1) + "\n"
       )
     )
@@ -510,6 +646,7 @@ private string stubSemmleExtractorOptions() {
 
 /** Gets the generated C# code. */
 string generatedCode() {
-  result = "// This file contains auto-generated code.\n" + stubSemmleExtractorOptions() + "\n" +
+  result =
+    "// This file contains auto-generated code.\n" + stubSemmleExtractorOptions() + "\n" +
       any(GeneratedNamespace ns | ns.isGlobalNamespace()).getStubs()
 }

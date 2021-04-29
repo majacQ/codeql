@@ -57,7 +57,7 @@ def loop(seq):
         if v:
             use(v)
 
-#This was causing the sanity check to fail, 
+#This was causing the consistency check to fail, 
 def double_attr_check(x, y):
     if x.b == 3:
         return
@@ -105,4 +105,11 @@ def not_or_not(*a):
         not a[0]):
         raise Exception()
     "Hello"
+
+def method_check(x):
+    if x.m():
+        use(x)
+    else:
+        use(x)
+
 

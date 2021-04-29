@@ -104,7 +104,10 @@ class ControlFlowNode extends @cil_controlflow_node {
   Type getType() { none() }
 
   /** Holds if this control flow node has more than one predecessor. */
-  predicate isJoin() { count(getAPredecessor()) > 1 }
+  predicate isJoin() { strictcount(this.getAPredecessor()) > 1 }
+
+  /** Holds if this control flow node has more than one successor. */
+  predicate isBranch() { strictcount(this.getASuccessor()) > 1 }
 }
 
 /**
@@ -122,13 +125,21 @@ private newtype TFlowType =
   TFalseFlow()
 
 /** A type of control flow. Either normal flow (`NormalFlow`), true flow (`TrueFlow`) or false flow (`FalseFlow`). */
-abstract class FlowType extends TFlowType { abstract string toString(); }
+abstract class FlowType extends TFlowType {
+  abstract string toString();
+}
 
 /** Normal control flow. */
-class NormalFlow extends FlowType, TNormalFlow { override string toString() { result = "" } }
+class NormalFlow extends FlowType, TNormalFlow {
+  override string toString() { result = "" }
+}
 
 /** True control flow. */
-class TrueFlow extends FlowType, TTrueFlow { override string toString() { result = "true" } }
+class TrueFlow extends FlowType, TTrueFlow {
+  override string toString() { result = "true" }
+}
 
 /** False control flow. */
-class FalseFlow extends FlowType, TTrueFlow { override string toString() { result = "false" } }
+class FalseFlow extends FlowType, TFalseFlow {
+  override string toString() { result = "false" }
+}

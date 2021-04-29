@@ -5,7 +5,7 @@
  * a `null` pointer exception (`NullReferenceException`) may be thrown.
  * Example:
  *
- * ```
+ * ```csharp
  * void M(string s) {
  *   if (s != null) {
  *     ...
@@ -19,45 +19,60 @@
 
 import csharp
 private import ControlFlow
+private import internal.CallableReturns
 private import semmle.code.csharp.commons.Assertions
-private import semmle.code.csharp.commons.ComparisonTest
 private import semmle.code.csharp.controlflow.Guards as G
 private import semmle.code.csharp.controlflow.Guards::AbstractValues
-private import semmle.code.csharp.dataflow.SSA
 private import semmle.code.csharp.frameworks.System
 private import semmle.code.csharp.frameworks.Test
 
 /** An expression that may be `null`. */
 class MaybeNullExpr extends Expr {
   MaybeNullExpr() {
-    this instanceof NullLiteral
+    G::Internal::nullValue(this)
     or
-    this.(ConditionalExpr).getThen() instanceof MaybeNullExpr
-    or
-    this.(ConditionalExpr).getElse() instanceof MaybeNullExpr
+    this instanceof AsExpr
     or
     this.(AssignExpr).getRValue() instanceof MaybeNullExpr
     or
     this.(Cast).getExpr() instanceof MaybeNullExpr
     or
-    this instanceof AsExpr
+    this =
+      any(ConditionalExpr ce |
+        ce.getThen() instanceof MaybeNullExpr
+        or
+        ce.getElse() instanceof MaybeNullExpr
+      )
+    or
+    this.(NullCoalescingExpr).getRightOperand() instanceof MaybeNullExpr
   }
 }
 
 /** An expression that is always `null`. */
 class AlwaysNullExpr extends Expr {
   AlwaysNullExpr() {
-    this instanceof NullLiteral
+    G::Internal::nullValue(this)
     or
-    this = any(ConditionalExpr ce |
-        ce.getThen() instanceof AlwaysNullExpr and
-        ce.getElse() instanceof AlwaysNullExpr
-      )
+    exists(AlwaysNullExpr e | G::Internal::nullValueImpliedUnary(e, this))
     or
-    this.(AssignExpr).getRValue() instanceof AlwaysNullExpr
+    exists(AlwaysNullExpr e1, AlwaysNullExpr e2 | G::Internal::nullValueImpliedBinary(e1, e2, this))
     or
-    this.(Cast).getExpr() instanceof AlwaysNullExpr
+    this =
+      any(Ssa::Definition def |
+        forex(Ssa::Definition u | u = def.getAnUltimateDefinition() | nullDef(u))
+      ).getARead()
+    or
+    exists(Callable target |
+      this.(Call).getTarget() = target and
+      not target.(Virtualizable).isVirtual() and
+      alwaysNullCallable(target)
+    )
   }
+}
+
+/** Holds if SSA definition `def` is always `null`. */
+private predicate nullDef(Ssa::ExplicitDefinition def) {
+  def.getADefinition().getSource() instanceof AlwaysNullExpr
 }
 
 /** An expression that is never `null`. */
@@ -65,24 +80,33 @@ class NonNullExpr extends Expr {
   NonNullExpr() {
     G::Internal::nonNullValue(this)
     or
-    exists(NonNullExpr mid | G::Internal::nonNullValueImplied(mid, this))
+    exists(NonNullExpr mid | G::Internal::nonNullValueImpliedUnary(mid, this))
     or
     this instanceof G::NullGuardedExpr
     or
-    exists(Ssa::Definition def | nonNullDef(def) | this = def.getARead())
+    this =
+      any(Ssa::Definition def |
+        forex(Ssa::Definition u | u = def.getAnUltimateDefinition() | nonNullDef(u))
+      ).getARead()
+    or
+    exists(Callable target |
+      this.(Call).getTarget() = target and
+      not target.(Virtualizable).isVirtual() and
+      alwaysNotNullCallable(target) and
+      not this.(QualifiableExpr).isConditional()
+    )
   }
 }
 
 /** Holds if SSA definition `def` is never `null`. */
-private predicate nonNullDef(Ssa::Definition v) {
-  v.(Ssa::ExplicitDefinition).getADefinition().getSource() instanceof NonNullExpr
+private predicate nonNullDef(Ssa::ExplicitDefinition def) {
+  def.getADefinition().getSource() instanceof NonNullExpr
   or
-  exists(AssignableDefinition ad | ad = v.(Ssa::ExplicitDefinition).getADefinition() |
-    ad instanceof AssignableDefinitions::IsPatternDefinition
+  exists(AssignableDefinition ad | ad = def.getADefinition() |
+    ad instanceof AssignableDefinitions::PatternDefinition
     or
-    ad instanceof AssignableDefinitions::TypeCasePatternDefinition
-    or
-    ad = any(AssignableDefinitions::LocalVariableDefinition d |
+    ad =
+      any(AssignableDefinitions::LocalVariableDefinition d |
         d.getExpr() = any(SpecificCatchClause scc).getVariableDeclExpr()
         or
         d.getExpr() = any(ForeachStmt fs).getAVariableDeclExpr()
@@ -105,7 +129,7 @@ private predicate dereferenceAt(BasicBlock bb, int i, Ssa::Definition def, Deref
 private predicate exprImpliesSsaDef(
   Expr e, G::AbstractValue vExpr, Ssa::Definition def, G::AbstractValue vDef
 ) {
-  exists(G::Internal::Guard g | G::Internal::impliesSteps(e, vExpr, g, vDef) |
+  exists(G::Guard g | G::Internal::impliesSteps(e, vExpr, g, vDef) |
     g = def.getARead()
     or
     g = def.(Ssa::ExplicitDefinition).getADefinition().getTargetAccess()
@@ -121,7 +145,7 @@ private predicate ensureNotNullAt(BasicBlock bb, int i, Ssa::Definition def) {
     G::Internal::asserts(bb.getNode(i).getElement(), e, v)
   |
     exprImpliesSsaDef(e, v, def, nv) and
-    not nv.isNull()
+    nv.isNonNull()
   )
 }
 
@@ -154,48 +178,77 @@ private predicate isMaybeNullArgument(Ssa::ExplicitDefinition def, MaybeNullExpr
     pdef = def.getADefinition()
   |
     p = pdef.getParameter().getSourceDeclaration() and
-    p.getAnAssignedArgument() = arg and
+    arg = p.getAnAssignedArgument() and
+    not arg.getEnclosingCallable().getEnclosingCallable*() instanceof TestMethod
+  )
+}
+
+private predicate isNullDefaultArgument(Ssa::ExplicitDefinition def, AlwaysNullExpr arg) {
+  exists(AssignableDefinitions::ImplicitParameterDefinition pdef, Parameter p |
+    pdef = def.getADefinition()
+  |
+    p = pdef.getParameter().getSourceDeclaration() and
+    arg = p.getDefaultValue() and
     not arg.getEnclosingCallable().getEnclosingCallable*() instanceof TestMethod
   )
 }
 
 /** Holds if `def` is an SSA definition that may be `null`. */
 private predicate defMaybeNull(Ssa::Definition def, string msg, Element reason) {
-  // A variable compared to `null` might be `null`
-  exists(G::DereferenceableExpr de | de = def.getARead() |
-    reason = de.getANullCheck(_, true) and
-    msg = "as suggested by $@ null check" and
-    not de = any(Ssa::PseudoDefinition pdef).getARead() and
-    strictcount(Element e | e = any(Ssa::Definition def0 | de = def0.getARead()).getElement()) = 1 and
-    not nonNullDef(def) and
-    // Don't use a check as reason if there is a `null` assignment
-    // or argument
-    not def.(Ssa::ExplicitDefinition).getADefinition().getSource() instanceof MaybeNullExpr and
-    not isMaybeNullArgument(def, _)
-  )
-  or
-  // A parameter might be `null` if there is a `null` argument somewhere
-  isMaybeNullArgument(def, reason) and
+  not nonNullDef(def) and
   (
-    if reason instanceof AlwaysNullExpr
-    then msg = "because of $@ null argument"
-    else msg = "because of $@ potential null argument"
+    // A variable compared to `null` might be `null`
+    exists(G::DereferenceableExpr de | de = def.getARead() |
+      reason = de.getANullCheck(_, true) and
+      msg = "as suggested by $@ null check" and
+      not de = any(Ssa::PseudoDefinition pdef).getARead() and
+      strictcount(Element e | e = any(Ssa::Definition def0 | de = def0.getARead()).getElement()) = 1 and
+      // Don't use a check as reason if there is a `null` assignment
+      // or argument
+      not def.(Ssa::ExplicitDefinition).getADefinition().getSource() instanceof MaybeNullExpr and
+      not isMaybeNullArgument(def, _)
+    )
+    or
+    // A parameter might be `null` if there is a `null` argument somewhere
+    isMaybeNullArgument(def, reason) and
+    (
+      if reason instanceof AlwaysNullExpr
+      then msg = "because of $@ null argument"
+      else msg = "because of $@ potential null argument"
+    )
+    or
+    isNullDefaultArgument(def, reason) and msg = "because the parameter has a null default value"
+    or
+    // If the source of a variable is `null` then the variable may be `null`
+    exists(AssignableDefinition adef | adef = def.(Ssa::ExplicitDefinition).getADefinition() |
+      adef.getSource() instanceof MaybeNullExpr and
+      reason = adef.getExpr() and
+      msg = "because of $@ assignment"
+    )
+    or
+    // A variable of nullable type may be null
+    exists(Dereference d | dereferenceAt(_, _, def, d) |
+      d.hasNullableType() and
+      not def instanceof Ssa::PseudoDefinition and
+      reason = def.getSourceVariable().getAssignable() and
+      msg = "because it has a nullable type"
+    )
   )
-  or
-  // If the source of a variable is `null` then the variable may be `null`
-  exists(AssignableDefinition adef | adef = def.(Ssa::ExplicitDefinition).getADefinition() |
-    adef.getSource() instanceof MaybeNullExpr and
-    reason = adef.getExpr() and
-    msg = "because of $@ assignment"
-  )
-  or
-  // A variable of nullable type may be null
-  exists(Dereference d | dereferenceAt(_, _, def, d) |
-    d.hasNullableType() and
-    not def instanceof Ssa::PseudoDefinition and
-    reason = def.getSourceVariable().getAssignable() and
-    msg = "because it has a nullable type"
-  )
+}
+
+pragma[noinline]
+private predicate sourceVariableMaybeNull(Ssa::SourceVariable v) {
+  defMaybeNull(v.getAnSsaDefinition(), _, _)
+}
+
+pragma[noinline]
+private predicate defNullImpliesStep0(
+  Ssa::SourceVariable v, Ssa::Definition def1, BasicBlock bb1, BasicBlock bb2
+) {
+  sourceVariableMaybeNull(v) and
+  def1.getSourceVariable() = v and
+  def1.isLiveAtEndOfBlock(bb1) and
+  bb2 = bb1.getASuccessor()
 }
 
 /**
@@ -206,10 +259,7 @@ private predicate defMaybeNull(Ssa::Definition def, string msg, Element reason) 
 private predicate defNullImpliesStep(
   Ssa::Definition def1, BasicBlock bb1, Ssa::Definition def2, BasicBlock bb2
 ) {
-  exists(Ssa::SourceVariable v |
-    defMaybeNull(v.getAnSsaDefinition(), _, _) and
-    def1.getSourceVariable() = v
-  |
+  exists(Ssa::SourceVariable v | defNullImpliesStep0(v, def1, bb1, bb2) |
     def2.(Ssa::PseudoDefinition).getAnInput() = def1 and
     bb2 = def2.getBasicBlock()
     or
@@ -219,14 +269,12 @@ private predicate defNullImpliesStep(
       bb2 = def.getBasicBlock()
     )
   ) and
-  def1.isLiveAtEndOfBlock(bb1) and
   not ensureNotNullAt(bb1, _, def1) and
-  bb2 = bb1.getASuccessor() and
   not exists(SuccessorTypes::ConditionalSuccessor s, NullValue nv |
     bb1.getLastNode() = getANullCheck(def1, s, nv).getAControlFlowNode()
   |
     bb2 = bb1.getASuccessorByType(s) and
-    not nv.isNull()
+    nv.isNonNull()
   )
 }
 
@@ -313,11 +361,8 @@ abstract class PathNode extends TPathNode {
 
 private class SourcePathNode extends PathNode, TSourcePathNode {
   private Ssa::Definition def;
-
   private string msg;
-
   private Element reason;
-
   private boolean isNullArgument;
 
   SourcePathNode() { this = TSourcePathNode(def, msg, reason, isNullArgument) }
@@ -353,7 +398,6 @@ private class SourcePathNode extends PathNode, TSourcePathNode {
 
 private class InternalPathNode extends PathNode, TInternalPathNode {
   private Ssa::Definition def;
-
   private BasicBlock bb;
 
   InternalPathNode() { this = TInternalPathNode(def, bb) }
@@ -373,11 +417,8 @@ private class InternalPathNode extends PathNode, TInternalPathNode {
 
 private class SinkPathNode extends PathNode, TSinkPathNode {
   private Ssa::Definition def;
-
   private BasicBlock bb;
-
   private int i;
-
   private Dereference d;
 
   SinkPathNode() { this = TSinkPathNode(def, bb, i, d) }
@@ -430,8 +471,9 @@ private predicate defReaches(Ssa::Definition def, ControlFlow::Node cfn, boolean
   (always = true or always = false)
   or
   exists(ControlFlow::Node mid | defReaches(def, mid, always) |
-    Ssa::Internal::adjacentReadPairSameVar(mid, cfn) and
-    not mid = any(Dereference d |
+    Ssa::Internal::adjacentReadPairSameVar(_, mid, cfn) and
+    not mid =
+      any(Dereference d |
         if always = true
         then d.isAlwaysNull(def.getSourceVariable())
         else d.isMaybeNull(def, _, _, _, _)
@@ -505,7 +547,8 @@ class Dereference extends G::DereferenceableExpr {
     this = v.getAnAccess() and
     // Exclude fields, properties, and captured variables, as they may not have an
     // accurate SSA representation
-    v.getAssignable() = any(LocalScopeVariable lsv |
+    v.getAssignable() =
+      any(LocalScopeVariable lsv |
         strictcount(Callable c |
           c = any(AssignableDefinition ad | ad.getTarget() = lsv).getEnclosingCallable()
         ) = 1

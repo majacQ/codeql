@@ -1,6 +1,12 @@
+/**
+ * Provides a library for reasoning about control flow at the granularity of
+ * individual nodes in the control-flow graph.
+ */
+
 import cpp
 import BasicBlocks
 private import semmle.code.cpp.controlflow.internal.ConstantExprs
+private import semmle.code.cpp.controlflow.internal.CFG
 
 /**
  * A control-flow node is either a statement or an expression; in addition,
@@ -28,8 +34,10 @@ private import semmle.code.cpp.controlflow.internal.ConstantExprs
  * `Handler`. There are no edges from function calls to `Handler`s.
  */
 class ControlFlowNode extends Locatable, ControlFlowNodeBase {
+  /** Gets a direct successor of this control-flow node, if any. */
   ControlFlowNode getASuccessor() { successors_adapted(this, result) }
 
+  /** Gets a direct predecessor of this control-flow node, if any. */
   ControlFlowNode getAPredecessor() { this = result.getASuccessor() }
 
   /** Gets the function containing this control-flow node. */
@@ -57,7 +65,7 @@ class ControlFlowNode extends Locatable, ControlFlowNodeBase {
    * taken when this expression is true.
    */
   ControlFlowNode getATrueSuccessor() {
-    truecond_base(this, result) and
+    qlCFGTrueSuccessor(this, result) and
     result = getASuccessor()
   }
 
@@ -66,94 +74,15 @@ class ControlFlowNode extends Locatable, ControlFlowNodeBase {
    * taken when this expression is false.
    */
   ControlFlowNode getAFalseSuccessor() {
-    falsecond_base(this,result) and
+    qlCFGFalseSuccessor(this, result) and
     result = getASuccessor()
   }
 
-  BasicBlock getBasicBlock() {
-    result.getANode() = this
-  }
+  /** Gets the `BasicBlock` containing this control-flow node. */
+  BasicBlock getBasicBlock() { result.getANode() = this }
 }
 
-import Cached
-private cached module Cached {
-  // The base case of `reachable` is factored out for performance. If it's
-  // written in-line in `reachable`, the compiler inserts a `n instanceof
-  // ControlFlowNode` check because the `not ... and not ...` case doesn't
-  // otherwise bind `n`. The problem is that this check is inserted at the
-  // outermost level of this predicate, so it covers all cases including the
-  // recursive case. The optimizer doesn't eliminate the check even though it's
-  // redundant, and having the check leads to needless extra computation and a
-  // risk of bad join orders.
-  private predicate reachableBaseCase(ControlFlowNode n) {
-    exists(Function f | f.getEntryPoint() = n)
-    or
-    // Okay to use successors_extended directly here
-    (not successors_extended(_,n) and not successors_extended(n,_))
-    or
-    n instanceof Handler
-  }
-
-  /**
-   * Holds if the control-flow node `n` is reachable, meaning that either
-   * it is an entry point, or there exists a path in the control-flow
-   * graph of its function that connects an entry point to it.
-   * Compile-time constant conditions are taken into account, so that
-   * the call to `f` is not reachable in `if (0) f();` even if the
-   * `if` statement as a whole is reachable.
-   */
-  cached
-  predicate reachable(ControlFlowNode n)
-  {
-    reachableBaseCase(n)
-    or
-    reachable(n.getAPredecessor())
-  }
-
-  /** Holds if `condition` always evaluates to a nonzero value. */
-  cached
-  predicate conditionAlwaysTrue(Expr condition) {
-    conditionAlways(condition, true)
-  }
-
-  /** Holds if `condition` always evaluates to zero. */
-  cached
-  predicate conditionAlwaysFalse(Expr condition) {
-    conditionAlways(condition, false)
-    or
-    // If a loop condition evaluates to false upon entry, it will always
-    // be false
-    loopConditionAlwaysUponEntry(_, condition, false)
-  }
-
-  /**
-   * The condition `condition` for the loop `loop` is provably `true` upon entry.
-   * That is, at least one iteration of the loop is guaranteed.
-   */
-  cached
-  predicate loopConditionAlwaysTrueUponEntry(ControlFlowNode loop, Expr condition) {
-    loopConditionAlwaysUponEntry(loop, condition, true)
-  }
-}
-
-private predicate conditionAlways(Expr condition, boolean b) {
-  exists(ConditionEvaluator x, int val |
-    val = x.getValue(condition) |
-    val != 0 and b = true
-    or
-    val = 0 and b = false
-  )
-}
-
-private predicate loopConditionAlwaysUponEntry(ControlFlowNode loop, Expr condition, boolean b) {
-  exists(LoopEntryConditionEvaluator x, int val |
-    x.isLoopEntry(condition, loop) and
-    val = x.getValue(condition) |
-    val != 0 and b = true
-    or
-    val = 0 and b = false
-  )
-}
+import ControlFlowGraphPublic
 
 /**
  * An element that is convertible to `ControlFlowNode`. This class is similar
@@ -163,15 +92,24 @@ private predicate loopConditionAlwaysUponEntry(ControlFlowNode loop, Expr condit
  * This class can be used as base class for classes that want to inherit the
  * extent of `ControlFlowNode` without inheriting its public member predicates.
  */
-class ControlFlowNodeBase extends ElementBase, @cfgnode {
+class ControlFlowNodeBase extends ElementBase, @cfgnode { }
+
+/**
+ * DEPRECATED: Use `ControlFlowNode.getATrueSuccessor()` instead.
+ * Holds when `n2` is a control-flow node such that the control-flow
+ * edge `(n1, n2)` may be taken when `n1` is an expression that is true.
+ */
+deprecated predicate truecond_base(ControlFlowNodeBase n1, ControlFlowNodeBase n2) {
+  qlCFGTrueSuccessor(n1, n2)
 }
 
-predicate truecond_base(ControlFlowNodeBase n1, ControlFlowNodeBase n2) {
-  truecond(unresolveElement(n1), unresolveElement(n2))
-}
-
-predicate falsecond_base(ControlFlowNodeBase n1, ControlFlowNodeBase n2) {
-  falsecond(unresolveElement(n1), unresolveElement(n2))
+/**
+ * DEPRECATED: Use `ControlFlowNode.getAFalseSuccessor()` instead.
+ * Holds when `n2` is a control-flow node such that the control-flow
+ * edge `(n1, n2)` may be taken when `n1` is an expression that is false.
+ */
+deprecated predicate falsecond_base(ControlFlowNodeBase n1, ControlFlowNodeBase n2) {
+  qlCFGFalseSuccessor(n1, n2)
 }
 
 /**
@@ -198,11 +136,10 @@ abstract class AdditionalControlFlowEdge extends ControlFlowNodeBase {
 /**
  * Holds if there is a control-flow edge from `source` to `target` in either
  * the extractor-generated control-flow graph or in a subclass of
- * `AdditionalControlFlowEdge`. Use this relation instead of `successors`.
+ * `AdditionalControlFlowEdge`. Use this relation instead of `qlCFGSuccessor`.
  */
-predicate successors_extended(
-    ControlFlowNodeBase source, ControlFlowNodeBase target) {
-  successors(unresolveElement(source), unresolveElement(target))
+predicate successors_extended(ControlFlowNodeBase source, ControlFlowNodeBase target) {
+  qlCFGSuccessor(source, target)
   or
   source.(AdditionalControlFlowEdge).getAnEdgeTarget() = target
 }

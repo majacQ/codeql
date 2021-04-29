@@ -13,23 +13,36 @@
  *       external/cwe/cwe-120
  *       external/cwe/cwe-122
  */
+
 import cpp
+import semmle.code.cpp.dataflow.DataFlow
+import semmle.code.cpp.models.interfaces.ArrayFunction
+import semmle.code.cpp.models.interfaces.Allocation
 
-class MallocCall extends FunctionCall {
-  MallocCall() { this.getTarget().hasGlobalName("malloc") }
-
-  Expr getAllocatedSize() {
-    if this.getArgument(0) instanceof VariableAccess then
-      exists(LocalScopeVariable v, ControlFlowNode def |
-        definitionUsePair(v, def, this.getArgument(0)) and
-        exprDefinition(v, def, result))
-    else
-      result = this.getArgument(0)
-  }
-}
-
-predicate terminationProblem(MallocCall malloc, string msg) {
-  malloc.getAllocatedSize() instanceof StrlenCall and
+predicate terminationProblem(AllocationExpr malloc, string msg) {
+  // malloc(strlen(...))
+  exists(StrlenCall strlen | DataFlow::localExprFlow(strlen, malloc.getSizeExpr())) and
+  // flows to a call that implies this is a null-terminated string
+  exists(ArrayFunction af, FunctionCall fc, int arg |
+    DataFlow::localExprFlow(malloc, fc.getArgument(arg)) and
+    fc.getTarget() = af and
+    (
+      // flows into null terminated string argument
+      af.hasArrayWithNullTerminator(arg)
+      or
+      // flows into likely null terminated string argument (such as `strcpy`, `strcat`)
+      af.hasArrayWithUnknownSize(arg)
+      or
+      // flows into string argument to a formatting function (such as `printf`)
+      exists(int n, FormatLiteral fl |
+        fc.getArgument(arg) = fc.(FormattingFunctionCall).getConversionArgument(n) and
+        fl = fc.(FormattingFunctionCall).getFormat() and
+        fl.getConversionType(n) instanceof PointerType and // `%s`, `%ws` etc
+        not fl.getConversionType(n) instanceof VoidPointerType and // exclude: `%p`
+        not fl.hasPrecision(n) // exclude: `%.*s`
+      )
+    )
+  ) and
   msg = "This allocation does not include space to null-terminate the string."
 }
 

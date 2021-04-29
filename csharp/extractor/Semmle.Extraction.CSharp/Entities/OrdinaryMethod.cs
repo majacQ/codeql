@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.CSharp.Populators;
+using System.IO;
 using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
@@ -11,6 +12,8 @@ namespace Semmle.Extraction.CSharp.Entities
             : base(cx, init) { }
 
         public override string Name => symbol.GetName();
+
+        protected override IMethodSymbol BodyDeclaringSymbol => symbol.PartialImplementationPart ?? symbol;
 
         public IMethodSymbol SourceDeclaration
         {
@@ -23,14 +26,14 @@ namespace Semmle.Extraction.CSharp.Entities
 
         public override Microsoft.CodeAnalysis.Location ReportingLocation => symbol.GetSymbolLocation();
 
-        public override void Populate()
+        public override void Populate(TextWriter trapFile)
         {
-            PopulateMethod();
-            ExtractModifiers();
-            ContainingType.ExtractGenerics();
+            PopulateMethod(trapFile);
+            PopulateModifiers(trapFile);
+            ContainingType.PopulateGenerics();
 
             var returnType = Type.Create(Context, symbol.ReturnType);
-            Context.Emit(Tuples.methods(this, Name, ContainingType, returnType.TypeRef, OriginalDefinition));
+            trapFile.methods(this, Name, ContainingType, returnType.TypeRef, OriginalDefinition);
 
             if (IsSourceDeclaration)
                 foreach (var declaration in symbol.DeclaringSyntaxReferences.Select(s => s.GetSyntax()).OfType<MethodDeclarationSyntax>())
@@ -40,15 +43,15 @@ namespace Semmle.Extraction.CSharp.Entities
                 }
 
             foreach (var l in Locations)
-                Context.Emit(Tuples.method_location(this, l));
+                trapFile.method_location(this, l);
 
-            ExtractGenerics();
-            Overrides();
-            ExtractRefReturn();
-            ExtractCompilerGenerated();
+            PopulateGenerics(trapFile);
+            Overrides(trapFile);
+            ExtractRefReturn(trapFile);
+            ExtractCompilerGenerated(trapFile);
         }
 
-        public new static OrdinaryMethod Create(Context cx, IMethodSymbol method) => OrdinaryMethodFactory.Instance.CreateEntity(cx, method);
+        public new static OrdinaryMethod Create(Context cx, IMethodSymbol method) => OrdinaryMethodFactory.Instance.CreateEntityFromSymbol(cx, method);
 
         class OrdinaryMethodFactory : ICachedEntityFactory<IMethodSymbol, OrdinaryMethod>
         {

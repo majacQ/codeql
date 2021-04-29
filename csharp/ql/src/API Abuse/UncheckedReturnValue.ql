@@ -47,12 +47,14 @@ predicate dubious(Method m, int percentage) {
   not designedForChaining(m) and
   exists(int used, int total, Method target |
     target = m.getSourceDeclaration() and
-    used = count(MethodCall mc |
+    used =
+      count(MethodCall mc |
         mc.getTarget().getSourceDeclaration() = target and
         not mc instanceof DiscardedMethodCall and
         (methodHasGenericReturnType(m) implies m.getReturnType() = mc.getTarget().getReturnType())
       ) and
-    total = count(MethodCall mc |
+    total =
+      count(MethodCall mc |
         mc.getTarget().getSourceDeclaration() = target and
         (methodHasGenericReturnType(m) implies m.getReturnType() = mc.getTarget().getReturnType())
       ) and
@@ -64,7 +66,8 @@ predicate dubious(Method m, int percentage) {
 }
 
 int chainedUses(Method m) {
-  result = count(MethodCall mc, MethodCall qual |
+  result =
+    count(MethodCall mc, MethodCall qual |
       m = mc.getTarget() and
       hasQualifierAndTarget(mc, qual, qual.getTarget())
     )
@@ -89,7 +92,14 @@ predicate whitelist(Method m) {
 }
 
 class DiscardedMethodCall extends MethodCall {
-  DiscardedMethodCall() { this.getParent() instanceof ExprStmt }
+  DiscardedMethodCall() {
+    this.getParent() instanceof ExprStmt
+    or
+    exists(Callable c |
+      this = c.getExpressionBody() and
+      not c.canReturn(this)
+    )
+  }
 
   string query() {
     exists(Method m |

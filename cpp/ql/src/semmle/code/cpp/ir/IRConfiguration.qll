@@ -1,19 +1,5 @@
-import cpp
-
-private newtype TIRConfiguration = MkIRConfiguration()
-
 /**
- * The query can extend this class to control which functions have IR generated for them.
+ * Module used to configure the IR generation process.
  */
-class IRConfiguration extends TIRConfiguration {
-  string toString() {
-    result = "IRConfiguration"
-  }
 
-  /**
-   * Holds if IR should be created for function `func`. By default, holds for all functions.
-   */
-  predicate shouldCreateIRForFunction(Function func) {
-    any()
-  }
-}
+import implementation.IRConfiguration

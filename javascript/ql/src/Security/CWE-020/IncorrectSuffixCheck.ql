@@ -31,12 +31,25 @@ class IndexOfCall extends DataFlow::MethodCallNode {
   }
 
   /**
+   * Holds if `recv` is the local source of the receiver of this call, and `m`
+   * is the name of the invoked method.
+   */
+  private predicate receiverAndMethodName(DataFlow::Node recv, string m) {
+    this.getReceiver().getALocalSource() = recv and
+    this.getMethodName() = m
+  }
+
+  /**
    * Gets an `indexOf` call with the same receiver, argument, and method name, including this call itself.
    */
   IndexOfCall getAnEquivalentIndexOfCall() {
-    result.getReceiver().getALocalSource() = this.getReceiver().getALocalSource() and
-    result.getArgument(0).getALocalSource() = this.getArgument(0).getALocalSource() and
-    result.getMethodName() = this.getMethodName()
+    exists(DataFlow::Node recv, string m |
+      this.receiverAndMethodName(recv, m) and result.receiverAndMethodName(recv, m)
+    |
+      result.getArgument(0).getALocalSource() = this.getArgument(0).getALocalSource()
+      or
+      result.getArgument(0).getStringValue() = this.getArgument(0).getStringValue()
+    )
   }
 
   /**
@@ -76,7 +89,7 @@ predicate isDerivedFromLength(DataFlow::Node length, DataFlow::Node operand) {
   exists(IndexOfCall call | operand = call.getAnOperand() |
     length = getStringSource(operand).getAPropertyRead("length")
     or
-    exists(string val | val = operand.asExpr().getStringValue() |
+    exists(string val | val = operand.getStringValue() |
       // Find a literal length with the same string constant
       exists(LiteralLengthExpr lengthExpr |
         lengthExpr.getContainer() = call.getContainer() and
@@ -95,9 +108,9 @@ predicate isDerivedFromLength(DataFlow::Node length, DataFlow::Node operand) {
   or
   isDerivedFromLength(length.getAPredecessor(), operand)
   or
-  exists(SubExpr sub |
-    isDerivedFromLength(sub.getAnOperand().flow(), operand) and
-    length = sub.flow()
+  exists(BinaryExpr expr | expr instanceof SubExpr or expr instanceof AddExpr |
+    isDerivedFromLength(expr.getAnOperand().flow(), operand) and
+    length = expr.flow()
   )
 }
 
@@ -109,7 +122,6 @@ predicate isDerivedFromLength(DataFlow::Node length, DataFlow::Node operand) {
  */
 class UnsafeIndexOfComparison extends EqualityTest {
   IndexOfCall indexOf;
-
   DataFlow::Node testedValue;
 
   UnsafeIndexOfComparison() {
@@ -138,6 +150,16 @@ class UnsafeIndexOfComparison extends EqualityTest {
         or
         not test.isInclusive() and
         value = -1
+      )
+    ) and
+    // Check for indexOf being <0, or <=-1
+    not exists(RelationalComparison test |
+      test.getLesserOperand() = indexOf.getAnEquivalentIndexOfCall().getAUse() and
+      exists(int value | value = test.getGreaterOperand().getIntValue() |
+        value < 0
+        or
+        not test.isInclusive() and
+        value = 0
       )
     )
   }

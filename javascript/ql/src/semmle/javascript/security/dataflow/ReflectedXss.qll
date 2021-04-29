@@ -4,24 +4,9 @@
  */
 
 import javascript
-import semmle.javascript.security.dataflow.RemoteFlowSources
-import semmle.javascript.frameworks.jQuery
 
 module ReflectedXss {
-  /**
-   * A data flow source for XSS vulnerabilities.
-   */
-  abstract class Source extends DataFlow::Node { }
-
-  /**
-   * A data flow sink for XSS vulnerabilities.
-   */
-  abstract class Sink extends DataFlow::Node { }
-
-  /**
-   * A sanitizer for XSS vulnerabilities.
-   */
-  abstract class Sanitizer extends DataFlow::Node { }
+  import ReflectedXssCustomizations::ReflectedXss
 
   /**
    * A taint-tracking configuration for reasoning about XSS.
@@ -37,33 +22,9 @@ module ReflectedXss {
       super.isSanitizer(node) or
       node instanceof Sanitizer
     }
-  }
 
-  /** A third-party controllable request input, considered as a flow source for reflected XSS. */
-  class ThirdPartyRequestInputAccessAsSource extends Source {
-    ThirdPartyRequestInputAccessAsSource() {
-      this.(HTTP::RequestInputAccess).isThirdPartyControllable()
-      or
-      this.(HTTP::RequestHeaderAccess).getAHeaderName() = "referer"
-    }
-  }
-
-  /**
-   * An expression that is sent as part of an HTTP response, considered as an XSS sink.
-   *
-   * We exclude cases where the route handler sets either an unknown content type or
-   * a content type that does not (case-insensitively) contain the string "html". This
-   * is to prevent us from flagging plain-text or JSON responses as vulnerable.
-   */
-  private class HttpResponseSink extends Sink {
-    HttpResponseSink() {
-      exists(HTTP::ResponseSendArgument sendarg | sendarg = asExpr() |
-        forall(HTTP::HeaderDefinition hd |
-          hd = sendarg.getRouteHandler().getAResponseHeader("content-type")
-        |
-          exists(string tp | hd.defines("content-type", tp) | tp.toLowerCase().matches("%html%"))
-        )
-      )
+    override predicate isSanitizerGuard(TaintTracking::SanitizerGuardNode guard) {
+      guard instanceof SanitizerGuard
     }
   }
 }

@@ -5,7 +5,7 @@
 import csharp
 
 module UrlRedirect {
-  import semmle.code.csharp.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
   import semmle.code.csharp.controlflow.Guards
   import semmle.code.csharp.frameworks.system.Web
   import semmle.code.csharp.frameworks.system.web.Mvc
@@ -28,6 +28,11 @@ module UrlRedirect {
   abstract class Sanitizer extends DataFlow::ExprNode { }
 
   /**
+   * A guard for unvalidated URL redirect vulnerabilities.
+   */
+  abstract class SanitizerGuard extends DataFlow::BarrierGuard { }
+
+  /**
    * A taint-tracking configuration for reasoning about unvalidated URL redirect vulnerabilities.
    */
   class TaintTrackingConfiguration extends TaintTracking::Configuration {
@@ -38,10 +43,16 @@ module UrlRedirect {
     override predicate isSink(DataFlow::Node sink) { sink instanceof Sink }
 
     override predicate isSanitizer(DataFlow::Node node) { node instanceof Sanitizer }
+
+    override predicate isSanitizerGuard(DataFlow::BarrierGuard guard) {
+      guard instanceof SanitizerGuard
+    }
   }
 
   /** A source of remote user input. */
-  class RemoteSource extends Source { RemoteSource() { this instanceof RemoteFlowSource } }
+  class RemoteSource extends Source {
+    RemoteSource() { this instanceof RemoteFlowSource }
+  }
 
   /**
    * A URL argument to a call to `HttpResponse.Redirect()` or `Controller.Redirect()`, that is a
@@ -96,12 +107,12 @@ module UrlRedirect {
   /**
    * A URL argument to a call to `UrlHelper.isLocalUrl()` that is a sanitizer for URL redirects.
    */
-  class IsLocalUrlSanitizer extends Sanitizer {
-    IsLocalUrlSanitizer() {
-      exists(MethodCall mc, AbstractValues::BooleanValue v | mc.getTarget().hasName("IsLocalUrl") |
-        mc = this.(GuardedDataFlowNode).getAGuard(mc.getArgument(0), v) and
-        v.getValue() = true
-      )
+  class IsLocalUrlSanitizer extends SanitizerGuard, MethodCall {
+    IsLocalUrlSanitizer() { this.getTarget().hasName("IsLocalUrl") }
+
+    override predicate checks(Expr e, AbstractValue v) {
+      e = this.getArgument(0) and
+      v.(AbstractValues::BooleanValue).getValue() = true
     }
   }
 

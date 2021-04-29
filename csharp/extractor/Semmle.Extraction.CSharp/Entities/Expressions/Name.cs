@@ -54,13 +54,16 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
 
                 case SymbolKind.Local:
                 case SymbolKind.RangeVariable:
-                    return Access.Create(info, target, false, LocalVariable.GetAlreadyCreated(info.Context, target));
+                    return Access.Create(info, target, false, LocalVariable.Create(info.Context, target));
 
                 case SymbolKind.Parameter:
-                    return Access.Create(info, target, false, Parameter.GetAlreadyCreated(info.Context, (IParameterSymbol)target));
+                    return Access.Create(info, target, false, Parameter.Create(info.Context, (IParameterSymbol)target));
+
+                case SymbolKind.Namespace:
+                    return Access.Create(info, target, false, Namespace.Create(info.Context, (INamespaceSymbol)target));
 
                 default:
-                    throw new InternalError(info.Node, "Unhandled identifier kind '{0}'", target.Kind);
+                    throw new InternalError(info.Node, $"Unhandled identifier kind '{target.Kind}'");
             }
         }
     }

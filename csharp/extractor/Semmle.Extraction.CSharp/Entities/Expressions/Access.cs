@@ -18,7 +18,8 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     return ExprKind.FIELD_ACCESS;
 
                 case SymbolKind.Property:
-                    return ExprKind.PROPERTY_ACCESS;
+                    return symbol is IPropertySymbol prop && prop.IsIndexer ?
+                         ExprKind.INDEXER_ACCESS : ExprKind.PROPERTY_ACCESS;
 
                 case SymbolKind.Event:
                     return ExprKind.EVENT_ACCESS;
@@ -33,8 +34,11 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                 case SymbolKind.Parameter:
                     return ExprKind.PARAMETER_ACCESS;
 
+                case SymbolKind.Namespace:
+                    return ExprKind.NAMESPACE_ACCESS;
+
                 default:
-                    cx.ModelError(symbol, "Unhandled access kind '{0}'", symbol.Kind);
+                    cx.ModelError(symbol, $"Unhandled access kind '{symbol.Kind}'");
                     return ExprKind.UNKNOWN;
             }
         }
@@ -42,11 +46,14 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
         Access(ExpressionNodeInfo info, ISymbol symbol, bool implicitThis, IEntity target)
             : base(info.SetKind(AccessKind(info.Context, symbol)))
         {
-            cx.Emit(Tuples.expr_access(this, target));
+            if (!(target is null))
+            {
+                cx.TrapWriter.Writer.expr_access(this, target);
+            }
 
             if (implicitThis && !symbol.IsStatic)
             {
-                This.CreateImplicit(cx, Type.Create(cx, symbol.ContainingType), Location, this, -1);
+                This.CreateImplicit(cx, Entities.Type.Create(cx, symbol.ContainingType), Location, this, -1);
             }
         }
 

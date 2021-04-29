@@ -5,6 +5,7 @@
 private import csharp as csharp
 private import semmle.code.csharp.frameworks.system.Data as Data
 
+/** Definitions relating to the `System.Data.Entity` namespace. */
 module SystemDataEntity {
   /** The `System.Data.Entity` namespace. */
   class Namespace extends csharp::Namespace {
@@ -15,7 +16,9 @@ module SystemDataEntity {
   }
 
   /** A class in the `System.Data.Entity` namespace. */
-  class Class extends csharp::Class { Class() { this.getNamespace() instanceof Namespace } }
+  class Class extends csharp::Class {
+    Class() { this.getNamespace() instanceof Namespace }
+  }
 
   /** The `System.Data.Entity.DbSet` class. */
   class Database extends Class {
@@ -47,7 +50,9 @@ module SystemDataEntity {
   }
 
   /** The `System.Data.Entity.DbContext` class. */
-  class DbContext extends Class { DbContext() { this.hasName("DbContext") } }
+  class DbContext extends Class {
+    DbContext() { this.hasName("DbContext") }
+  }
 
   /** A user provided sub type of `DbContext`. */
   class CustomDbContext extends csharp::Class {
@@ -74,6 +79,7 @@ module SystemDataEntity {
   }
 }
 
+/** Definitions relating to the `System.Data.Entity.Infrastructure` namespace. */
 module SystemDataEntityInfrastructure {
   /** The `System.Data.Entity.Infrastructure` namespace. */
   class Namespace extends csharp::Namespace {
@@ -84,7 +90,9 @@ module SystemDataEntityInfrastructure {
   }
 
   /** A class in the `System.Data.Entity.Infrastructure` namespace. */
-  class Class extends csharp::Class { Class() { this.getNamespace() instanceof Namespace } }
+  class Class extends csharp::Class {
+    Class() { this.getNamespace() instanceof Namespace }
+  }
 
   /** A class that extends or is constructed from `System.Entity.Data.Infrastructure.DbRawSqlQuery`. */
   class DbRawSqlQuery extends Class {

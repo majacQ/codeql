@@ -5,8 +5,8 @@
 import csharp
 
 module CodeInjection {
-  import semmle.code.csharp.dataflow.flowsources.Remote
-  import semmle.code.csharp.dataflow.flowsources.Local
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Local
   import semmle.code.csharp.frameworks.system.codedom.Compiler
   import semmle.code.csharp.security.Sanitizers
 
@@ -39,10 +39,14 @@ module CodeInjection {
   }
 
   /** A source of remote user input. */
-  class RemoteSource extends Source { RemoteSource() { this instanceof RemoteFlowSource } }
+  class RemoteSource extends Source {
+    RemoteSource() { this instanceof RemoteFlowSource }
+  }
 
   /** A source of local user input. */
-  class LocalSource extends Source { LocalSource() { this instanceof LocalFlowSource } }
+  class LocalSource extends Source {
+    LocalSource() { this instanceof LocalFlowSource }
+  }
 
   private class SimpleTypeSanitizer extends Sanitizer, SimpleTypeSanitizedExpr { }
 

@@ -1,3 +1,6 @@
+using System.IO;
+using Microsoft.CodeAnalysis;
+
 namespace Semmle.Extraction
 {
     /// <summary>
@@ -14,27 +17,48 @@ namespace Semmle.Extraction
 
         public Label Label { get; set; }
 
-        public abstract Microsoft.CodeAnalysis.Location ReportingLocation { get; }
+        public abstract Microsoft.CodeAnalysis.Location? ReportingLocation { get; }
 
         public override string ToString() => Label.ToString();
 
-        public abstract void Populate();
+        public abstract void Populate(TextWriter trapFile);
+
+        /// <summary>
+        /// For debugging.
+        /// </summary>
+        public string DebugContents
+        {
+            get
+            {
+                using (var trap = new StringWriter())
+                {
+                    Populate(trap);
+                    return trap.ToString();
+                }
+            }
+        }
 
         public Context Context
         {
-            get; private set;
+            get;
         }
 
         public Initializer symbol
         {
-            get; private set;
+            get;
         }
 
-        object ICachedEntity.UnderlyingObject => symbol;
+        object? ICachedEntity.UnderlyingObject => symbol;
 
-        public abstract IId Id
+        public Initializer UnderlyingObject => symbol;
+
+        public abstract void WriteId(System.IO.TextWriter trapFile);
+
+        public virtual void WriteQuotedId(TextWriter trapFile)
         {
-            get;
+            trapFile.Write("@\"");
+            WriteId(trapFile);
+            trapFile.Write('\"');
         }
 
         public abstract bool NeedsPopulation
@@ -42,24 +66,30 @@ namespace Semmle.Extraction
             get;
         }
 
-        /// <summary>
-        /// Runs the given action <paramref name="a"/>, guarding for trap duplication
-        /// based on the ID an location of this entity.
-        /// </summary>
-        protected void WithDuplicationGuard(System.Action a, IEntity location)
-        {
-            var key = new Key(this, location);
-            Context.WithDuplicationGuard(key, a);
-        }
+        public override int GetHashCode() => symbol is null ? 0 : symbol.GetHashCode();
 
-        public override int GetHashCode() => symbol.GetHashCode();
-
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             var other = obj as CachedEntity<Initializer>;
             return other?.GetType() == GetType() && Equals(other.symbol, symbol);
         }
 
         public abstract TrapStackBehaviour TrapStackBehaviour { get; }
+    }
+
+    /// <summary>
+    /// A class used to wrap an `ISymbol` object, which uses `SymbolEqualityComparer.Default`
+    /// for comparison.
+    /// </summary>
+    public sealed class SymbolEqualityWrapper
+    {
+        public ISymbol Symbol { get; }
+
+        public SymbolEqualityWrapper(ISymbol symbol) { Symbol = symbol; }
+
+        public override bool Equals(object? other) =>
+            other is SymbolEqualityWrapper sew && SymbolEqualityComparer.Default.Equals(Symbol, sew.Symbol);
+
+        public override int GetHashCode() => 11 * Symbol.GetHashCode();
     }
 }

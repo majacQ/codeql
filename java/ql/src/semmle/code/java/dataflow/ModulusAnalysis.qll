@@ -6,6 +6,7 @@
 
 import java
 private import SSA
+private import semmle.code.java.dataflow.internal.rangeanalysis.SsaReadPositionCommon
 private import RangeUtils
 private import semmle.code.java.controlflow.Guards
 import Bound
@@ -76,8 +77,6 @@ private Expr modExpr(Expr arg, int mod) {
     c.getIntValue() = mod - 1 and
     result.(AndBitwiseExpr).hasOperands(arg, c)
   )
-  or
-  result.(ParExpr).getExpr() = modExpr(arg, mod)
 }
 
 /**
@@ -149,13 +148,8 @@ private predicate rankedPhiInput(
   SsaPhiNode phi, SsaVariable inp, SsaReadPositionPhiInputEdge edge, int r
 ) {
   edge.phiInput(phi, inp) and
-  edge = rank[r](SsaReadPositionPhiInputEdge e |
-      e.phiInput(phi, _)
-    |
-      e
-      order by
-        getId(e.getOrigBlock())
-    )
+  edge =
+    rank[r](SsaReadPositionPhiInputEdge e | e.phiInput(phi, _) | e order by getId(e.getOrigBlock()))
 }
 
 /**

@@ -14,7 +14,6 @@ module SQL {
    */
   abstract class SqlSanitizer extends Expr {
     Expr input;
-
     Expr output;
 
     /** Gets the input expression being sanitized. */
@@ -30,38 +29,30 @@ module SQL {
  */
 private module MySql {
   /** Gets the package name `mysql` or `mysql2`. */
-  string mysql() { result = "mysql" or result = "mysql2" }
+  API::Node mysql() { result = API::moduleImport(["mysql", "mysql2"]) }
 
   /** Gets a call to `mysql.createConnection`. */
-  DataFlow::SourceNode createConnection() {
-    result = DataFlow::moduleMember(mysql(), "createConnection").getACall()
-  }
+  API::Node createConnection() { result = mysql().getMember("createConnection").getReturn() }
 
   /** Gets a call to `mysql.createPool`. */
-  DataFlow::SourceNode createPool() {
-    result = DataFlow::moduleMember(mysql(), "createPool").getACall()
-  }
+  API::Node createPool() { result = mysql().getMember("createPool").getReturn() }
 
   /** Gets a data flow node that contains a freshly created MySQL connection instance. */
-  DataFlow::SourceNode connection() {
+  API::Node connection() {
     result = createConnection()
     or
-    result = createPool().getAMethodCall("getConnection").getCallback(0).getParameter(1)
+    result = createPool().getMember("getConnection").getParameter(0).getParameter(1)
   }
 
   /** A call to the MySql `query` method. */
-  private class QueryCall extends DatabaseAccess, DataFlow::ValueNode {
-    override MethodCallExpr astNode;
-
+  private class QueryCall extends DatabaseAccess, DataFlow::MethodCallNode {
     QueryCall() {
-      exists(DataFlow::SourceNode recv | recv = createPool() or recv = connection() |
-        this = recv.getAMethodCall("query")
+      exists(API::Node recv | recv = createPool() or recv = connection() |
+        this = recv.getMember("query").getReturn().getAUse()
       )
     }
 
-    override DataFlow::Node getAQueryArgument() {
-      result = DataFlow::valueNode(astNode.getArgument(0))
-    }
+    override DataFlow::Node getAQueryArgument() { result = getArgument(0) }
   }
 
   /** An expression that is passed to the `query` method and hence interpreted as SQL. */
@@ -70,20 +61,16 @@ private module MySql {
   }
 
   /** A call to the `escape` or `escapeId` method that performs SQL sanitization. */
-  class EscapingSanitizer extends SQL::SqlSanitizer, @callexpr {
+  class EscapingSanitizer extends SQL::SqlSanitizer, MethodCallExpr {
     EscapingSanitizer() {
-      exists(string esc | esc = "escape" or esc = "escapeId" |
-        exists(DataFlow::SourceNode escape, MethodCallExpr mce |
-          escape = DataFlow::moduleMember(mysql(), esc) or
-          escape = connection().getAPropertyRead(esc) or
-          escape = createPool().getAPropertyRead(esc)
-        |
-          this = mce and
-          mce = escape.getACall().asExpr() and
-          input = mce.getArgument(0) and
-          output = mce
-        )
-      )
+      this =
+        [mysql(), createPool(), connection()]
+            .getMember(["escape", "escapeId"])
+            .getReturn()
+            .getAUse()
+            .asExpr() and
+      input = this.getArgument(0) and
+      output = this
     }
   }
 
@@ -92,9 +79,9 @@ private module MySql {
     string kind;
 
     Credentials() {
-      exists(DataFlow::SourceNode call, string prop |
-        (call = createConnection() or call = createPool()) and
-        call.asExpr().(CallExpr).hasOptionArgument(0, prop, this) and
+      exists(API::Node call, string prop |
+        call in [createConnection(), createPool()] and
+        call.getAUse().asExpr().(CallExpr).hasOptionArgument(0, prop, this) and
         (
           prop = "user" and kind = "user name"
           or
@@ -112,40 +99,30 @@ private module MySql {
  */
 private module Postgres {
   /** Gets an expression of the form `new require('pg').Client()`. */
-  DataFlow::SourceNode newClient() {
-    result = DataFlow::moduleImport("pg").getAConstructorInvocation("Client")
-  }
+  API::Node newClient() { result = API::moduleImport("pg").getMember("Client").getInstance() }
 
   /** Gets a data flow node that holds a freshly created Postgres client instance. */
-  DataFlow::SourceNode client() {
+  API::Node client() {
     result = newClient()
     or
     // pool.connect(function(err, client) { ... })
-    result = newPool().getAMethodCall("connect").getCallback(0).getParameter(1)
+    result = newPool().getMember("connect").getParameter(0).getParameter(1)
   }
 
   /** Gets an expression that constructs a new connection pool. */
-  DataFlow::SourceNode newPool() {
+  API::Node newPool() {
     // new require('pg').Pool()
-    result = DataFlow::moduleImport("pg").getAConstructorInvocation("Pool")
+    result = API::moduleImport("pg").getMember("Pool").getInstance()
     or
     // new require('pg-pool')
-    result = DataFlow::moduleImport("pg-pool").getAnInstantiation()
+    result = API::moduleImport("pg-pool").getInstance()
   }
 
   /** A call to the Postgres `query` method. */
-  private class QueryCall extends DatabaseAccess, DataFlow::ValueNode {
-    override MethodCallExpr astNode;
+  private class QueryCall extends DatabaseAccess, DataFlow::MethodCallNode {
+    QueryCall() { this = [client(), newPool()].getMember("query").getReturn().getAUse() }
 
-    QueryCall() {
-      exists(DataFlow::SourceNode recv | recv = client() or recv = newPool() |
-        this = recv.getAMethodCall("query")
-      )
-    }
-
-    override DataFlow::Node getAQueryArgument() {
-      result = DataFlow::valueNode(astNode.getArgument(0))
-    }
+    override DataFlow::Node getAQueryArgument() { result = getArgument(0) }
   }
 
   /** An expression that is passed to the `query` method and hence interpreted as SQL. */
@@ -159,7 +136,7 @@ private module Postgres {
 
     Credentials() {
       exists(DataFlow::InvokeNode call, string prop |
-        (call = newClient() or call = newPool()) and
+        call = [client(), newPool()].getAUse() and
         this = call.getOptionArgument(0, prop).asExpr() and
         (
           prop = "user" and kind = "user name"
@@ -178,22 +155,20 @@ private module Postgres {
  */
 private module Sqlite {
   /** Gets a reference to the `sqlite3` module. */
-  DataFlow::SourceNode sqlite() {
-    result = DataFlow::moduleImport("sqlite3")
+  API::Node sqlite() {
+    result = API::moduleImport("sqlite3")
     or
-    result = sqlite().getAMemberCall("verbose")
+    result = sqlite().getMember("verbose").getReturn()
   }
 
   /** Gets an expression that constructs a Sqlite database instance. */
-  DataFlow::SourceNode newDb() {
+  API::Node newDb() {
     // new require('sqlite3').Database()
-    result = sqlite().getAConstructorInvocation("Database")
+    result = sqlite().getMember("Database").getInstance()
   }
 
   /** A call to a Sqlite query method. */
-  private class QueryCall extends DatabaseAccess, DataFlow::ValueNode {
-    override MethodCallExpr astNode;
-
+  private class QueryCall extends DatabaseAccess, DataFlow::MethodCallNode {
     QueryCall() {
       exists(string meth |
         meth = "all" or
@@ -203,13 +178,11 @@ private module Sqlite {
         meth = "prepare" or
         meth = "run"
       |
-        this = newDb().getAMethodCall(meth)
+        this = newDb().getMember(meth).getReturn().getAUse()
       )
     }
 
-    override DataFlow::Node getAQueryArgument() {
-      result = DataFlow::valueNode(astNode.getArgument(0))
-    }
+    override DataFlow::Node getAQueryArgument() { result = getArgument(0) }
   }
 
   /** An expression that is passed to the `query` method and hence interpreted as SQL. */
@@ -223,22 +196,24 @@ private module Sqlite {
  */
 private module MsSql {
   /** Gets a reference to the `mssql` module. */
-  DataFlow::ModuleImportNode mssql() { result.getPath() = "mssql" }
+  API::Node mssql() { result = API::moduleImport("mssql") }
 
   /** Gets an expression that creates a request object. */
-  DataFlow::SourceNode request() {
+  API::Node request() {
     // new require('mssql').Request()
-    result = mssql().getAConstructorInvocation("Request")
+    result = mssql().getMember("Request").getInstance()
     or
     // request.input(...)
-    result = request().getAMethodCall("input")
+    result = request().getMember("input").getReturn()
   }
 
   /** A tagged template evaluated as a query. */
   private class QueryTemplateExpr extends DatabaseAccess, DataFlow::ValueNode {
     override TaggedTemplateExpr astNode;
 
-    QueryTemplateExpr() { mssql().getAPropertyRead("query").flowsToExpr(astNode.getTag()) }
+    QueryTemplateExpr() {
+      mssql().getMember("query").getAUse() = DataFlow::valueNode(astNode.getTag())
+    }
 
     override DataFlow::Node getAQueryArgument() {
       result = DataFlow::valueNode(astNode.getTemplate().getAnElement())
@@ -246,16 +221,10 @@ private module MsSql {
   }
 
   /** A call to a MsSql query method. */
-  private class QueryCall extends DatabaseAccess, DataFlow::ValueNode {
-    override MethodCallExpr astNode;
+  private class QueryCall extends DatabaseAccess, DataFlow::MethodCallNode {
+    QueryCall() { this = request().getMember(["query", "batch"]).getReturn().getAUse() }
 
-    QueryCall() {
-      exists(string meth | this = request().getAMethodCall(meth) | meth = "query" or meth = "batch")
-    }
-
-    override DataFlow::Node getAQueryArgument() {
-      result = DataFlow::valueNode(astNode.getArgument(0))
-    }
+    override DataFlow::Node getAQueryArgument() { result = getArgument(0) }
   }
 
   /** An expression that is passed to a method that interprets it as SQL. */
@@ -283,9 +252,9 @@ private module MsSql {
     Credentials() {
       exists(DataFlow::InvokeNode call, string prop |
         (
-          call = mssql().getAMemberCall("connect")
+          call = mssql().getMember("connect").getReturn().getAUse()
           or
-          call = mssql().getAConstructorInvocation("ConnectionPool")
+          call = mssql().getMember("ConnectionPool").getInstance().getAUse()
         ) and
         this = call.getOptionArgument(0, prop).asExpr() and
         (
@@ -305,20 +274,16 @@ private module MsSql {
  */
 private module Sequelize {
   /** Gets an import of the `sequelize` module. */
-  DataFlow::ModuleImportNode sequelize() { result.getPath() = "sequelize" }
+  API::Node sequelize() { result = API::moduleImport("sequelize") }
 
   /** Gets an expression that creates an instance of the `Sequelize` class. */
-  DataFlow::SourceNode newSequelize() { result = sequelize().getAnInstantiation() }
+  API::Node newSequelize() { result = sequelize().getInstance() }
 
   /** A call to `Sequelize.query`. */
-  private class QueryCall extends DatabaseAccess, DataFlow::ValueNode {
-    override MethodCallExpr astNode;
+  private class QueryCall extends DatabaseAccess, DataFlow::MethodCallNode {
+    QueryCall() { this = newSequelize().getMember("query").getReturn().getAUse() }
 
-    QueryCall() { this = newSequelize().getAMethodCall("query") }
-
-    override DataFlow::Node getAQueryArgument() {
-      result = DataFlow::valueNode(astNode.getArgument(0))
-    }
+    override DataFlow::Node getAQueryArgument() { result = getArgument(0) }
   }
 
   /** An expression that is passed to `Sequelize.query` method and hence interpreted as SQL. */
@@ -335,7 +300,7 @@ private module Sequelize {
 
     Credentials() {
       exists(NewExpr ne, string prop |
-        ne = newSequelize().asExpr() and
+        ne = newSequelize().getAUse().asExpr() and
         (
           this = ne.getArgument(1) and prop = "username"
           or
@@ -362,33 +327,34 @@ private module Spanner {
   /**
    * Gets a node that refers to the `Spanner` class
    */
-  DataFlow::SourceNode spanner() {
+  API::Node spanner() {
     // older versions
-    result = DataFlow::moduleImport("@google-cloud/spanner")
+    result = API::moduleImport("@google-cloud/spanner")
     or
     // newer versions
-    result = DataFlow::moduleMember("@google-cloud/spanner", "Spanner")
+    result = API::moduleImport("@google-cloud/spanner").getMember("Spanner")
   }
 
   /**
    * Gets a node that refers to an instance of the `Database` class.
    */
-  DataFlow::SourceNode database() {
-    result = spanner().getAnInvocation().getAMethodCall("instance").getAMethodCall("database")
+  API::Node database() {
+    result =
+      spanner().getReturn().getMember("instance").getReturn().getMember("database").getReturn()
   }
 
   /**
    * Gets a node that refers to an instance of the `v1.SpannerClient` class.
    */
-  DataFlow::SourceNode v1SpannerClient() {
-    result = spanner().getAPropertyRead("v1").getAPropertyRead("SpannerClient").getAnInstantiation()
+  API::Node v1SpannerClient() {
+    result = spanner().getMember("v1").getMember("SpannerClient").getInstance()
   }
 
   /**
    * Gets a node that refers to a transaction object.
    */
-  DataFlow::SourceNode transaction() {
-    result = database().getAMethodCall("runTransaction").getCallback(0).getParameter(1)
+  API::Node transaction() {
+    result = database().getMember("runTransaction").getParameter(0).getParameter(1)
   }
 
   /**
@@ -412,9 +378,8 @@ private module Spanner {
    */
   class DatabaseRunCall extends SqlExecution {
     DatabaseRunCall() {
-      exists(string run | run = "run" or run = "runPartitionedUpdate" or run = "runStream" |
-        this = database().getAMethodCall(run)
-      )
+      this =
+        database().getMember(["run", "runPartitionedUpdate", "runStream"]).getReturn().getAUse()
     }
   }
 
@@ -423,9 +388,7 @@ private module Spanner {
    */
   class TransactionRunCall extends SqlExecution {
     TransactionRunCall() {
-      exists(string run | run = "run" or run = "runStream" or run = "runUpdate" |
-        this = transaction().getAMethodCall(run)
-      )
+      this = transaction().getMember(["run", "runStream", "runUpdate"]).getReturn().getAUse()
     }
   }
 
@@ -434,9 +397,8 @@ private module Spanner {
    */
   class ExecuteSqlCall extends SqlExecution {
     ExecuteSqlCall() {
-      exists(string exec | exec = "executeSql" or exec = "executeStreamingSql" |
-        this = v1SpannerClient().getAMethodCall(exec)
-      )
+      this =
+        v1SpannerClient().getMember(["executeSql", "executeStreamingSql"]).getReturn().getAUse()
     }
 
     override DataFlow::Node getAQueryArgument() {

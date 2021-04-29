@@ -67,12 +67,11 @@ namespace Semmle.Util.Logging
 
             try
             {
-                var dir = Path.GetDirectoryName(outputFile);
-                if (dir.Length > 0 && !System.IO.Directory.Exists(dir))
+                string? dir = Path.GetDirectoryName(outputFile);
+                if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
                 writer = new PidStreamWriter(new FileStream(outputFile, FileMode.Append, FileAccess.Write,
                     FileShare.ReadWrite, 8192));
-                writer.AutoFlush = true;
             }
             catch (Exception ex)  // lgtm[cs/catch-of-all-exceptions]
             {

@@ -77,6 +77,24 @@ private class ConsPath extends Path, TConsPath {
 }
 
 /**
+ * Gets a regular expression that can be used to parse slash-separated paths.
+ *
+ * The first capture group captures the dirname of the path, that is, everything
+ * before the last slash, or the empty string if there isn't a slash.
+ *
+ * The second capture group captures the basename of the path, that is, everything
+ * after the last slash, or the entire path if there isn't a slash.
+ *
+ * The third capture group captures the stem of the basename, that is, everything
+ * before the last dot, or the entire basename if there isn't a dot.
+ *
+ * Finally, the fourth and fifth capture groups capture the extension of the basename,
+ * that is, everything after the last dot. The fourth group includes the dot, the
+ * fifth does not.
+ */
+private string pathRegex() { result = "(.*)(?:/|^)(([^/]*?)(\\.([^.]*))?)" }
+
+/**
  * A string value that represents a (relative or absolute) file system path.
  *
  * Each path string is associated with one or more root folders relative to
@@ -98,7 +116,25 @@ abstract class PathString extends string {
   int getNumComponent() { result = count(int i | exists(getComponent(i))) }
 
   /** Gets the base name of the folder or file this path refers to. */
-  string getBaseName() { result = this.regexpCapture("(.*/|^)([^/]+)", 2) }
+  string getBaseName() { result = this.regexpCapture(pathRegex(), 2) }
+
+  /**
+   * Gets stem of the folder or file this path refers to, that is, the prefix of its base name
+   * up to (but not including) the last dot character if there is one, or the entire
+   * base name if there is not
+   */
+  string getStem() { result = this.regexpCapture(pathRegex(), 3) }
+
+  /** Gets the path of the parent folder of the folder or file this path refers to. */
+  string getDirName() { result = this.regexpCapture(pathRegex(), 1) }
+
+  /**
+   * Gets the extension of the folder or file this path refers to, that is, the suffix of the base name
+   * starting at the last dot character, if there is one.
+   *
+   * Has no result if the base name does not contain a dot.
+   */
+  string getExtension() { result = this.regexpCapture(pathRegex(), 4) }
 
   /**
    * Gets the absolute path that the sub-path consisting of the first `n`
@@ -139,17 +175,6 @@ abstract class PathString extends string {
 }
 
 /**
- * Non-abstract base class for path expressions.
- */
-private class PathExprBase extends Locatable {
-  // We must put getEnclosingModule here for it to be usable in the characteristic predicate of PathExprInModule
-  /** Gets the module containing this path expression, if any. */
-  Module getEnclosingModule() {
-    result = this.(Expr).getTopLevel() or result = this.(Comment).getTopLevel()
-  }
-}
-
-/**
  * An expression whose value represents a (relative or absolute) file system path.
  *
  * Each path expression is associated with one or more root folders, each of which
@@ -161,12 +186,25 @@ private class PathExprBase extends Locatable {
  * as their highest-priority root, with default library paths as additional roots
  * of lower priority.
  */
-abstract class PathExpr extends PathExprBase {
+abstract class PathExpr extends Locatable {
   /** Gets the (unresolved) path represented by this expression. */
   abstract string getValue();
 
   /** Gets the root folder of priority `priority` associated with this path expression. */
-  abstract Folder getSearchRoot(int priority);
+  Folder getSearchRoot(int priority) {
+    // We default to the enclosing module's search root, though this may be overridden.
+    getEnclosingModule().searchRoot(this, result, priority)
+    or
+    result = getAdditionalSearchRoot(priority)
+  }
+
+  /**
+   * INTERNAL. Use `getSearchRoot` instead.
+   *
+   * Can be overridden by subclasses of `PathExpr` to provide additional search roots
+   * without overriding `getSearchRoot`.
+   */
+  Folder getAdditionalSearchRoot(int priority) { none() }
 
   /** Gets the `i`th component of this path. */
   string getComponent(int i) { result = getValue().(PathString).getComponent(i) }
@@ -176,6 +214,17 @@ abstract class PathExpr extends PathExprBase {
 
   /** Gets the base name of the folder or file this path refers to. */
   string getBaseName() { result = getValue().(PathString).getBaseName() }
+
+  /** Gets the stem, that is, base name without extension, of the folder or file this path refers to. */
+  string getStem() { result = getValue().(PathString).getStem() }
+
+  /**
+   * Gets the extension of the folder or file this path refers to, that is, the suffix of the base name
+   * starting at the last dot character, if there is one.
+   *
+   * Has no result if the base name does not contain a dot.
+   */
+  string getExtension() { result = getValue().(PathString).getExtension() }
 
   /**
    * Gets the file or folder that the first `n` components of this path refer to
@@ -199,6 +248,11 @@ abstract class PathExpr extends PathExprBase {
 
   /** Gets the file or folder that this path refers to. */
   Container resolve() { result = resolveUpTo(getNumComponent()) }
+
+  /** Gets the module containing this path expression, if any. */
+  Module getEnclosingModule() {
+    result = this.(Expr).getTopLevel() or result = this.(Comment).getTopLevel()
+  }
 }
 
 /** A path string derived from a path expression. */
@@ -232,7 +286,24 @@ private class ConcatPath extends PathExpr {
     )
   }
 
-  override Folder getSearchRoot(int priority) {
-    result = this.(AddExpr).getAnOperand().(PathExpr).getSearchRoot(priority)
+  override Folder getAdditionalSearchRoot(int priority) {
+    result = this.(AddExpr).getAnOperand().(PathExpr).getAdditionalSearchRoot(priority)
   }
+}
+
+/**
+ * An expression that appears in a syntactic position where it may represent a path.
+ *
+ * Examples include arguments to the CommonJS `require` function or AMD dependency arguments.
+ */
+abstract class PathExprCandidate extends Expr {
+  /**
+   * Gets an expression that is nested inside this expression.
+   *
+   * Equivalent to `getAChildExpr*()`, but useful to enforce a better join order (in spite of
+   * what the optimizer thinks, there are generally far fewer `PathExprCandidate`s than
+   * `ConstantString`s).
+   */
+  pragma[nomagic]
+  Expr getAPart() { result = this or result = getAPart().getAChildExpr() }
 }

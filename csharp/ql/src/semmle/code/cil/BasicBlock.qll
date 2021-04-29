@@ -8,7 +8,7 @@ private import CIL
  * A basic block, that is, a maximal straight-line sequence of control flow nodes
  * without branches or joins.
  */
-class BasicBlock extends Internal::TBasicBlockStart {
+class BasicBlock extends Cached::TBasicBlockStart {
   /** Gets an immediate successor of this basic block, if any. */
   BasicBlock getASuccessor() { result.getFirstNode() = getLastNode().getASuccessor() }
 
@@ -23,7 +23,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * if (x < 0)
    *   x = -x;
    * ```
@@ -41,7 +41,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * if (!(x >= 0))
    *   x = -x;
    * ```
@@ -52,13 +52,13 @@ class BasicBlock extends Internal::TBasicBlockStart {
   BasicBlock getAFalseSuccessor() { result.getFirstNode() = getLastNode().getFalseSuccessor() }
 
   /** Gets the control flow node at a specific (zero-indexed) position in this basic block. */
-  ControlFlowNode getNode(int pos) { Internal::bbIndex(getFirstNode(), result, pos) }
+  ControlFlowNode getNode(int pos) { Cached::bbIndex(getFirstNode(), result, pos) }
 
   /** Gets a control flow node in this basic block. */
   ControlFlowNode getANode() { result = getNode(_) }
 
   /** Gets the first control flow node in this basic block. */
-  ControlFlowNode getFirstNode() { this = Internal::TBasicBlockStart(result) }
+  ControlFlowNode getFirstNode() { this = Cached::TBasicBlockStart(result) }
 
   /** Gets the last control flow node in this basic block. */
   ControlFlowNode getLastNode() { result = getNode(length() - 1) }
@@ -75,7 +75,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -97,7 +97,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -124,7 +124,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * if (x < 0) {
    *   x = -x;
    *   if (x > 10)
@@ -158,7 +158,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -182,7 +182,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   try {
    *     return s.Length;
@@ -207,7 +207,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   try {
    *     return s.Length;
@@ -246,7 +246,7 @@ class BasicBlock extends Internal::TBasicBlockStart {
  * Internal implementation details.
  */
 cached
-private module Internal {
+private module Cached {
   /** Internal representation of basic blocks. */
   cached
   newtype TBasicBlock = TBasicBlockStart(ControlFlowNode cfn) { startsBB(cfn) }
@@ -257,9 +257,7 @@ private module Internal {
     or
     cfn.isJoin()
     or
-    exists(ControlFlowNode pred | pred = cfn.getAPredecessor() |
-      strictcount(pred.getASuccessor()) > 1
-    )
+    cfn.getAPredecessor().isBranch()
   }
 
   /**
@@ -302,7 +300,9 @@ predicate bbIPostDominates(BasicBlock dom, BasicBlock bb) =
  * An entry basic block, that is, a basic block whose first node is
  * the entry node of a callable.
  */
-class EntryBasicBlock extends BasicBlock { EntryBasicBlock() { entryBB(this) } }
+class EntryBasicBlock extends BasicBlock {
+  EntryBasicBlock() { entryBB(this) }
+}
 
 /** Holds if `bb` is an entry basic block. */
 private predicate entryBB(BasicBlock bb) { bb.getFirstNode() instanceof EntryPoint }
@@ -311,7 +311,9 @@ private predicate entryBB(BasicBlock bb) { bb.getFirstNode() instanceof EntryPoi
  * An exit basic block, that is, a basic block whose last node is
  * an exit node.
  */
-class ExitBasicBlock extends BasicBlock { ExitBasicBlock() { exitBB(this) } }
+class ExitBasicBlock extends BasicBlock {
+  ExitBasicBlock() { exitBB(this) }
+}
 
 /** Holds if `bb` is an exit basic block. */
 private predicate exitBB(BasicBlock bb) { not exists(bb.getLastNode().getASuccessor()) }
@@ -319,7 +321,9 @@ private predicate exitBB(BasicBlock bb) { not exists(bb.getLastNode().getASucces
 /**
  * A basic block with more than one predecessor.
  */
-class JoinBlock extends BasicBlock { JoinBlock() { getFirstNode().isJoin() } }
+class JoinBlock extends BasicBlock {
+  JoinBlock() { getFirstNode().isJoin() }
+}
 
 /** A basic block that terminates in a condition, splitting the subsequent control flow. */
 class ConditionBlock extends BasicBlock {
@@ -349,7 +353,7 @@ class ConditionBlock extends BasicBlock {
      * all predecessors of `this.getATrueSuccessor()` are either `this` or dominated by `this.getATrueSuccessor()`.
      *
      * For example, in the following C# snippet:
-     * ```
+     * ```csharp
      * if (x)
      *   controlled;
      * false_successor;
@@ -357,7 +361,7 @@ class ConditionBlock extends BasicBlock {
      * ```
      * `false_successor` dominates `uncontrolled`, but not all of its predecessors are `this` (`if (x)`)
      *  or dominated by itself. Whereas in the following code:
-     * ```
+     * ```csharp
      * if (x)
      *   while (controlled)
      *     also_controlled;

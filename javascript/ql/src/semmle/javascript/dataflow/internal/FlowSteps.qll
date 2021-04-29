@@ -6,45 +6,16 @@
 
 import javascript
 import semmle.javascript.dataflow.Configuration
+import semmle.javascript.dataflow.internal.CallGraphs
 
 /**
  * Holds if flow should be tracked through properties of `obj`.
  *
- * Flow is tracked through object literals, `module` and `module.exports` objects.
+ * Flow is tracked through `module` and `module.exports` objects.
  */
 predicate shouldTrackProperties(AbstractValue obj) {
   obj instanceof AbstractExportsObject or
   obj instanceof AbstractModuleObject
-}
-
-/**
- * Holds if `invk` may invoke `f`.
- */
-predicate calls(DataFlow::InvokeNode invk, Function f) { f = invk.getACallee(0) }
-
-/**
- * Holds if `invk` may invoke `f` indirectly through the given `callback` argument.
- *
- * This only holds for explicitly modeled partial calls.
- */
-private predicate partiallyCalls(
-  DataFlow::AdditionalPartialInvokeNode invk, DataFlow::AnalyzedNode callback, Function f
-) {
-  invk.isPartialArgument(callback, _, _) and
-  exists(AbstractFunction callee | callee = callback.getAValue() |
-    if callback.getAValue().isIndefinite("global")
-    then f = callee.getFunction() and f.getFile() = invk.getFile()
-    else f = callee.getFunction()
-  )
-}
-
-/**
- * Holds if `f` captures the variable defined by `def` in `cap`.
- */
-cached
-predicate captures(Function f, SsaExplicitDefinition def, SsaVariableCapture cap) {
-  def.getSourceVariable() = cap.getSourceVariable() and
-  f = cap.getContainer()
 }
 
 /**
@@ -81,214 +52,409 @@ predicate localFlowStep(
   )
   or
   configuration.isAdditionalFlowStep(pred, succ, predlbl, succlbl)
-}
-
-/**
- * Holds if `arg` is passed as an argument into parameter `parm`
- * through invocation `invk` of function `f`.
- */
-predicate argumentPassing(
-  DataFlow::InvokeNode invk, DataFlow::ValueNode arg, Function f, DataFlow::ParameterNode parm
-) {
-  calls(invk, f) and
-  exists(int i |
-    f.getParameter(i) = parm.getParameter() and
-    not parm.isRestParameter() and
-    arg = invk.getArgument(i)
-  )
   or
-  exists(DataFlow::Node callback, int i |
-    invk.(DataFlow::AdditionalPartialInvokeNode).isPartialArgument(callback, arg, i) and
-    partiallyCalls(invk, callback, f) and
-    parm.getParameter() = f.getParameter(i) and
-    not parm.isRestParameter()
-  )
+  localExceptionStep(pred, succ) and
+  predlbl = succlbl
 }
 
 /**
- * Holds if there is a flow step from `pred` to `succ` through parameter passing
- * to a function call.
+ * Holds if an exception thrown from `pred` can propagate locally to `succ`.
  */
-predicate callStep(DataFlow::Node pred, DataFlow::Node succ) { argumentPassing(_, pred, _, succ) }
+predicate localExceptionStep(DataFlow::Node pred, DataFlow::Node succ) {
+  localExceptionStepWithAsyncFlag(pred, succ, false)
+}
 
 /**
- * Holds if there is a flow step from `pred` to `succ` through returning
- * from a function call or the receiver flowing out of a constructor call.
+ * Holds if an exception thrown from `pred` can propagate locally to `succ`.
+ *
+ * The `async` flag is true if the step involves wrapping the exception in a rejected Promise.
  */
-predicate returnStep(DataFlow::Node pred, DataFlow::Node succ) {
-  exists(Function f | calls(succ, f) |
-    returnExpr(f, pred, _)
+predicate localExceptionStepWithAsyncFlag(DataFlow::Node pred, DataFlow::Node succ, boolean async) {
+  exists(DataFlow::Node target | target = getThrowTarget(pred) |
+    // this also covers generators - as the behavior of exceptions is close enough to the behavior of ordinary
+    // functions when it comes to exceptions (assuming that the iterator does not cross function boundaries).
+    async = false and
+    succ = target and
+    not succ = any(DataFlow::FunctionNode f | f.getFunction().isAsync()).getExceptionalReturn()
     or
-    succ instanceof DataFlow::NewNode and
-    DataFlow::thisNode(pred, f)
+    async = true and
+    exists(DataFlow::FunctionNode f | f.getExceptionalReturn() = target |
+      succ = f.getReturnNode() // returns a rejected promise - therefore using the ordinary return node.
+    )
   )
 }
 
 /**
- * Holds if there is an assignment to property `prop` of an object represented by `obj`
- * with right hand side `rhs` somewhere, and properties of `obj` should be tracked.
- */
-pragma[noinline]
-private predicate trackedPropertyWrite(AbstractValue obj, string prop, DataFlow::Node rhs) {
-  exists(AnalyzedPropertyWrite pw |
-    pw.writes(obj, prop, rhs) and
-    shouldTrackProperties(obj) and
-    // avoid introducing spurious global flow
-    not pw.baseIsIncomplete("global")
-  )
-}
-
-/**
- * Holds if there is a flow step from `pred` to `succ` through an object property.
- */
-predicate propertyFlowStep(DataFlow::Node pred, DataFlow::Node succ) {
-  exists(AbstractValue obj, string prop |
-    trackedPropertyWrite(obj, prop, pred) and
-    succ.(AnalyzedPropertyRead).reads(obj, prop)
-  )
-}
-
-/**
- * Gets a node whose value is assigned to `gv` in `f`.
- */
-pragma[noinline]
-private DataFlow::ValueNode getADefIn(GlobalVariable gv, File f) {
-  exists(VarDef def |
-    def.getFile() = f and
-    def.getTarget() = gv.getAReference() and
-    result = DataFlow::valueNode(def.getSource())
-  )
-}
-
-/**
- * Gets a use of `gv` in `f`.
- */
-pragma[noinline]
-DataFlow::ValueNode getAUseIn(GlobalVariable gv, File f) {
-  result.getFile() = f and
-  result = DataFlow::valueNode(gv.getAnAccess())
-}
-
-/**
- * Holds if there is a flow step from `pred` to `succ` through a global
- * variable. Both `pred` and `succ` must be in the same file.
- */
-predicate globalFlowStep(DataFlow::Node pred, DataFlow::Node succ) {
-  exists(GlobalVariable gv, File f |
-    pred = getADefIn(gv, f) and
-    succ = getAUseIn(gv, f)
-  )
-}
-
-/**
- * Holds if there is a write to property `prop` of global variable `gv`
- * in file `f`, where the right-hand side of the write is `rhs`.
- */
-pragma[noinline]
-predicate globalPropertyWrite(GlobalVariable gv, File f, string prop, DataFlow::Node rhs) {
-  exists(DataFlow::PropWrite pw | pw.writes(getAUseIn(gv, f), prop, rhs))
-}
-
-/**
- * Holds if there is a read from property `prop` of `base`, which is
- * an access to global variable `base` in file `f`.
- */
-pragma[noinline]
-predicate globalPropertyRead(GlobalVariable gv, File f, string prop, DataFlow::Node base) {
-  exists(DataFlow::PropRead pr |
-    base = getAUseIn(gv, f) and
-    pr.accesses(base, prop)
-  )
-}
-
-/**
- * Holds if there is a store step from `pred` to `succ` under property `prop`,
- * that is, `succ` is the local source of the base of a write of property
- * `prop` with right-hand side `pred`.
+ * Gets the dataflow-node that an exception thrown at `thrower` will flow to.
  *
- * For example, for this code snippet:
- *
- * ```
- * var a = new A();
- * a.p = e;
- * ```
- *
- * there is a store step from `e` to `new A()` under property `prop`.
- *
- * As a special case, if the base of the property write is a global variable,
- * then there is a store step from the right-hand side of the write to any
- * read of the same property from the same global variable in the same file.
+ * The predicate that all functions are not async.
  */
-predicate basicStoreStep(DataFlow::Node pred, DataFlow::Node succ, string prop) {
-  succ.(DataFlow::SourceNode).hasPropertyWrite(prop, pred)
-  or
-  exists(GlobalVariable gv, File f |
-    globalPropertyWrite(gv, f, prop, pred) and
-    globalPropertyRead(gv, f, prop, succ)
+DataFlow::Node getThrowTarget(DataFlow::Node thrower) {
+  exists(Expr expr |
+    expr = any(ThrowStmt throw).getExpr() and
+    thrower = expr.flow()
+    or
+    DataFlow::exceptionalInvocationReturnNode(thrower, expr)
+  |
+    result = expr.getExceptionTarget()
   )
 }
 
 /**
- * Holds if there is a load step from `pred` to `succ` under property `prop`,
- * that is, `succ` is a read of property `prop` from `pred`.
+ * Implements a set of data flow predicates that are used by multiple predicates and
+ * hence should only be computed once.
  */
-predicate loadStep(DataFlow::Node pred, DataFlow::PropRead succ, string prop) {
-  succ.accesses(pred, prop)
+cached
+private module CachedSteps {
+  /**
+   * Holds if `f` captures the given `variable` in `cap`.
+   */
+  cached
+  predicate captures(Function f, LocalVariable variable, SsaVariableCapture cap) {
+    variable = cap.getSourceVariable() and
+    f = cap.getContainer()
+  }
+
+  /**
+   * Holds if `invk` may invoke `f`.
+   */
+  cached
+  predicate calls(DataFlow::InvokeNode invk, Function f) { f = invk.getACallee(0) }
+
+  private predicate callsBoundInternal(
+    DataFlow::InvokeNode invk, Function f, int boundArgs, boolean contextDependent
+  ) {
+    CallGraph::getABoundFunctionReference(f.flow(), boundArgs, contextDependent)
+        .flowsTo(invk.getCalleeNode())
+  }
+
+  /**
+   * Holds if `invk` may invoke a bound version of `f` with `boundArgs` already bound.
+   *
+   * The receiver is assumed to be bound as well, and should not propagate into `f`.
+   *
+   * Does not hold for context-dependent call sites, such as callback invocations.
+   */
+  cached
+  predicate callsBound(DataFlow::InvokeNode invk, Function f, int boundArgs) {
+    callsBoundInternal(invk, f, boundArgs, false)
+  }
+
+  /**
+   * Holds if `pred` may flow to `succ` through an invocation of a bound function.
+   *
+   * Should only be used for graph pruning, as the edge may lead to spurious flow.
+   */
+  cached
+  predicate exploratoryBoundInvokeStep(DataFlow::Node pred, DataFlow::Node succ) {
+    exists(DataFlow::InvokeNode invk, Function f, int i, int boundArgs |
+      callsBoundInternal(invk, f, boundArgs, _) and
+      pred = invk.getArgument(i) and
+      succ = DataFlow::parameterNode(f.getParameter(i + boundArgs))
+    )
+  }
+
+  /**
+   * Holds if `invk` may invoke `f` indirectly through the given `callback` argument.
+   *
+   * This only holds for explicitly modeled partial calls.
+   */
+  private predicate partiallyCalls(
+    DataFlow::PartialInvokeNode invk, DataFlow::AnalyzedNode callback, Function f
+  ) {
+    callback = invk.getACallbackNode() and
+    exists(AbstractFunction callee | callee = callback.getAValue() |
+      if callback.getAValue().isIndefinite("global")
+      then f = callee.getFunction() and f.getFile() = invk.getFile()
+      else f = callee.getFunction()
+    )
+  }
+
+  /**
+   * Holds if `arg` is passed as an argument into parameter `parm`
+   * through invocation `invk` of function `f`.
+   */
+  cached
+  predicate argumentPassing(
+    DataFlow::InvokeNode invk, DataFlow::ValueNode arg, Function f, DataFlow::SourceNode parm
+  ) {
+    calls(invk, f) and
+    (
+      exists(int i | arg = invk.getArgument(i) |
+        exists(Parameter p |
+          f.getParameter(i) = p and
+          not p.isRestParameter() and
+          parm = DataFlow::parameterNode(p)
+        )
+        or
+        parm = reflectiveParameterAccess(f, i)
+      )
+      or
+      arg = invk.(DataFlow::CallNode).getReceiver() and
+      parm = DataFlow::thisNode(f)
+    )
+    or
+    exists(DataFlow::Node callback, int i, Parameter p |
+      invk.(DataFlow::PartialInvokeNode).isPartialArgument(callback, arg, i) and
+      partiallyCalls(invk, callback, f) and
+      f.getParameter(i) = p and
+      not p.isRestParameter() and
+      parm = DataFlow::parameterNode(p)
+    )
+    or
+    exists(DataFlow::Node callback |
+      arg = invk.(DataFlow::PartialInvokeNode).getBoundReceiver(callback) and
+      partiallyCalls(invk, callback, f) and
+      parm = DataFlow::thisNode(f)
+    )
+    or
+    exists(int boundArgs, int i, Parameter p |
+      callsBound(invk, f, boundArgs) and
+      f.getParameter(boundArgs + i) = p and
+      not p.isRestParameter() and
+      arg = invk.getArgument(i) and
+      parm = DataFlow::parameterNode(p)
+    )
+  }
+
+  /**
+   * Gets a data-flow node inside `f` that refers to the `arguments` object of `f`.
+   */
+  private DataFlow::Node argumentsAccess(Function f) {
+    result.getContainer().getEnclosingContainer*() = f and
+    result.analyze().getAValue().(AbstractArguments).getFunction() = f
+  }
+
+  /**
+   * Gets a data-flow node that refers to the `i`th parameter of `f` through its `arguments`
+   * object.
+   */
+  private DataFlow::SourceNode reflectiveParameterAccess(Function f, int i) {
+    result.(DataFlow::PropRead).accesses(argumentsAccess(f), any(string p | i = p.toInt()))
+  }
+
+  /**
+   * Holds if there is a flow step from `pred` to `succ` through parameter passing
+   * to a function call.
+   */
+  cached
+  predicate callStep(DataFlow::Node pred, DataFlow::Node succ) { argumentPassing(_, pred, _, succ) }
+
+  /**
+   * Holds if there is a flow step from `pred` to `succ` through:
+   * - returning a value from a function call (from the special `FunctionReturnNode`), or
+   * - throwing an exception out of a function call, or
+   * - the receiver flowing out of a constructor call.
+   */
+  cached
+  predicate returnStep(DataFlow::Node pred, DataFlow::Node succ) {
+    exists(Function f | calls(succ, f) or callsBound(succ, f, _) |
+      DataFlow::functionReturnNode(pred, f)
+      or
+      succ instanceof DataFlow::NewNode and
+      DataFlow::thisNode(pred, f)
+    )
+    or
+    exists(InvokeExpr invoke, Function fun |
+      DataFlow::exceptionalFunctionReturnNode(pred, fun) and
+      DataFlow::exceptionalInvocationReturnNode(succ, invoke)
+    |
+      calls(invoke.flow(), fun)
+      or
+      callsBound(invoke.flow(), fun, _)
+    )
+  }
+
+  /**
+   * Holds if there is an assignment to property `prop` of an object represented by `obj`
+   * with right hand side `rhs` somewhere, and properties of `obj` should be tracked.
+   */
+  pragma[noinline]
+  private predicate trackedPropertyWrite(AbstractValue obj, string prop, DataFlow::Node rhs) {
+    exists(AnalyzedPropertyWrite pw |
+      pw.writes(obj, prop, rhs) and
+      shouldTrackProperties(obj) and
+      // avoid introducing spurious global flow
+      not pw.baseIsIncomplete("global")
+    )
+  }
+
+  /**
+   * Holds if there is a flow step from `pred` to `succ` through an object property.
+   */
+  cached
+  predicate propertyFlowStep(DataFlow::Node pred, DataFlow::Node succ) {
+    exists(AbstractValue obj, string prop |
+      trackedPropertyWrite(obj, prop, pred) and
+      succ.(AnalyzedPropertyRead).reads(obj, prop)
+    )
+  }
+
+  /**
+   * Gets a node whose value is assigned to `gv` in `f`.
+   */
+  pragma[noinline]
+  private DataFlow::ValueNode getADefIn(GlobalVariable gv, File f) {
+    exists(VarDef def |
+      def.getFile() = f and
+      def.getTarget() = gv.getAReference() and
+      result = DataFlow::valueNode(def.getSource())
+    )
+  }
+
+  /**
+   * Gets a use of `gv` in `f`.
+   */
+  pragma[noinline]
+  private DataFlow::ValueNode getAUseIn(GlobalVariable gv, File f) {
+    result.getFile() = f and
+    result = DataFlow::valueNode(gv.getAnAccess())
+  }
+
+  /**
+   * Holds if there is a flow step from `pred` to `succ` through a global
+   * variable. Both `pred` and `succ` must be in the same file.
+   */
+  cached
+  predicate globalFlowStep(DataFlow::Node pred, DataFlow::Node succ) {
+    exists(GlobalVariable gv, File f |
+      pred = getADefIn(gv, f) and
+      succ = getAUseIn(gv, f)
+    )
+  }
+
+  /**
+   * Holds if there is a write to property `prop` of global variable `gv`
+   * in file `f`, where the right-hand side of the write is `rhs`.
+   */
+  pragma[noinline]
+  private predicate globalPropertyWrite(GlobalVariable gv, File f, string prop, DataFlow::Node rhs) {
+    exists(DataFlow::PropWrite pw | pw.writes(getAUseIn(gv, f), prop, rhs))
+  }
+
+  /**
+   * Holds if there is a read from property `prop` of `base`, which is
+   * an access to global variable `base` in file `f`.
+   */
+  pragma[noinline]
+  private predicate globalPropertyRead(GlobalVariable gv, File f, string prop, DataFlow::Node base) {
+    exists(DataFlow::PropRead pr |
+      base = getAUseIn(gv, f) and
+      pr.accesses(base, prop)
+    )
+  }
+
+  /**
+   * Holds if there is a store step from `pred` to `succ` under property `prop`,
+   * that is, `succ` is the local source of the base of a write of property
+   * `prop` with right-hand side `pred`.
+   *
+   * For example, for this code snippet:
+   *
+   * ```
+   * var a = new A();
+   * a.p = e;
+   * ```
+   *
+   * there is a store step from `e` to `new A()` under property `prop`.
+   *
+   * As a special case, if the base of the property write is a global variable,
+   * then there is a store step from the right-hand side of the write to any
+   * read of the same property from the same global variable in the same file.
+   */
+  cached
+  predicate basicStoreStep(DataFlow::Node pred, DataFlow::Node succ, string prop) {
+    succ.(DataFlow::SourceNode).hasPropertyWrite(prop, pred)
+    or
+    exists(GlobalVariable gv, File f |
+      globalPropertyWrite(gv, f, prop, pred) and
+      globalPropertyRead(gv, f, prop, succ)
+    )
+  }
+
+  /**
+   * Holds if there is a load step from `pred` to `succ` under property `prop`,
+   * that is, `succ` is a read of property `prop` from `pred`.
+   */
+  cached
+  predicate basicLoadStep(DataFlow::Node pred, DataFlow::PropRead succ, string prop) {
+    succ.accesses(pred, prop)
+  }
+
+  /**
+   * Holds if there is a higher-order call with argument `arg`, and `cb` is the local
+   * source of an argument that flows into the callee position of that call:
+   *
+   * ```
+   * function f(x, g) {
+   *   g(
+   *     x                 // arg
+   *   );
+   * }
+   *
+   * function cb() {      // cb
+   * }
+   *
+   * f(arg, cb);
+   * ```
+   *
+   * This is an over-approximation of a possible data flow step through a callback
+   * invocation.
+   */
+  cached
+  predicate callback(DataFlow::Node arg, DataFlow::SourceNode cb) {
+    exists(DataFlow::InvokeNode invk, DataFlow::ParameterNode cbParm, DataFlow::Node cbArg |
+      arg = invk.getAnArgument() and
+      cbParm.flowsTo(invk.getCalleeNode()) and
+      callStep(cbArg, cbParm) and
+      cb.flowsTo(cbArg)
+    )
+    or
+    exists(DataFlow::ParameterNode cbParm, DataFlow::Node cbArg |
+      callback(arg, cbParm) and
+      callStep(cbArg, cbParm) and
+      cb.flowsTo(cbArg)
+    )
+  }
+
+  /**
+   * Holds if `f` may return `base`, which has a write of property `prop` with right-hand side `rhs`.
+   */
+  cached
+  predicate returnedPropWrite(Function f, DataFlow::SourceNode base, string prop, DataFlow::Node rhs) {
+    base.hasPropertyWrite(prop, rhs) and
+    base.flowsToExpr(f.getAReturnedExpr())
+  }
+
+  /**
+   * Holds if `f` may assign `rhs` to `this.prop`.
+   */
+  cached
+  predicate receiverPropWrite(Function f, string prop, DataFlow::Node rhs) {
+    DataFlow::thisNode(f).hasPropertyWrite(prop, rhs)
+  }
+
+  /**
+   * A step from `pred` to `succ` through a call to an identity function.
+   */
+  cached
+  predicate identityFunctionStep(DataFlow::Node pred, DataFlow::CallNode succ) {
+    exists(DataFlow::GlobalVarRefNode global |
+      global.getName() = "Object" and
+      succ.(DataFlow::MethodCallNode).calls(global, ["freeze", "seal"]) and
+      pred = succ.getArgument(0)
+    )
+  }
 }
 
-/**
- * Holds if there is a higher-order call with argument `arg`, and `cb` is the local
- * source of an argument that flows into the callee position of that call:
- *
- * ```
- * function f(x, g) {
- *   g(
- *     x                 // arg
- *   );
- * }
- *
- * function cb() {      // cb
- * }
- *
- * f(arg, cb);
- *
- * This is an over-approximation of a possible data flow step through a callback
- * invocation.
- */
-predicate callback(DataFlow::Node arg, DataFlow::SourceNode cb) {
-  exists(DataFlow::InvokeNode invk, DataFlow::ParameterNode cbParm, DataFlow::Node cbArg |
-    arg = invk.getAnArgument() and
-    cbParm.flowsTo(invk.getCalleeNode()) and
-    callStep(cbArg, cbParm) and
-    cb.flowsTo(cbArg)
-  )
-  or
-  exists(DataFlow::ParameterNode cbParm, DataFlow::Node cbArg |
-    callback(arg, cbParm) and
-    callStep(cbArg, cbParm) and
-    cb.flowsTo(cbArg)
-  )
-}
-
-/**
- * Holds if `f` may return `base`, which has a write of property `prop` with right-hand side `rhs`.
- */
-predicate returnedPropWrite(Function f, DataFlow::SourceNode base, string prop, DataFlow::Node rhs) {
-  base.hasPropertyWrite(prop, rhs) and
-  base.flowsToExpr(f.getAReturnedExpr())
-}
-
-/**
- * Holds if `f` may assign `rhs` to `this.prop`.
- */
-predicate receiverPropWrite(Function f, string prop, DataFlow::Node rhs) {
-  DataFlow::thisNode(f).hasPropertyWrite(prop, rhs)
-}
+import CachedSteps
 
 /**
  * A utility class that is equivalent to `boolean` but does not require type joining.
  */
-class Boolean extends boolean { Boolean() { this = true or this = false } }
+class Boolean extends boolean {
+  Boolean() { this = true or this = false }
+}
 
 /**
  * A summary of an inter-procedural data flow path.
@@ -310,20 +476,20 @@ newtype TPathSummary =
  */
 class PathSummary extends TPathSummary {
   Boolean hasReturn;
-
   Boolean hasCall;
-
   FlowLabel start;
-
   FlowLabel end;
 
   PathSummary() { this = MkPathSummary(hasReturn, hasCall, start, end) }
 
-  /** Indicates whether the path represented by this summary contains any return steps. */
+  /** Indicates whether the path represented by this summary contains any unmatched return steps. */
   boolean hasReturn() { result = hasReturn }
 
-  /** Indicates whether the path represented by this summary contains any call steps. */
+  /** Indicates whether the path represented by this summary contains any unmatched call steps. */
   boolean hasCall() { result = hasCall }
+
+  /** Holds if the path represented by this summary contains no unmatched call or return steps. */
+  predicate isLevel() { hasReturn = false and hasCall = false }
 
   /** Gets the flow label describing the value at the start of this flow path. */
   FlowLabel getStartLabel() { result = start }
@@ -341,8 +507,8 @@ class PathSummary extends TPathSummary {
     exists(Boolean hasReturn2, Boolean hasCall2, FlowLabel end2 |
       that = MkPathSummary(hasReturn2, hasCall2, end, end2)
     |
-      result = MkPathSummary(hasReturn.booleanOr(hasReturn2), hasCall.booleanOr(hasCall2), start,
-          end2) and
+      result =
+        MkPathSummary(hasReturn.booleanOr(hasReturn2), hasCall.booleanOr(hasCall2), start, end2) and
       // avoid constructing invalid paths
       not (hasCall = true and hasReturn2 = true)
     )
@@ -357,8 +523,8 @@ class PathSummary extends TPathSummary {
     exists(Boolean hasReturn2, Boolean hasCall2 |
       that = MkPathSummary(hasReturn2, hasCall2, FlowLabel::data(), FlowLabel::data())
     |
-      result = MkPathSummary(hasReturn.booleanOr(hasReturn2), hasCall.booleanOr(hasCall2), start,
-          end) and
+      result =
+        MkPathSummary(hasReturn.booleanOr(hasReturn2), hasCall.booleanOr(hasCall2), start, end) and
       // avoid constructing invalid paths
       not (hasCall = true and hasReturn2 = true)
     )
@@ -375,8 +541,9 @@ class PathSummary extends TPathSummary {
       (if hasReturn = true then withReturn = "with" else withReturn = "without") and
       (if hasCall = true then withCall = "with" else withCall = "without")
     |
-      result = "path " + withReturn + " return steps and " + withCall + " call steps " +
-          "transforming " + start + " into " + end
+      result =
+        "path " + withReturn + " return steps and " + withCall + " call steps " + "transforming " +
+          start + " into " + end
     )
   }
 }
@@ -385,7 +552,13 @@ module PathSummary {
   /**
    * Gets a summary describing a path without any calls or returns.
    */
-  PathSummary level() { exists(FlowLabel lbl | result = MkPathSummary(false, false, lbl, lbl)) }
+  PathSummary level() { result = level(_) }
+
+  /**
+   * Gets a summary describing a path without any calls or returns, transforming `lbl` into
+   * itself.
+   */
+  PathSummary level(FlowLabel lbl) { result = MkPathSummary(false, false, lbl, lbl) }
 
   /**
    * Gets a summary describing a path with one or more calls, but no returns.

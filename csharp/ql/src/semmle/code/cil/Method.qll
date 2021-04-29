@@ -50,6 +50,12 @@ class MethodImplementation extends EntryPoint, @cil_method_implementation {
   int getStackSize() { cil_method_stack_size(this, result) }
 
   override string toString() { result = getMethod().toString() }
+
+  /** Gets a string representing the disassembly of this implementation. */
+  string getDisassembly() {
+    result =
+      concat(Instruction i | i = this.getAnInstruction() | i.toString(), ", " order by i.getIndex())
+  }
 }
 
 /**
@@ -63,6 +69,9 @@ class Method extends DotNet::Callable, Element, Member, TypeContainer, DataFlowN
    */
   MethodImplementation getAnImplementation() { result.getMethod() = this }
 
+  /** Gets the "best" implementation of this method, if any. */
+  BestImplementation getImplementation() { result = getAnImplementation() }
+
   override Method getMethod() { result = this }
 
   override string getName() { cil_method(this, result, _, _) }
@@ -73,13 +82,7 @@ class Method extends DotNet::Callable, Element, Member, TypeContainer, DataFlowN
 
   override Location getLocation() { result = Element.super.getLocation() }
 
-  /**
-   * Gets a location of this method, if any.
-   *
-   * This predicate returns locations both in assemblies and in source code
-   * if available.
-   */
-  override Location getALocation() { cil_method_location(this, result) }
+  override Location getALocation() { cil_method_location(this.getSourceDeclaration(), result) }
 
   override Parameter getRawParameter(int n) { cil_parameter(result, this, n, _) }
 
@@ -102,7 +105,7 @@ class Method extends DotNet::Callable, Element, Member, TypeContainer, DataFlowN
   int getCallPopCount() { result = count(getRawParameter(_)) }
 
   /** Gets a method called by this method. */
-  Method getACallee() { result = getAnImplementation().getAnInstruction().(Call).getTarget() }
+  Method getACallee() { result = getImplementation().getAnInstruction().(Call).getTarget() }
 
   /** Holds if this method is `virtual`. */
   predicate isVirtual() { cil_virtual(this) }
@@ -168,21 +171,27 @@ class Method extends DotNet::Callable, Element, Member, TypeContainer, DataFlowN
   /** Gets a method that overrides this method, if any. */
   final Method getAnOverrider() { result.getOverriddenMethod() = this }
 
-  override predicate hasBody() { exists(getAnImplementation()) }
+  override predicate hasBody() { exists(getImplementation()) }
 
   override predicate canReturn(DotNet::Expr expr) {
-    exists(Return ret | ret.getImplementation().getMethod() = this and expr = ret.getExpr())
+    exists(Return ret | ret.getImplementation() = this.getImplementation() and expr = ret.getExpr())
   }
 }
 
 /** A destructor/finalizer. */
-class Destructor extends Method, DotNet::Destructor { Destructor() { this.isFinalizer() } }
+class Destructor extends Method, DotNet::Destructor {
+  Destructor() { this.isFinalizer() }
+}
 
 /** A constructor. */
-class Constructor extends Method, DotNet::Constructor { Constructor() { this.isConstructor() } }
+class Constructor extends Method, DotNet::Constructor {
+  Constructor() { this.isConstructor() }
+}
 
 /** A static/class constructor. */
-class StaticConstructor extends Constructor { StaticConstructor() { this.isStaticConstructor() } }
+class StaticConstructor extends Constructor {
+  StaticConstructor() { this.isStaticConstructor() }
+}
 
 /** An instance constructor. */
 class InstanceConstructor extends Constructor {
@@ -192,7 +201,7 @@ class InstanceConstructor extends Constructor {
 /** A method that always returns the `this` parameter. */
 class ChainingMethod extends Method {
   ChainingMethod() {
-    forex(Return ret | ret = getAnImplementation().getAnInstruction() |
+    forex(Return ret | ret = getImplementation().getAnInstruction() |
       ret.getExpr() instanceof ThisAccess
     )
   }
@@ -225,9 +234,7 @@ class TrivialGetter extends Method {
   }
 
   /** Gets the underlying field of this getter. */
-  Field getField() {
-    getAnImplementation().getAnInstruction().(FieldReadAccess).getTarget() = result
-  }
+  Field getField() { getImplementation().getAnInstruction().(FieldReadAccess).getTarget() = result }
 }
 
 /** A setter. */
@@ -243,7 +250,7 @@ class Setter extends Accessor {
  */
 class TrivialSetter extends Method {
   TrivialSetter() {
-    exists(MethodImplementation impl | impl = getAnImplementation() |
+    exists(MethodImplementation impl | impl = getImplementation() |
       impl.getInstruction(0) instanceof ThisAccess and
       impl.getInstruction(1).(ParameterReadAccess).getTarget().getIndex() = 1 and
       impl.getInstruction(2) instanceof FieldWriteAccess
@@ -252,7 +259,7 @@ class TrivialSetter extends Method {
 
   /** Gets the underlying field of this setter. */
   Field getField() {
-    result = getAnImplementation().getAnInstruction().(FieldWriteAccess).getTarget()
+    result = getImplementation().getAnInstruction().(FieldWriteAccess).getTarget()
   }
 }
 

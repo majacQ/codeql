@@ -66,19 +66,22 @@ module Hapi {
   /**
    * A Hapi response expression.
    */
-  class ResponseExpr extends HTTP::Servers::StandardResponseExpr { override ResponseSource src; }
+  class ResponseExpr extends HTTP::Servers::StandardResponseExpr {
+    override ResponseSource src;
+  }
 
   /**
    * An Hapi request expression.
    */
-  class RequestExpr extends HTTP::Servers::StandardRequestExpr { override RequestSource src; }
+  class RequestExpr extends HTTP::Servers::StandardRequestExpr {
+    override RequestSource src;
+  }
 
   /**
    * An access to a user-controlled Hapi request input.
    */
   private class RequestInputAccess extends HTTP::RequestInputAccess {
     RouteHandler rh;
-
     string kind;
 
     RequestInputAccess() {
@@ -172,7 +175,6 @@ module Hapi {
    */
   class RouteSetup extends MethodCallExpr, HTTP::Servers::StandardRouteSetup {
     ServerDefinition server;
-
     Expr handler;
 
     RouteSetup() {
@@ -189,8 +191,14 @@ module Hapi {
     }
 
     override DataFlow::SourceNode getARouteHandler() {
-      result.(DataFlow::SourceNode).flowsTo(handler.flow()) or
-      result.(DataFlow::TrackedNode).flowsTo(handler.flow())
+      result = getARouteHandler(DataFlow::TypeBackTracker::end())
+    }
+
+    private DataFlow::SourceNode getARouteHandler(DataFlow::TypeBackTracker t) {
+      t.start() and
+      result = handler.flow().getALocalSource()
+      or
+      exists(DataFlow::TypeBackTracker t2 | result = getARouteHandler(t2).backtrack(t2, t))
     }
 
     Expr getRouteHandlerExpr() { result = handler }
@@ -220,24 +228,10 @@ module Hapi {
   }
 
   /**
-   * Tracking for `RouteHandlerCandidate`.
-   */
-  private class TrackedRouteHandlerCandidate extends DataFlow::TrackedNode {
-    TrackedRouteHandlerCandidate() { this instanceof RouteHandlerCandidate }
-  }
-
-  /**
    * A function that looks like a Hapi route handler and flows to a route setup.
    */
   private class TrackedRouteHandlerCandidateWithSetup extends RouteHandler,
-    HTTP::Servers::StandardRouteHandler, DataFlow::ValueNode {
-    override Function astNode;
-
-    TrackedRouteHandlerCandidateWithSetup() {
-      exists(TrackedRouteHandlerCandidate tracked |
-        tracked.flowsTo(any(RouteSetup s).getRouteHandlerExpr().flow()) and
-        this = tracked
-      )
-    }
+    HTTP::Servers::StandardRouteHandler, DataFlow::FunctionNode {
+    TrackedRouteHandlerCandidateWithSetup() { this = any(RouteSetup s).getARouteHandler() }
   }
 }

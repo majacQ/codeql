@@ -4,8 +4,9 @@
  * Provides classes implementing type inference for variables.
  */
 
-import javascript
+private import javascript
 private import AbstractValuesImpl
+private import AnalyzedParameters
 private import semmle.javascript.dataflow.InferredTypes
 private import semmle.javascript.dataflow.Refinements
 
@@ -31,35 +32,46 @@ private class AnalyzedCapturedVariable extends @variable {
 }
 
 /**
- * Flow analysis for accesses to SSA variables.
+ * Flow analysis for SSA nodes.
  */
-private class SsaVarAccessAnalysis extends DataFlow::AnalyzedValueNode {
-  AnalyzedSsaDefinition def;
-
-  SsaVarAccessAnalysis() { astNode = def.getVariable().getAUse() }
-
-  override AbstractValue getALocalValue() { result = def.getAnRhsValue() }
+private class AnalyzedSsaDefinitionNode extends AnalyzedNode, DataFlow::SsaDefinitionNode {
+  override AbstractValue getALocalValue() { result = ssa.(AnalyzedSsaDefinition).getAnRhsValue() }
 }
 
 /**
- * Flow analysis for accesses to SSA variables.
- *
- * Unlike `SsaVarAccessAnalysis`, this only contributes to `getAValue()`, not `getALocalValue()`.
+ * An SSA definition whose right-hand side is a call with non-local data flow.
  */
-private class SsaVarAccessWithNonLocalAnalysis extends SsaVarAccessAnalysis {
-  DataFlow::AnalyzedValueNode src;
+private class SsaDefinitionWithNonLocalFlow extends SsaExplicitDefinition {
+  CallWithNonLocalAnalyzedReturnFlow source;
 
-  SsaVarAccessWithNonLocalAnalysis() {
-    exists(VarDef varDef |
-      varDef = def.(SsaExplicitDefinition).getDef() and
-      varDef.getSource().flow() = src and
-      src instanceof CallWithNonLocalAnalyzedReturnFlow and
-      // avoid relating `v` and `f()` in `var {v} = f();`
-      not varDef.getTarget() instanceof DestructuringPattern
-    )
+  SsaDefinitionWithNonLocalFlow() { source = getDef().getSource().flow() }
+
+  CallWithNonLocalAnalyzedReturnFlow getSource() { result = source }
+}
+
+/**
+ * Flow analysis for SSA nodes corresponding to `SsaDefinitionWithNonLocalFlow`.
+ */
+private class AnalyzedSsaDefinitionNodeWithNonLocalAnalysis extends AnalyzedSsaDefinitionNode {
+  override SsaDefinitionWithNonLocalFlow ssa;
+
+  override AbstractValue getAValue() { result = ssa.getSource().getAValue() }
+}
+
+/**
+ * Flow analysis for uses of an SSA variable corresponding to `SsaDefinitionWithNonLocalFlow`.
+ */
+private class AnalyzedSsaVariableUseWithNonLocalFlow extends AnalyzedValueNode {
+  SsaDefinitionWithNonLocalFlow ssaDef;
+
+  AnalyzedSsaVariableUseWithNonLocalFlow() {
+    this = DataFlow::valueNode(ssaDef.getVariable().getAUse())
   }
 
-  override AbstractValue getAValue() { result = src.getAValue() }
+  override AbstractValue getAValue() {
+    // Block indefinite values coming from getALocalValue()
+    result = ssaDef.getSource().getAValue()
+  }
 }
 
 /**
@@ -109,7 +121,7 @@ class AnalyzedVarDef extends VarDef {
    * due to the given `cause`.
    */
   predicate isIncomplete(DataFlow::Incompleteness cause) {
-    this instanceof Parameter and cause = "call"
+    this instanceof Parameter and DataFlow::valueNode(this).(AnalyzedValueNode).isIncomplete(cause)
     or
     this instanceof ImportSpecifier and cause = "import"
     or
@@ -132,47 +144,21 @@ class AnalyzedVarDef extends VarDef {
 /**
  * Flow analysis for simple parameters of selected functions.
  */
-private class AnalyzedParameter extends AnalyzedVarDef, @vardecl {
-  AnalyzedParameter() {
-    exists(FunctionWithAnalyzedParameters f, int parmIdx | this = f.getParameter(parmIdx) |
-      // we cannot track flow into rest parameters
-      not this.(Parameter).isRestParameter()
-    )
-  }
-
-  /** Gets the function this is a parameter of. */
-  FunctionWithAnalyzedParameters getFunction() { this = result.getAParameter() }
-
-  override DataFlow::AnalyzedNode getRhs() {
-    getFunction().argumentPassing(this, result.asExpr()) or
-    result = this.(Parameter).getDefault().analyze()
-  }
+private class AnalyzedParameterAsVarDef extends AnalyzedVarDef, @var_decl {
+  AnalyzedParameterAsVarDef() { this instanceof Parameter }
 
   override AbstractValue getAnRhsValue() {
-    result = AnalyzedVarDef.super.getAnRhsValue()
-    or
-    not getFunction().mayReceiveArgument(this) and
-    result = TAbstractUndefined()
-  }
-
-  override predicate isIncomplete(DataFlow::Incompleteness cause) {
-    getFunction().isIncomplete(cause)
-    or
-    not getFunction().argumentPassing(this, _) and
-    getFunction().mayReceiveArgument(this) and
-    cause = "call"
+    result = DataFlow::valueNode(this).(AnalyzedValueNode).getALocalValue()
   }
 }
 
 /**
  * Flow analysis for simple rest parameters.
  */
-private class AnalyzedRestParameter extends AnalyzedVarDef, @vardecl {
-  AnalyzedRestParameter() { this.(Parameter).isRestParameter() }
+private class AnalyzedRestParameter extends AnalyzedValueNode {
+  AnalyzedRestParameter() { astNode.(Parameter).isRestParameter() }
 
-  override AbstractValue getAnRhsValue() { result = TAbstractOtherObject() }
-
-  override predicate isIncomplete(DataFlow::Incompleteness cause) { none() }
+  override AbstractValue getALocalValue() { result = TAbstractOtherObject() }
 }
 
 /**
@@ -182,7 +168,7 @@ private class AnalyzedAmdParameter extends AnalyzedVarDef {
   AbstractValue implicitInitVal;
 
   AnalyzedAmdParameter() {
-    exists(AMDModule m, AMDModuleDefinition mdef | mdef = m.getDefine() |
+    exists(AmdModule m, AmdModuleDefinition mdef | mdef = m.getDefine() |
       this = mdef.getModuleParameter() and
       implicitInitVal = TAbstractModuleObject(m)
       or
@@ -212,7 +198,11 @@ abstract class AnalyzedSsaDefinition extends SsaDefinition {
  * Flow analysis for SSA definitions corresponding to `VarDef`s.
  */
 private class AnalyzedExplicitDefinition extends AnalyzedSsaDefinition, SsaExplicitDefinition {
-  override AbstractValue getAnRhsValue() { result = getDef().(AnalyzedVarDef).getAnAssignedValue() }
+  override AbstractValue getAnRhsValue() {
+    result = getDef().(AnalyzedVarDef).getAnAssignedValue()
+    or
+    result = getRhsNode().analyze().getALocalValue()
+  }
 }
 
 /**
@@ -229,6 +219,8 @@ private class AnalyzedVariableCapture extends AnalyzedSsaDefinition, SsaVariable
   override AbstractValue getAnRhsValue() {
     exists(LocalVariable v | v = getSourceVariable() |
       result = v.(AnalyzedCapturedVariable).getALocalValue()
+      or
+      result = any(AnalyzedExplicitDefinition def | def.getSourceVariable() = v).getAnRhsValue()
       or
       not guaranteedToBeInitialized(v) and result = getImplicitInitValue(v)
     )
@@ -373,7 +365,6 @@ private predicate nodeBuiltins(Variable var, AbstractValue av) {
  */
 private class AnalyzedGlobalVarUse extends DataFlow::AnalyzedValueNode {
   GlobalVariable gv;
-
   AnalyzedGlobal agv;
 
   AnalyzedGlobalVarUse() {
@@ -396,9 +387,7 @@ private class AnalyzedGlobalVarUse extends DataFlow::AnalyzedValueNode {
     result.getBase().analyze().getALocalValue() instanceof AbstractGlobalObject
   }
 
-  override predicate isIncomplete(DataFlow::Incompleteness reason) {
-    super.isIncomplete(reason)
-    or
+  override predicate hasAdditionalIncompleteness(DataFlow::Incompleteness reason) {
     clobberedProp(gv, reason)
   }
 
@@ -432,7 +421,7 @@ private AnalyzedVarDef defIn(GlobalVariable gv, TopLevel tl) {
  * Holds if there is a write to a property with the same name as `gv` on an object
  * for which the analysis is incomplete due to the given `reason`.
  */
-pragma[noinline]
+cached
 private predicate clobberedProp(GlobalVariable gv, DataFlow::Incompleteness reason) {
   exists(AnalyzedNode base |
     potentialPropWriteOfGlobal(base, gv) and
@@ -440,13 +429,13 @@ private predicate clobberedProp(GlobalVariable gv, DataFlow::Incompleteness reas
   )
 }
 
-pragma[noinline]
+pragma[nomagic]
 private predicate indefiniteObjectValue(AbstractValue val, DataFlow::Incompleteness reason) {
   val.isIndefinite(reason) and
   val.getType() = TTObject()
 }
 
-pragma[noinline]
+pragma[nomagic]
 private predicate potentialPropWriteOfGlobal(AnalyzedNode base, GlobalVariable gv) {
   exists(DataFlow::PropWrite pwn |
     pwn.getPropertyName() = gv.getName() and
@@ -517,7 +506,6 @@ private class AnalyzedGlobal extends TAnalyzedGlobal {
  */
 private class AnalyzedGlocal extends AnalyzedGlobal, TAnalyzedGlocal {
   GlobalVariable gv;
-
   TopLevel tl;
 
   AnalyzedGlocal() { this = TAnalyzedGlocal(gv, tl) }
@@ -622,7 +610,11 @@ private class ReflectiveVarFlow extends DataFlow::AnalyzedValueNode {
     )
   }
 
-  override AbstractValue getALocalValue() { result = TIndefiniteAbstractValue("eval") }
+  override AbstractValue getALocalValue() {
+    result = TIndefiniteAbstractValue("eval")
+    or
+    result = AnalyzedValueNode.super.getALocalValue()
+  }
 }
 
 /**
@@ -634,7 +626,11 @@ private class ReflectiveVarFlow extends DataFlow::AnalyzedValueNode {
 private class NamespaceExportVarFlow extends DataFlow::AnalyzedValueNode {
   NamespaceExportVarFlow() { astNode.(VarAccess).getVariable().isNamespaceExport() }
 
-  override AbstractValue getALocalValue() { result = TIndefiniteAbstractValue("namespace") }
+  override AbstractValue getALocalValue() {
+    result = TIndefiniteAbstractValue("namespace")
+    or
+    result = AnalyzedValueNode.super.getALocalValue()
+  }
 }
 
 /**
@@ -645,7 +641,7 @@ abstract class FunctionWithAnalyzedParameters extends Function {
    * Holds if `p` is a parameter of this function and `arg` is
    * the corresponding argument.
    */
-  abstract predicate argumentPassing(SimpleParameter p, Expr arg);
+  abstract predicate argumentPassing(Parameter p, Expr arg);
 
   /**
    * Holds if `p` is a parameter of this function that may receive a value from an argument.
@@ -665,7 +661,7 @@ abstract private class CallWithAnalyzedParameters extends FunctionWithAnalyzedPa
    */
   abstract DataFlow::InvokeNode getAnInvocation();
 
-  override predicate argumentPassing(SimpleParameter p, Expr arg) {
+  override predicate argumentPassing(Parameter p, Expr arg) {
     exists(DataFlow::InvokeNode invk, int argIdx | invk = getAnInvocation() |
       p = getParameter(argIdx) and
       not p.isRestParameter() and
@@ -674,14 +670,14 @@ abstract private class CallWithAnalyzedParameters extends FunctionWithAnalyzedPa
   }
 
   override predicate mayReceiveArgument(Parameter p) {
-    exists(DataFlow::InvokeNode invk, int argIdx |
-      invk = getAnInvocation() and
-      p = getParameter(argIdx)
-    |
-      exists(invk.getArgument(argIdx))
-      or
-      invk.asExpr().(InvokeExpr).isSpreadArgument([0 .. argIdx])
+    exists(int argIdx |
+      p = getParameter(argIdx) and
+      getAnInvocation().getNumArgument() > argIdx
     )
+    or
+    // All parameters may receive an argument if invoked with a spread argument
+    p = getAParameter() and
+    getAnInvocation().asExpr().(InvokeExpr).isSpreadArgument(_)
   }
 }
 

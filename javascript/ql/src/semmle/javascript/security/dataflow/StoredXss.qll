@@ -4,25 +4,9 @@
  */
 
 import javascript
-import semmle.javascript.security.dataflow.RemoteFlowSources
-import semmle.javascript.security.dataflow.ReflectedXss as ReflectedXss
-import semmle.javascript.security.dataflow.DomBasedXss as DomBasedXss
 
 module StoredXss {
-  /**
-   * A data flow source for XSS vulnerabilities.
-   */
-  abstract class Source extends DataFlow::Node { }
-
-  /**
-   * A data flow sink for XSS vulnerabilities.
-   */
-  abstract class Sink extends DataFlow::Node { }
-
-  /**
-   * A sanitizer for XSS vulnerabilities.
-   */
-  abstract class Sanitizer extends DataFlow::Node { }
+  import Xss::StoredXss
 
   /**
    * A taint-tracking configuration for reasoning about XSS.
@@ -38,6 +22,10 @@ module StoredXss {
       super.isSanitizer(node) or
       node instanceof Sanitizer
     }
+
+    override predicate isSanitizerGuard(TaintTracking::SanitizerGuardNode guard) {
+      guard instanceof SanitizerGuard
+    }
   }
 
   /** A file name, considered as a flow source for stored XSS. */
@@ -45,11 +33,8 @@ module StoredXss {
     FileNameSourceAsSource() { this instanceof FileNameSource }
   }
 
-  /** An ordinary XSS sink, considered as a flow sink for stored XSS. */
-  class XssSinkAsSink extends Sink {
-    XssSinkAsSink() {
-      this instanceof ReflectedXss::ReflectedXss::Sink or
-      this instanceof DomBasedXss::DomBasedXss::Sink
-    }
+  /** User-controlled torrent information, considered as a flow source for stored XSS. */
+  class UserControlledTorrentInfoAsSource extends Source {
+    UserControlledTorrentInfoAsSource() { this instanceof ParseTorrent::UserControlledTorrentInfo }
   }
 }

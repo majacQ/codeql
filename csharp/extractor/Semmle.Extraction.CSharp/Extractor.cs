@@ -62,6 +62,8 @@ namespace Semmle.Extraction.CSharp
         /// <returns><see cref="ExitCode"/></returns>
         public static ExitCode Run(string[] args)
         {
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
             var commandLineArguments = Options.CreateWithEnvironment(args);
             var fileLogger = new FileLogger(commandLineArguments.Verbosity, GetCSharpLogPath());
             var logger = commandLineArguments.Console
@@ -74,15 +76,15 @@ namespace Semmle.Extraction.CSharp
                 return ExitCode.Ok;
             }
 
-            using (var analyser = new Analyser(new LogProgressMonitor(logger), logger))
+            var canonicalPathCache = CanonicalPathCache.Create(logger, 1000);
+            var pathTransformer = new PathTransformer(canonicalPathCache);
+
+            using (var analyser = new Analyser(new LogProgressMonitor(logger), logger, commandLineArguments.AssemblySensitiveTrap, pathTransformer))
             using (var references = new BlockingCollection<MetadataReference>())
             {
                 try
                 {
                     var compilerVersion = new CompilerVersion(commandLineArguments);
-
-                    bool preserveSymlinks = Environment.GetEnvironmentVariable("SEMMLE_PRESERVE_SYMLINKS") == "true";
-                    var canonicalPathCache = CanonicalPathCache.Create(logger, 1000, preserveSymlinks ? CanonicalPathCache.Symlinks.Preserve : CanonicalPathCache.Symlinks.Follow);
 
                     if (compilerVersion.SkipExtraction)
                     {
@@ -107,6 +109,12 @@ namespace Semmle.Extraction.CSharp
                         return ExitCode.Failed;
                     }
 
+                    if (!analyser.BeginInitialize(compilerVersion.ArgsWithResponse))
+                    {
+                        logger.Log(Severity.Info, "Skipping extraction since files have already been extracted");
+                        return ExitCode.Ok;
+                    }
+
                     var referenceTasks = ResolveReferences(compilerArguments, analyser, canonicalPathCache, references);
 
                     var syntaxTrees = new List<SyntaxTree>();
@@ -118,8 +126,8 @@ namespace Semmle.Extraction.CSharp
                         compilerArguments.Encoding,
                         syntaxTrees);
 
-                    var sw = new Stopwatch();
-                    sw.Start();
+                    var sw1 = new Stopwatch();
+                    sw1.Start();
 
                     Parallel.Invoke(
                         new ParallelOptions { MaxDegreeOfParallelism = commandLineArguments.Threads },
@@ -129,10 +137,15 @@ namespace Semmle.Extraction.CSharp
                     {
                         logger.Log(Severity.Error, "  No source files");
                         ++analyser.CompilationErrors;
-                        analyser.LogDiagnostics(compilerVersion.ArgsWithResponse);
                         return ExitCode.Failed;
                     }
 
+                    // csc.exe (CSharpCompiler.cs) also provides CompilationOptions
+                    // .WithMetadataReferenceResolver(),
+                    // .WithXmlReferenceResolver() and
+                    // .WithSourceReferenceResolver().
+                    // These would be needed if we hadn't explicitly provided the source/references
+                    // already.
                     var compilation = CSharpCompilation.Create(
                         compilerArguments.CompilationName,
                         syntaxTrees,
@@ -140,14 +153,10 @@ namespace Semmle.Extraction.CSharp
                         compilerArguments.CompilationOptions.
                             WithAssemblyIdentityComparer(DesktopAssemblyIdentityComparer.Default).
                             WithStrongNameProvider(new DesktopStrongNameProvider(compilerArguments.KeyFileSearchPaths))
-                        // csc.exe (CSharpCompiler.cs) also provides WithMetadataReferenceResolver,
-                        // WithXmlReferenceResolver and
-                        // WithSourceReferenceResolver.
-                        // These would be needed if we hadn't explicitly provided the source/references
-                        // already.
                         );
 
-                    analyser.Initialize(compilerArguments, compilation, commandLineArguments, compilerVersion.ArgsWithResponse);
+                    analyser.EndInitialize(compilerArguments, commandLineArguments, compilation);
+                    analyser.AnalyseCompilation(cwd, args);
                     analyser.AnalyseReferences();
 
                     foreach (var tree in compilation.SyntaxTrees)
@@ -155,13 +164,29 @@ namespace Semmle.Extraction.CSharp
                         analyser.AnalyseTree(tree);
                     }
 
-                    sw.Stop();
-                    logger.Log(Severity.Info, "  Models constructed in {0}", sw.Elapsed);
+                    var currentProcess = Process.GetCurrentProcess();
+                    var cpuTime1 = currentProcess.TotalProcessorTime;
+                    var userTime1 = currentProcess.UserProcessorTime;
+                    sw1.Stop();
+                    logger.Log(Severity.Info, "  Models constructed in {0}", sw1.Elapsed);
 
-                    sw.Restart();
+                    var sw2 = new Stopwatch();
+                    sw2.Start();
                     analyser.PerformExtraction(commandLineArguments.Threads);
-                    sw.Stop();
-                    logger.Log(Severity.Info, "  Extraction took {0}", sw.Elapsed);
+                    sw2.Stop();
+                    var cpuTime2 = currentProcess.TotalProcessorTime;
+                    var userTime2 = currentProcess.UserProcessorTime;
+
+                    var performance = new Entities.PerformanceMetrics()
+                    {
+                        Frontend = new Entities.Timings() { Elapsed = sw1.Elapsed, Cpu = cpuTime1, User = userTime1 },
+                        Extractor = new Entities.Timings() { Elapsed = sw2.Elapsed, Cpu = cpuTime2 - cpuTime1, User = userTime2 - userTime1 },
+                        Total = new Entities.Timings() { Elapsed = stopwatch.Elapsed, Cpu = cpuTime2, User = userTime2 },
+                        PeakWorkingSet = currentProcess.PeakWorkingSet64
+                    };
+
+                    analyser.LogPerformance(performance);
+                    logger.Log(Severity.Info, "  Extraction took {0}", sw2.Elapsed);
 
                     return analyser.TotalErrors == 0 ? ExitCode.Ok : ExitCode.Errors;
                 }
@@ -293,7 +318,10 @@ namespace Semmle.Extraction.CSharp
             ILogger logger,
             CommonOptions options)
         {
-            using (var analyser = new Analyser(pm, logger))
+            var canonicalPathCache = CanonicalPathCache.Create(logger, 1000);
+            var pathTransformer = new PathTransformer(canonicalPathCache);
+
+            using (var analyser = new Analyser(pm, logger, false, pathTransformer))
             using (var references = new BlockingCollection<MetadataReference>())
             {
                 try
@@ -367,24 +395,37 @@ namespace Semmle.Extraction.CSharp
         public static string GetCSharpLogPath() =>
             Path.Combine(GetCSharpLogDirectory(), "csharp.log");
 
-        public static string GetCSharpLogDirectory()
+        /// <summary>
+        /// Gets the path to a `csharp.{hash}.txt` file written to by the C# extractor.
+        /// </summary>
+        public static string GetCSharpArgsLogPath(string hash) =>
+            Path.Combine(GetCSharpLogDirectory(), $"csharp.{hash}.txt");
+
+        /// <summary>
+        /// Gets a list of all `csharp.{hash}.txt` files currently written to the log directory.
+        /// </summary>
+        public static IEnumerable<string> GetCSharpArgsLogs() =>
+            Directory.EnumerateFiles(GetCSharpLogDirectory(), "csharp.*.txt");
+
+        static string GetCSharpLogDirectory()
         {
-            string snapshot = Environment.GetEnvironmentVariable("ODASA_SNAPSHOT");
-            string buildErrorDir = Environment.GetEnvironmentVariable("ODASA_BUILD_ERROR_DIR");
-            string traps = Environment.GetEnvironmentVariable("TRAP_FOLDER");
+            var codeQlLogDir = Environment.GetEnvironmentVariable("CODEQL_EXTRACTOR_CSHARP_LOG_DIR");
+            if (!string.IsNullOrEmpty(codeQlLogDir))
+                return codeQlLogDir;
+
+            var snapshot = Environment.GetEnvironmentVariable("ODASA_SNAPSHOT");
             if (!string.IsNullOrEmpty(snapshot))
-            {
                 return Path.Combine(snapshot, "log");
-            }
+
+            var buildErrorDir = Environment.GetEnvironmentVariable("ODASA_BUILD_ERROR_DIR");
             if (!string.IsNullOrEmpty(buildErrorDir))
-            {
                 // Used by `qltest`
                 return buildErrorDir;
-            }
+
+            var traps = Environment.GetEnvironmentVariable("TRAP_FOLDER");
             if (!string.IsNullOrEmpty(traps))
-            {
                 return traps;
-            }
+
             return Directory.GetCurrentDirectory();
         }
     }

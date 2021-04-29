@@ -34,3 +34,26 @@ def multi_loop_in_try(x):
 def f(*args, **kwargs):
     not args[0]
     not kwargs["x"]
+
+def multi_assign_and_packing(a, b="b", c="c"):
+    t = 1, 2, 3
+    w = a, b, c
+    p, q, r = t
+    x, y, z = w
+    p
+    q
+    r
+    x
+    y
+    z
+    g, h, i = a, b, c
+    g
+    h
+    i
+    l, m = (1,) + (2,)
+    l
+    m
+    s, u = a
+    s
+    u
+

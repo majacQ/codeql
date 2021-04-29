@@ -1,14 +1,15 @@
+/**
+ * Provides classes and predicates for reasoning about instances of
+ * `java.util.Map` and their methods.
+ */
+
 import java
 import Collections
 
 /** A reference type that extends a parameterization of `java.util.Map`. */
 class MapType extends RefType {
   MapType() {
-    exists(ParameterizedInterface coll |
-      coll.getSourceDeclaration().hasQualifiedName("java.util", "Map")
-    |
-      this.hasSupertype*(coll)
-    )
+    this.getSourceDeclaration().getASourceSupertype*().hasQualifiedName("java.util", "Map")
   }
 
   /** Gets the type of keys stored in this map. */
@@ -51,6 +52,7 @@ class MapSizeMethod extends MapMethod {
 class MapMutation extends MethodAccess {
   MapMutation() { this.getMethod() instanceof MapMutator }
 
+  /** Holds if the result of this call is not immediately discarded. */
   predicate resultIsChecked() { not this.getParent() instanceof ExprStmt }
 }
 
@@ -76,7 +78,9 @@ class FreshMap extends ClassInstanceExpr {
 class MapPutCall extends MethodAccess {
   MapPutCall() { getCallee().(MapMethod).hasName("put") }
 
+  /** Gets the key argument of this call. */
   Expr getKey() { result = getArgument(0) }
 
+  /** Gets the value argument of this call. */
   Expr getValue() { result = getArgument(1) }
 }

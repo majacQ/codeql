@@ -1,40 +1,16 @@
 /**
- * Provides a taint tracking configuration for reasoning about cross-window communication
- * with unrestricted origin.
+ * Provides a taint tracking configuration for reasoning about
+ * cross-window communication with unrestricted origin.
+ *
+ * Note, for performance reasons: only import this file if
+ * `PostMessageStar::Configuration` is needed, otherwise
+ * `PostMessageStarCustomizations` should be imported instead.
  */
 
 import javascript
-private import semmle.javascript.security.SensitiveActions
 
 module PostMessageStar {
-  /**
-   * A data flow source for cross-window communication with unrestricted origin.
-   */
-  abstract class Source extends DataFlow::Node { }
-
-  /**
-   * A data flow sink for cross-window communication with unrestricted origin.
-   */
-  abstract class Sink extends DataFlow::Node { }
-
-  /**
-   * A sanitizer for cross-window communication with unrestricted origin.
-   */
-  abstract class Sanitizer extends DataFlow::Node { }
-
-  /**
-   * A flow label representing an object with at least one tainted property.
-   */
-  private class PartiallyTaintedObject extends DataFlow::FlowLabel {
-    PartiallyTaintedObject() { this = "partially tainted object" }
-  }
-
-  /**
-   * Gets either a standard flow label or the partial-taint label.
-   */
-  private DataFlow::FlowLabel anyLabel() {
-    result instanceof DataFlow::StandardFlowLabel or result instanceof PartiallyTaintedObject
-  }
+  import PostMessageStarCustomizations::PostMessageStar
 
   /**
    * A taint tracking configuration for cross-window communication with unrestricted origin.
@@ -70,58 +46,18 @@ module PostMessageStar {
       )
       or
       // `toString` or `JSON.toString` on a partially tainted object gives a tainted value
-      exists (DataFlow::InvokeNode toString | toString = trg |
+      exists(DataFlow::InvokeNode toString | toString = trg |
         toString.(DataFlow::MethodCallNode).calls(src, "toString")
         or
-        toString = DataFlow::globalVarRef("JSON").getAMemberCall("stringify") and
-        src = toString.getArgument(0)
+        src = toString.(JsonStringifyCall).getInput()
       ) and
       inlbl instanceof PartiallyTaintedObject and
-      outlbl = DataFlow::FlowLabel::taint()
+      outlbl.isTaint()
       or
       // `valueOf` preserves partial taint
       trg.(DataFlow::MethodCallNode).calls(src, "valueOf") and
       inlbl instanceof PartiallyTaintedObject and
       outlbl = inlbl
-    }
-  }
-
-  /**
-   * A sensitive expression, viewed as a data flow source for cross-window communication
-   * with unrestricted origin.
-   */
-  class SensitiveExprSource extends Source, DataFlow::ValueNode { override SensitiveExpr astNode; }
-
-  /**
-   * A variable/property access or function call whose name suggests that it may contain credentials,
-   * viewed as a data flow source for cross-window communication with unrestricted origin.
-   */
-  class CredentialsSource extends Source {
-    CredentialsSource() {
-      exists(string name |
-        name = this.(DataFlow::InvokeNode).getCalleeName() or
-        name = this.(DataFlow::PropRead).getPropertyName() or
-        name = this.asExpr().(VarUse).getVariable().getName()
-      |
-        name.regexpMatch(HeuristicNames::suspiciousCredentials()) and
-        not name.regexpMatch(HeuristicNames::nonSuspicious())
-      )
-    }
-  }
-
-  /** A call to any function whose name suggests that it encodes or encrypts its arguments. */
-  class ProtectSanitizer extends Sanitizer { ProtectSanitizer() { this instanceof ProtectCall } }
-
-  /**
-   * An expression sent using `postMessage` without restricting the target window origin.
-   */
-  class PostMessageStarSink extends Sink {
-    PostMessageStarSink() {
-      exists(DataFlow::MethodCallNode postMessage |
-        postMessage.getMethodName() = "postMessage" and
-        postMessage.getArgument(1).mayHaveStringValue("*") and
-        this = postMessage.getArgument(0)
-      )
     }
   }
 }

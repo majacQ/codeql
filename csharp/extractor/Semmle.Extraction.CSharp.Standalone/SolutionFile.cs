@@ -12,6 +12,8 @@ namespace Semmle.BuildAnalyser
     {
         readonly Microsoft.Build.Construction.SolutionFile solutionFile;
 
+        private string FullPath { get; }
+
         /// <summary>
         /// Read the file.
         /// </summary>
@@ -19,8 +21,8 @@ namespace Semmle.BuildAnalyser
         public SolutionFile(string filename)
         {
             // SolutionFile.Parse() expects a rooted path.
-            var fullPath = Path.GetFullPath(filename);
-            solutionFile = Microsoft.Build.Construction.SolutionFile.Parse(fullPath);
+            FullPath = Path.GetFullPath(filename);
+            solutionFile = Microsoft.Build.Construction.SolutionFile.Parse(FullPath);
         }
 
         /// <summary>
@@ -55,10 +57,15 @@ namespace Semmle.BuildAnalyser
         /// <summary>
         /// List of projects which were mentioned but don't exist on disk.
         /// </summary>
-        public IEnumerable<string> MissingProjects =>
+        public IEnumerable<string> MissingProjects
+        {
+            get
+            {
                 // Only projects in the solution file can be missing.
                 // (NestedProjects are located on disk so always exist.)
-                MsBuildProjects.Where(p => !File.Exists(p));
+                return MsBuildProjects.Where(p => !File.Exists(p));
+            }
+        }
 
         /// <summary>
         /// The list of project files.

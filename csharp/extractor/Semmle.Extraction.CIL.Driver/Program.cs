@@ -21,13 +21,13 @@ namespace Semmle.Extraction.CIL.Driver
             Console.WriteLine("    path       A directory/dll/exe to analyze");
         }
 
-        static void ExtractAssembly(Layout layout, string assemblyPath, ILogger logger, bool nocache, bool extractPdbs)
+        static void ExtractAssembly(Layout layout, string assemblyPath, ILogger logger, bool nocache, bool extractPdbs, TrapWriter.CompressionMode trapCompression)
         {
             string trapFile;
             bool extracted;
             var sw = new Stopwatch();
             sw.Start();
-            Entities.Assembly.ExtractCIL(layout, assemblyPath, logger, nocache, extractPdbs, out trapFile, out extracted);
+            Entities.Assembly.ExtractCIL(layout, assemblyPath, logger, nocache, extractPdbs, trapCompression, out trapFile, out extracted);
             sw.Stop();
             logger.Log(Severity.Info, "  {0} ({1})", assemblyPath, sw.Elapsed);
         }
@@ -40,13 +40,13 @@ namespace Semmle.Extraction.CIL.Driver
                 return;
             }
 
-            var options = ExtractorOptions.ParseCommandLine(args);
+            var options = new ExtractorOptions(args);
             var layout = new Layout();
             var logger = new ConsoleLogger(options.Verbosity);
 
             var actions = options.
                 AssembliesToExtract.Select(asm => asm.filename).
-                Select<string, Action>(filename => () => ExtractAssembly(layout, filename, logger, options.NoCache, options.PDB)).
+                Select<string, Action>(filename => () => ExtractAssembly(layout, filename, logger, options.NoCache, options.PDB, options.TrapCompression)).
                 ToArray();
 
             foreach (var missingRef in options.MissingReferences)

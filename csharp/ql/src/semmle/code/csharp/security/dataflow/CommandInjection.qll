@@ -5,7 +5,7 @@
 import csharp
 
 module CommandInjection {
-  import semmle.code.csharp.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
   import semmle.code.csharp.frameworks.system.Diagnostics
   import semmle.code.csharp.security.Sanitizers
 
@@ -38,7 +38,9 @@ module CommandInjection {
   }
 
   /** A source of remote user input. */
-  class RemoteSource extends Source { RemoteSource() { this instanceof RemoteFlowSource } }
+  class RemoteSource extends Source {
+    RemoteSource() { this instanceof RemoteFlowSource }
+  }
 
   /**
    * A sink in `System.Diagnostic.Process` or its related classes.

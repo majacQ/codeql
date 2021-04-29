@@ -49,7 +49,9 @@
 | 36 | ControlFlowNode for classmethod() | classmethod() |
 | 37 | ControlFlowNode for FunctionExpr | Function method1 |
 | 37 | ControlFlowNode for method1 | classmethod() |
+| 40 | ControlFlowNode for deco() | deco() |
 | 41 | ControlFlowNode for FunctionExpr | Function method2 |
+| 41 | ControlFlowNode for method2 | deco() |
 | 44 | ControlFlowNode for FunctionExpr | Function deco |
 | 44 | ControlFlowNode for deco | Function deco |
 | 47 | ControlFlowNode for v1 | class C |
@@ -89,7 +91,9 @@
 | 64 | ControlFlowNode for dict | int 7 |
 | 65 | ControlFlowNode for tuple | builtin-class tuple |
 | 66 | ControlFlowNode for tuple | builtin-class tuple |
+| 69 | ControlFlowNode for Attribute | Attribute |
 | 69 | ControlFlowNode for X | class X |
+| 70 | ControlFlowNode for Attribute | deco() |
 | 70 | ControlFlowNode for X | class X |
 | 72 | ControlFlowNode for ImportExpr | Module abc |
 | 72 | ControlFlowNode for ImportMember | Function abstractmethod |
@@ -107,6 +111,7 @@
 | 79 | ControlFlowNode for Tuple | Tuple |
 | 79 | ControlFlowNode for object | builtin-class object |
 | 79 | ControlFlowNode for type | builtin-class type |
+| 79 | ControlFlowNode for type() | type() |
 | 81 | ControlFlowNode for FunctionExpr | Function k |
 | 81 | ControlFlowNode for k | Function k |
 | 82 | ControlFlowNode for C | class C |
@@ -121,6 +126,7 @@
 | 85 | ControlFlowNode for Tuple | Tuple |
 | 85 | ControlFlowNode for object | builtin-class object |
 | 85 | ControlFlowNode for type | builtin-class type |
+| 85 | ControlFlowNode for type() | type() |
 | 88 | ControlFlowNode for FunctionExpr | Function outer |
 | 88 | ControlFlowNode for outer | Function outer |
 | 89 | ControlFlowNode for IntegerLiteral | int 1 |
@@ -153,6 +159,7 @@
 | 106 | ControlFlowNode for inner | Function inner |
 | 108 | ControlFlowNode for IntegerLiteral | int 2 |
 | 108 | ControlFlowNode for z | int 2 |
+| 109 | ControlFlowNode for BinaryExpr | BinaryExpr |
 | 109 | ControlFlowNode for y | int 1 |
 | 109 | ControlFlowNode for z | int 2 |
 | 110 | ControlFlowNode for inner | Function inner |
@@ -226,6 +233,8 @@
 | 161 | ControlFlowNode for ClassExpr | class Derived3 |
 | 161 | ControlFlowNode for Derived3 | class Derived3 |
 | 164 | ControlFlowNode for Base | class Base |
+| 164 | ControlFlowNode for Base() | Base() |
+| 164 | ControlFlowNode for thing | Base() |
 | 167 | ControlFlowNode for FunctionExpr | Function multiple_assignment |
 | 167 | ControlFlowNode for multiple_assignment | Function multiple_assignment |
 | 168 | ControlFlowNode for Tuple | Tuple |
@@ -247,7 +256,7 @@
 | 180 | ControlFlowNode for Derived4 | class Derived4 |
 | 182 | ControlFlowNode for FunctionExpr | Function __init__ |
 | 182 | ControlFlowNode for __init__ | Function __init__ |
-| 183 | ControlFlowNode for Attribute | super().x |
+| 183 | ControlFlowNode for Attribute | int 1 |
 | 183 | ControlFlowNode for Derived4 | class Derived4 |
 | 183 | ControlFlowNode for self | self |
 | 183 | ControlFlowNode for super | builtin-class super |
@@ -349,7 +358,6 @@
 | 273 | ControlFlowNode for self | self |
 | 275 | ControlFlowNode for FunctionExpr | Function add_node |
 | 275 | ControlFlowNode for add_node | Function add_node |
-| 276 | ControlFlowNode for Attribute | Dict |
 | 276 | ControlFlowNode for IntegerLiteral | int 0 |
 | 276 | ControlFlowNode for Subscript | int 0 |
 | 276 | ControlFlowNode for self | self |

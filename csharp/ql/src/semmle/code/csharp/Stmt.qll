@@ -4,12 +4,13 @@
  * All statements have the common base class `Stmt`.
  */
 
-import Location
 import Element
+import Location
 import Member
 import exprs.Expr
 private import semmle.code.csharp.Enclosing::Internal
 private import semmle.code.csharp.frameworks.System
+private import TypeRef
 
 /**
  * A statement.
@@ -44,7 +45,7 @@ class Stmt extends ControlFlowElement, @stmt {
 /**
  * A block statement, for example
  *
- * ```
+ * ```csharp
  * {
  *   ...
  * }
@@ -76,12 +77,14 @@ class BlockStmt extends Stmt, @block_stmt {
   }
 
   override string toString() { result = "{...}" }
+
+  override string getAPrimaryQlClass() { result = "BlockStmt" }
 }
 
 /**
  * An expression statement, for example `M1()` on line 5
  *
- * ```
+ * ```csharp
  * class C {
  *   int M1() { ... }
  *
@@ -96,6 +99,8 @@ class ExprStmt extends Stmt, @expr_stmt {
   Expr getExpr() { result.getParent() = this }
 
   override string toString() { result = "...;" }
+
+  override string getAPrimaryQlClass() { result = "ExprStmt" }
 }
 
 /**
@@ -111,7 +116,7 @@ class SelectionStmt extends Stmt, @cond_stmt {
 /**
  * An `if` statement, for example
  *
- * ```
+ * ```csharp
  * if (x==0) {
  *   ...
  * } else {
@@ -131,26 +136,30 @@ class IfStmt extends SelectionStmt, @if_stmt {
   Stmt getElse() { result = this.getChild(2) }
 
   override string toString() { result = "if (...) ..." }
+
+  override string getAPrimaryQlClass() { result = "IfStmt" }
 }
 
 /**
  * A `switch` statement, for example
  *
- * ```
+ * ```csharp
  * switch (instruction) {
  *   ...
  * }
  * ```
  */
-class SwitchStmt extends SelectionStmt, @switch_stmt {
-  override Expr getCondition() { result = this.getChild(0) }
+class SwitchStmt extends SelectionStmt, Switch, @switch_stmt {
+  override Expr getExpr() { result = this.getChild(0) }
+
+  override Expr getCondition() { result = this.getExpr() }
 
   /**
    * Gets the `i`th `case` statement in the body of this `switch` statement.
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * switch (x) {
    *   case "abc":              // i = 0
    *     return 0;
@@ -163,11 +172,12 @@ class SwitchStmt extends SelectionStmt, @switch_stmt {
    *     return 3;
    * }
    * ```
+   * Note that this reorders the `default` case to always be at the end.
    */
-  CaseStmt getCase(int i) { result = SwithStmtInternal::getCase(this, i) }
+  override CaseStmt getCase(int i) { result = SwithStmtInternal::getCase(this, i) }
 
   /** Gets a case of this `switch` statement. */
-  CaseStmt getACase() { result = this.getCase(_) }
+  override CaseStmt getACase() { result = this.getCase(_) }
 
   /** Gets a constant value case of this `switch` statement, if any. */
   ConstCase getAConstCase() { result = this.getACase() }
@@ -175,17 +185,16 @@ class SwitchStmt extends SelectionStmt, @switch_stmt {
   /** Gets the default case of this `switch` statement, if any. */
   DefaultCase getDefaultCase() { result = this.getACase() }
 
-  /** Gets a type case of this `switch` statement, if any. */
-  TypeCase getATypeCase() { result = this.getACase() }
-
   override string toString() { result = "switch (...) {...}" }
+
+  override string getAPrimaryQlClass() { result = "SwitchStmt" }
 
   /**
    * Gets the `i`th statement in the body of this `switch` statement.
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * switch (x) {
    *   case "abc":              // i = 0
    *     return 0;
@@ -213,9 +222,18 @@ private module SwithStmtInternal {
   cached
   CaseStmt getCase(SwitchStmt ss, int i) {
     exists(int index, int rankIndex |
-      result = ss.getChildStmt(index) and
+      caseIndex(ss, result, index) and
       rankIndex = i + 1 and
-      index = rank[rankIndex](int j, CaseStmt cs | cs = ss.getChildStmt(j) | j)
+      index = rank[rankIndex](int j, CaseStmt cs | caseIndex(ss, cs, j) | j)
+    )
+  }
+
+  /** Implicitly reorder case statements to put the default case last if needed. */
+  private predicate caseIndex(SwitchStmt ss, CaseStmt case, int index) {
+    exists(int i | case = ss.getChildStmt(i) |
+      if case instanceof DefaultCase
+      then index = max(int j | exists(ss.getChildStmt(j))) + 1
+      else index = i
     )
   }
 
@@ -224,7 +242,8 @@ private module SwithStmtInternal {
     exists(int index, int rankIndex |
       result = ss.getChildStmt(index) and
       rankIndex = i + 1 and
-      index = rank[rankIndex](int j, Stmt s |
+      index =
+        rank[rankIndex](int j, Stmt s |
           // `getChild` includes both labeled statements and the targeted
           // statements of labeled statement as separate children, but we
           // only want the labeled statement
@@ -237,21 +256,28 @@ private module SwithStmtInternal {
 
   private Stmt getLabeledStmt(SwitchStmt ss, int i) {
     result = ss.getChildStmt(i) and
-    not result = any(ConstCase cc).getStmt() and
-    not result = any(TypeCase tc).getStmt()
+    not result = any(CaseStmt cs).getBody()
   }
 }
 
-/**
- * A `case` statement. Either a constant case (`ConstCase`), a type matching
- * case (`TypeCase`), or a `default` case (`DefaultCase`).
- */
-class CaseStmt extends Stmt, @case {
+/** A `case` statement. */
+class CaseStmt extends Case, @case_stmt {
+  override Expr getExpr() { result = any(SwitchStmt ss | ss.getACase() = this).getExpr() }
+
+  override PatternExpr getPattern() { result = this.getChild(0) }
+
+  override Stmt getBody() {
+    exists(int i |
+      this = this.getParent().getChild(i) and
+      result = this.getParent().getChild(i + 1)
+    )
+  }
+
   /**
    * Gets the condition on this case, if any. For example, the type case on line 3
    * has no condition, and the type case on line 4 has condition `s.Length > 0`, in
    *
-   * ```
+   * ```csharp
    * switch(p)
    * {
    *     case int i:
@@ -261,129 +287,58 @@ class CaseStmt extends Stmt, @case {
    * }
    * ```
    */
-  Expr getCondition() { result = this.getChild(2) }
+  override Expr getCondition() { result = this.getChild(1) }
 
   /** Gets the `switch` statement that this `case` statement belongs to. */
   SwitchStmt getSwitchStmt() { result.getACase() = this }
+
+  override string toString() { result = "case ...:" }
+
+  override string getAPrimaryQlClass() { result = "CaseStmt" }
 }
 
 /**
  * A constant case of a `switch` statement, for example `case OpCode.Nop:`
  * on line 2 in
  *
- * ```
+ * ```csharp
  * switch (instruction) {
  *   case OpCode.Nop: ...
  *   default: ...
  * }
  * ```
  */
-class ConstCase extends LabeledStmt, CaseStmt {
-  Expr expr;
+class ConstCase extends CaseStmt, LabeledStmt {
+  private ConstantPatternExpr p;
 
-  ConstCase() {
-    expr = this.getChild(0) and
-    not expr instanceof LocalVariableDeclExpr
-  }
+  ConstCase() { p = this.getPattern() }
 
-  /** Gets the case expression. */
-  Expr getExpr() { result = expr }
+  override string getLabel() { result = p.getValue() }
 
-  override string getLabel() { result = getExpr().getValue() }
+  override string toString() { result = CaseStmt.super.toString() }
 
-  override string toString() { result = "case ...:" }
-}
-
-/**
- * A type matching case in a `switch` statement, for example `case int i:` on line 3 or
- * `case string s when s.Length > 0:` on line 4 in
- *
- * ```
- * switch(p)
- * {
- *     case int i:
- *     case string s when s.Length > 0:
- *         break;
- *     ...
- * }
- * ```
- */
-class TypeCase extends LabeledStmt, CaseStmt {
-  TypeCase() { this.getChild(1) instanceof TypeAccess }
-
-  /**
-   * Gets the local variable declaration of this type case, if any. For example,
-   * the local variable declaration of the type case on line 3 is `string s` in
-   *
-   * ```
-   * switch(p) {
-   *   case int i:
-   *   case string s when s.Length>0:
-   *     break;
-   *   case bool _:
-   *     break;
-   *   ...
-   * }
-   * ```
-   */
-  LocalVariableDeclExpr getVariableDeclExpr() { result = getChild(0) }
-
-  /**
-   * Gets the type access of this case, for example access to `string` or
-   * access to `int` in
-   *
-   * ```
-   * switch(p) {
-   *   case int i:
-   *   case string s when s.Length>0:
-   *     break;
-   *   ...
-   * }
-   * ```
-   */
-  TypeAccess getTypeAccess() { result = getChild(1) }
-
-  /**
-   * Gets the type being checked by this case. For example, the type being checked
-   * by the type case on line 3 is `string` in
-   *
-   * ```
-   * switch(p) {
-   *   case int i:
-   *   case string s when s.Length>0:
-   *     break;
-   *   ...
-   * }
-   * ```
-   */
-  Type getCheckedType() { result = getTypeAccess().getType() }
-
-  override string toString() {
-    exists(string var |
-      if exists(this.getVariableDeclExpr())
-      then var = " " + this.getVariableDeclExpr().getName()
-      else var = ""
-    |
-      result = "case " + this.getTypeAccess().getType().getName() + var + ":"
-    )
-  }
+  override string getAPrimaryQlClass() { result = "ConstCase" }
 }
 
 /**
  * A default case of a `switch` statement, for example `default:` on
  * line 3 in
  *
- * ```
+ * ```csharp
  * switch (instruction) {
  *   case OpCode.Nop: ...
  *   default: ...
  * }
  * ```
  */
-class DefaultCase extends CaseStmt {
+class DefaultCase extends CaseStmt, LabeledStmt {
   DefaultCase() { not exists(Expr e | e.getParent() = this) }
 
+  override string getLabel() { result = "default" }
+
   override string toString() { result = "default:" }
+
+  override string getAPrimaryQlClass() { result = "DefaultCase" }
 }
 
 /**
@@ -404,7 +359,7 @@ class LoopStmt extends Stmt, @loop_stmt {
 /**
  * A `while` statement, for example
  *
- * ```
+ * ```csharp
  * while (remaining > 0) {
  *   ...
  * }
@@ -414,12 +369,14 @@ class WhileStmt extends LoopStmt, @while_stmt {
   override Expr getCondition() { result.getParent() = this }
 
   override string toString() { result = "while (...) ..." }
+
+  override string getAPrimaryQlClass() { result = "WhileStmt" }
 }
 
 /**
  * A `do`-`while` statement, for example
  *
- * ```
+ * ```csharp
  * do {
  *   ...
  * }
@@ -430,12 +387,14 @@ class DoStmt extends LoopStmt, @do_stmt {
   override Expr getCondition() { result.getParent() = this }
 
   override string toString() { result = "do ... while (...);" }
+
+  override string getAPrimaryQlClass() { result = "DoStmt" }
 }
 
 /**
  * A `for` loop, for example
  *
- * ```
+ * ```csharp
  * for (int i = 0; i < 10; i++) {
  *   ...
  * }
@@ -447,7 +406,7 @@ class ForStmt extends LoopStmt, @for_stmt {
    *
    * For example, `i = 0` in
    *
-   * ```
+   * ```csharp
    * for (int i = 0; i < 10; i++) {
    *   ...
    * }
@@ -461,7 +420,7 @@ class ForStmt extends LoopStmt, @for_stmt {
    *
    * For example, the second (`n = 1`) initializer is `j = 10` in
    *
-   * ```
+   * ```csharp
    * for (int i = 0, j = 10; i < j; i++) {
    *   ...
    * }
@@ -478,7 +437,7 @@ class ForStmt extends LoopStmt, @for_stmt {
    *
    * For example, `i++` in
    *
-   * ```
+   * ```csharp
    * for (int i = 0; i < 10; i++) {
    *   ...
    * }
@@ -491,7 +450,7 @@ class ForStmt extends LoopStmt, @for_stmt {
    *
    * For example, the second (`n = 1`) update expression is `j--` in
    *
-   * ```
+   * ```csharp
    * for (int i = 0, j = 10; i < j; i++, j--) {
    *   ...
    * }
@@ -500,12 +459,14 @@ class ForStmt extends LoopStmt, @for_stmt {
   Expr getUpdate(int n) { exists(int i | result = this.getChild(i) and n = i - 1 and i >= 1) }
 
   override string toString() { result = "for (...;...;...) ..." }
+
+  override string getAPrimaryQlClass() { result = "ForStmt" }
 }
 
 /**
  * A `foreach` loop, for example
  *
- * ```
+ * ```csharp
  * foreach (var item in items) {
  *   ...
  * }
@@ -517,7 +478,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `item` in
    *
-   * ```
+   * ```csharp
    * foreach (var item in items) {
    *   ...
    * }
@@ -530,7 +491,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `var item` in
    *
-   * ```
+   * ```csharp
    * foreach (var item in items) {
    *   ...
    * }
@@ -543,7 +504,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `int a` is the 0th local variable declaration in
    *
-   * ```
+   * ```csharp
    * foreach ((int a, int b) in items) {
    *   ...
    * }
@@ -559,7 +520,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    * Gets the local variable declaration tuple of this `foreach` loop, if any.
    * For example, `(int a, int b)` in
    *
-   * ```
+   * ```csharp
    * foreach ((int a, int b) in items) {
    *   ...
    * }
@@ -572,7 +533,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `a` is the 0th local variable in
    *
-   * ```
+   * ```csharp
    * foreach ((int a, int b) in items) {
    *   ...
    * }
@@ -585,7 +546,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `a` and `b` in
    *
-   * ```
+   * ```csharp
    * foreach ((int a, int b) in items) {
    *   ...
    * }
@@ -598,7 +559,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `int a` and `int b` in
    *
-   * ```
+   * ```csharp
    * foreach ((int a, int b) in items) {
    *   ...
    * }
@@ -613,7 +574,7 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
    *
    * For example, `items` in
    *
-   * ```
+   * ```csharp
    * foreach (var item in items) {
    *   ...
    * }
@@ -622,6 +583,8 @@ class ForeachStmt extends LoopStmt, @foreach_stmt {
   Expr getIterableExpr() { result = this.getChild(1) }
 
   override string toString() { result = "foreach (... ... in ...) ..." }
+
+  override string getAPrimaryQlClass() { result = "ForeachStmt" }
 }
 
 /**
@@ -636,7 +599,7 @@ class JumpStmt extends Stmt, @jump_stmt { }
 /**
  * A `break` statement, for example line 4 in
  *
- * ```
+ * ```csharp
  * while (true) {
  *   ...
  *   if (done)
@@ -644,12 +607,16 @@ class JumpStmt extends Stmt, @jump_stmt { }
  * }
  * ```
  */
-class BreakStmt extends JumpStmt, @break_stmt { override string toString() { result = "break;" } }
+class BreakStmt extends JumpStmt, @break_stmt {
+  override string toString() { result = "break;" }
+
+  override string getAPrimaryQlClass() { result = "BreakStmt" }
+}
 
 /**
  * A `continue` statement, for example line 4 in
  *
- * ```
+ * ```csharp
  * while (true) {
  *   ...
  *   if (!done)
@@ -660,6 +627,8 @@ class BreakStmt extends JumpStmt, @break_stmt { override string toString() { res
  */
 class ContinueStmt extends JumpStmt, @continue_stmt {
   override string toString() { result = "continue;" }
+
+  override string getAPrimaryQlClass() { result = "ContinueStmt" }
 }
 
 /**
@@ -668,12 +637,15 @@ class ContinueStmt extends JumpStmt, @continue_stmt {
  * Either a `goto` label (`GotoLabelStmt`), a `goto case` (`GotoCaseStmt`), or
  * a `goto default` (`GotoDefaultStmt`).
  */
-class GotoStmt extends JumpStmt, @goto_any_stmt { }
+class GotoStmt extends JumpStmt, @goto_any_stmt {
+  /** Gets the label that this `goto` statement jumps to. */
+  string getLabel() { none() }
+}
 
 /**
  * A `goto` statement that jumps to a labeled statement, for example line 4 in
  *
- * ```
+ * ```csharp
  * while (true) {
  *   ...
  *   if (done)
@@ -683,8 +655,7 @@ class GotoStmt extends JumpStmt, @goto_any_stmt { }
  * ```
  */
 class GotoLabelStmt extends GotoStmt, @goto_stmt {
-  /** Gets the label that this `goto` statement jumps to. */
-  string getLabel() { exprorstmt_name(this, result) }
+  override string getLabel() { exprorstmt_name(this, result) }
 
   override string toString() { result = "goto ...;" }
 
@@ -693,6 +664,8 @@ class GotoLabelStmt extends GotoStmt, @goto_stmt {
     result.getEnclosingCallable() = getEnclosingCallable() and
     result.getLabel() = getLabel()
   }
+
+  override string getAPrimaryQlClass() { result = "GotoLabelStmt" }
 }
 
 /**
@@ -700,7 +673,7 @@ class GotoLabelStmt extends GotoStmt, @goto_stmt {
  *
  * For example, line 5 in
  *
- * ```
+ * ```csharp
  * switch (x) {
  *   case 0 :
  *     return 1;
@@ -715,10 +688,11 @@ class GotoCaseStmt extends GotoStmt, @goto_case_stmt {
   /** Gets the constant expression that this `goto case` statement jumps to. */
   Expr getExpr() { result = this.getChild(0) }
 
-  /** Gets the label that this `goto case` statement jumps to. */
-  string getLabel() { result = getExpr().getValue() }
+  override string getLabel() { result = getExpr().getValue() }
 
   override string toString() { result = "goto case ...;" }
+
+  override string getAPrimaryQlClass() { result = "GotoCaseStmt" }
 }
 
 /**
@@ -726,7 +700,7 @@ class GotoCaseStmt extends GotoStmt, @goto_case_stmt {
  *
  * For example, line 5 in
  *
- * ```
+ * ```csharp
  * switch (x) {
  *   case 0 :
  *     return 1;
@@ -739,12 +713,16 @@ class GotoCaseStmt extends GotoStmt, @goto_case_stmt {
  */
 class GotoDefaultStmt extends GotoStmt, @goto_default_stmt {
   override string toString() { result = "goto default;" }
+
+  override string getLabel() { result = "default" }
+
+  override string getAPrimaryQlClass() { result = "GotoDefaultStmt" }
 }
 
 /**
  * A `throw` statement, for example line 3 in
  *
- * ```
+ * ```csharp
  * void M(string s) {
  *   if (s == null)
  *     throw new ArgumentNullException(nameof(s));
@@ -769,6 +747,8 @@ class ThrowStmt extends JumpStmt, ThrowElement, @throw_stmt {
       result = mid.getParent()
     )
   }
+
+  override string getAPrimaryQlClass() { result = "ThrowStmt" }
 }
 
 /**
@@ -782,7 +762,7 @@ class ExceptionClass extends Class {
 /**
  * A `return` statement, for example line 2 in
  *
- * ```
+ * ```csharp
  * int M() {
  *   return 0;
  * }
@@ -793,6 +773,8 @@ class ReturnStmt extends JumpStmt, @return_stmt {
   Expr getExpr() { result.getParent() = this }
 
   override string toString() { result = "return ...;" }
+
+  override string getAPrimaryQlClass() { result = "ReturnStmt" }
 }
 
 /**
@@ -809,7 +791,7 @@ class YieldStmt extends JumpStmt, @yield_stmt {
 /**
  * A `yield break` statement, for example line 6 in
  *
- * ```
+ * ```csharp
  * IEnumerable<int> DownFrom(int i) {
  *   while (true) {
  *     if (i > 0)
@@ -824,12 +806,14 @@ class YieldBreakStmt extends YieldStmt {
   YieldBreakStmt() { not exists(this.getExpr()) }
 
   override string toString() { result = "yield break;" }
+
+  override string getAPrimaryQlClass() { result = "YieldBreakStmt" }
 }
 
 /**
  * A `yield return` statement, for example line 4 in
  *
- * ```
+ * ```csharp
  * IEnumerable<int> DownFrom(int i) {
  *   while (true) {
  *     if (i > 0)
@@ -844,12 +828,14 @@ class YieldReturnStmt extends YieldStmt {
   YieldReturnStmt() { exists(this.getExpr()) }
 
   override string toString() { result = "yield return ...;" }
+
+  override string getAPrimaryQlClass() { result = "YieldReturnStmt" }
 }
 
 /**
  * A `try` statement, for example
  *
- * ```
+ * ```csharp
  * try {
  *   ...
  * }
@@ -878,6 +864,8 @@ class TryStmt extends Stmt, @try_stmt {
   predicate hasFinally() { exists(this.getFinally()) }
 
   override string toString() { result = "try {...} ..." }
+
+  override string getAPrimaryQlClass() { result = "TryStmt" }
 
   /** Gets the `catch` clause that handles an exception of type `ex`, if any. */
   CatchClause getAnExceptionHandler(ExceptionClass ex) { result = clauseHandlesException(ex, 0) }
@@ -955,7 +943,7 @@ class CatchClause extends Stmt, @catch {
    * Gets the type of the exception caught. For example, the type of the exception
    * caught on line 4 is `System.IO.IOException` in
    *
-   * ```
+   * ```csharp
    * try {
    *   ...
    * }
@@ -970,7 +958,7 @@ class CatchClause extends Stmt, @catch {
    * Gets the `catch` filter clause, if any. For example, the filter expression
    * of the catch clause on line 4 is `ex.HResult == 1` in
    *
-   * ```
+   * ```csharp
    * try {
    *   ...
    * }
@@ -999,7 +987,7 @@ class CatchClause extends Stmt, @catch {
  *
  * For example, the `catch` clause on line 4 in
  *
- * ```
+ * ```csharp
  * try {
  *   ...
  * }
@@ -1020,6 +1008,8 @@ class SpecificCatchClause extends CatchClause {
   LocalVariableDeclExpr getVariableDeclExpr() { result.getParent() = this }
 
   override string toString() { result = "catch (...) {...}" }
+
+  override string getAPrimaryQlClass() { result = "SpecificCatchClause" }
 }
 
 /**
@@ -1027,7 +1017,7 @@ class SpecificCatchClause extends CatchClause {
  *
  * For example, the `catch` clause on line 4 in
  *
- * ```
+ * ```csharp
  * try {
  *   ...
  * }
@@ -1040,12 +1030,14 @@ class GeneralCatchClause extends CatchClause {
   GeneralCatchClause() { catch_type(this, _, 2) }
 
   override string toString() { result = "catch {...}" }
+
+  override string getAPrimaryQlClass() { result = "GeneralCatchClause" }
 }
 
 /**
  * A `checked` statement, for example
  *
- * ```
+ * ```csharp
  * checked {
  *   int i = 2147483647;
  *   i++;
@@ -1057,12 +1049,14 @@ class CheckedStmt extends Stmt, @checked_stmt {
   BlockStmt getBlock() { result.getParent() = this }
 
   override string toString() { result = "checked {...}" }
+
+  override string getAPrimaryQlClass() { result = "CheckedStmt" }
 }
 
 /**
  * An `unchecked` statement, for example
  *
- * ```
+ * ```csharp
  * unchecked {
  *   int i = 2147483647;
  *   i++;
@@ -1074,12 +1068,14 @@ class UncheckedStmt extends Stmt, @unchecked_stmt {
   BlockStmt getBlock() { result.getParent() = this }
 
   override string toString() { result = "unchecked {...}" }
+
+  override string getAPrimaryQlClass() { result = "UncheckedStmt" }
 }
 
 /**
  * A `lock` statement, for example
  *
- * ```
+ * ```csharp
  * lock (mutex) {
  *   ...
  * }
@@ -1111,49 +1107,27 @@ class LockStmt extends Stmt, @lock_stmt {
 
   /** Gets the type `T` if this statement is of the form `lock(typeof(T)) { ... }`. */
   Type getLockTypeObject() { result = getExpr().(TypeofExpr).getTypeAccess().getTarget() }
+
+  override string getAPrimaryQlClass() { result = "LockStmt" }
 }
 
 /**
- * A `using` statement, for example
- *
- * ```
- * using (FileStream f = File.Open("settings.xml")) {
- *   ...
- * }
- * ```
+ * A using block or declaration. Either a using declaration (`UsingDeclStmt`) or
+ * a using block (`UsingBlockStmt`).
  */
 class UsingStmt extends Stmt, @using_stmt {
-  /** Gets the `i`th local variable of this `using` statement. */
-  LocalVariable getVariable(int i) { result = this.getVariableDeclExpr(i).getVariable() }
-
-  /** Gets a local variable of this `using` statement. */
-  LocalVariable getAVariable() { result = this.getVariable(_) }
-
   /** Gets the `i`th local variable declaration of this `using` statement. */
-  LocalVariableDeclExpr getVariableDeclExpr(int i) { result = this.getChild(-i - 1) }
+  LocalVariableDeclExpr getVariableDeclExpr(int i) { none() }
 
   /** Gets a local variable declaration of this `using` statement. */
   LocalVariableDeclExpr getAVariableDeclExpr() { result = this.getVariableDeclExpr(_) }
-
-  /**
-   * Gets the expression directly used by this `using` statement, if any. For
-   * example, `f` on line 2 in
-   *
-   * ```
-   * var f = File.Open("settings.xml");
-   * using (f) {
-   *   ...
-   * }
-   * ```
-   */
-  Expr getExpr() { result = this.getChild(0) }
 
   /**
    * Gets an expression that is used in this `using` statement. Either an
    * expression assigned to a variable, for example `File.Open("settings.xml")`
    * in
    *
-   * ```
+   * ```csharp
    * using (FileStream f = File.Open("settings.xml")) {
    *   ...
    * }
@@ -1162,13 +1136,48 @@ class UsingStmt extends Stmt, @using_stmt {
    * or an expression directly used, for example `File.Open("settings.xml")`
    * in
    *
-   * ```
+   * ```csharp
    * using (File.Open("settings.xml")) {
    *   ...
    * }
    * ```
    */
-  Expr getAnExpr() {
+  Expr getAnExpr() { none() }
+}
+
+/**
+ * A `using` block statement, for example
+ *
+ * ```csharp
+ * using (FileStream f = File.Open("settings.xml")) {
+ *   ...
+ * }
+ * ```
+ */
+class UsingBlockStmt extends UsingStmt, @using_block_stmt {
+  /** Gets the `i`th local variable of this `using` statement. */
+  LocalVariable getVariable(int i) { result = this.getVariableDeclExpr(i).getVariable() }
+
+  /** Gets a local variable of this `using` statement. */
+  LocalVariable getAVariable() { result = this.getVariable(_) }
+
+  /** Gets the `i`th local variable declaration of this `using` statement. */
+  override LocalVariableDeclExpr getVariableDeclExpr(int i) { result = this.getChild(-i - 1) }
+
+  /**
+   * Gets the expression directly used by this `using` statement, if any. For
+   * example, `f` on line 2 in
+   *
+   * ```csharp
+   * var f = File.Open("settings.xml");
+   * using (f) {
+   *   ...
+   * }
+   * ```
+   */
+  Expr getExpr() { result = this.getChild(0) }
+
+  override Expr getAnExpr() {
     result = this.getAVariableDeclExpr().getInitializer()
     or
     result = this.getExpr()
@@ -1178,12 +1187,14 @@ class UsingStmt extends Stmt, @using_stmt {
   Stmt getBody() { result.getParent() = this }
 
   override string toString() { result = "using (...) {...}" }
+
+  override string getAPrimaryQlClass() { result = "UsingBlockStmt" }
 }
 
 /**
  * A local declaration statement, for example line 2 in
  *
- * ```
+ * ```csharp
  * void M() {
  *   string x = null, y = "";
  * }
@@ -1194,7 +1205,7 @@ class LocalVariableDeclStmt extends Stmt, @decl_stmt {
    * Gets a local variable declaration, for example `x = null` and
    * `y = ""` in
    *
-   * ```
+   * ```csharp
    * void M() {
    *   string x = null, y = "";
    * }
@@ -1206,7 +1217,7 @@ class LocalVariableDeclStmt extends Stmt, @decl_stmt {
    * Gets the `n`th local variable declaration. For example, the second
    * (`n = 1`) declaration is `y = ""` in
    *
-   * ```
+   * ```csharp
    * void M() {
    *   string x = null, y = "";
    * }
@@ -1215,12 +1226,14 @@ class LocalVariableDeclStmt extends Stmt, @decl_stmt {
   LocalVariableDeclExpr getVariableDeclExpr(int n) { result = this.getChild(n) }
 
   override string toString() { result = "... ...;" }
+
+  override string getAPrimaryQlClass() { result = "LocalVariableDeclStmt" }
 }
 
 /**
  * A local constant declaration statement, for example line 2 in
  *
- * ```
+ * ```csharp
  * void M() {
  *   const int x = 1, y = 2;
  * }
@@ -1230,7 +1243,7 @@ class LocalConstantDeclStmt extends LocalVariableDeclStmt, @const_decl_stmt {
   /**
    * Gets a local constant declaration, for example `x = 1` and `y = 2` in
    *
-   * ```
+   * ```csharp
    * void M() {
    *   const int x = 1, y = 2;
    * }
@@ -1242,7 +1255,7 @@ class LocalConstantDeclStmt extends LocalVariableDeclStmt, @const_decl_stmt {
    * Gets the `n`th local constant declaration. For example, the second
    * (`n = 1`) declaration is `y = 2` in
    *
-   * ```
+   * ```csharp
    * void M() {
    *   const int x = 1, y = 2;
    * }
@@ -1251,23 +1264,52 @@ class LocalConstantDeclStmt extends LocalVariableDeclStmt, @const_decl_stmt {
   override LocalConstantDeclExpr getVariableDeclExpr(int n) { result = this.getChild(n) }
 
   override string toString() { result = "const ... ...;" }
+
+  override string getAPrimaryQlClass() { result = "LocalConstantDeclStmt" }
+}
+
+/**
+ * A `using` declaration statement, for example
+ *
+ * ```csharp
+ * using FileStream f = File.Open("settings.xml");
+ * ```
+ */
+class UsingDeclStmt extends LocalVariableDeclStmt, UsingStmt, @using_decl_stmt {
+  override string toString() { result = "using ... ...;" }
+
+  override LocalVariableDeclExpr getAVariableDeclExpr() {
+    result = LocalVariableDeclStmt.super.getAVariableDeclExpr()
+  }
+
+  override LocalVariableDeclExpr getVariableDeclExpr(int n) {
+    result = LocalVariableDeclStmt.super.getVariableDeclExpr(n)
+  }
+
+  override Expr getAnExpr() { result = this.getAVariableDeclExpr().getInitializer() }
+
+  override string getAPrimaryQlClass() { result = "UsingDeclStmt" }
 }
 
 /**
  * An empty statement, for example line 2 in
  *
- * ```
+ * ```csharp
  * while (true) do {
  *   ;
  * }
  * ```
  */
-class EmptyStmt extends Stmt, @empty_stmt { override string toString() { result = ";" } }
+class EmptyStmt extends Stmt, @empty_stmt {
+  override string toString() { result = ";" }
+
+  override string getAPrimaryQlClass() { result = "EmptyStmt" }
+}
 
 /**
  * An `unsafe` statement, for example
  *
- * ```
+ * ```csharp
  * unsafe {
  *   var data = new int[10];
  *   fixed (int* p = data) {
@@ -1281,12 +1323,14 @@ class UnsafeStmt extends Stmt, @unsafe_stmt {
   BlockStmt getBlock() { result.getParent() = this }
 
   override string toString() { result = "unsafe {...}" }
+
+  override string getAPrimaryQlClass() { result = "UnsafeStmt" }
 }
 
 /**
  * A `fixed` statement, for example lines 3--5 in
  *
- * ```
+ * ```csharp
  * unsafe {
  *   var data = new int[10];
  *   fixed (int* p = data) {
@@ -1312,12 +1356,14 @@ class FixedStmt extends Stmt, @fixed_stmt {
   Stmt getBody() { result.getParent() = this }
 
   override string toString() { result = "fixed(...) { ... }" }
+
+  override string getAPrimaryQlClass() { result = "FixedStmt" }
 }
 
 /**
  * A label statement, for example line 7 in
  *
- * ```
+ * ```csharp
  * while (true) {
  *   if (done)
  *     goto exit;
@@ -1327,7 +1373,9 @@ class FixedStmt extends Stmt, @fixed_stmt {
  * exit: ...
  * ```
  */
-class LabelStmt extends LabeledStmt, @label_stmt { }
+class LabelStmt extends LabeledStmt, @label_stmt {
+  override string getAPrimaryQlClass() { result = "LabelStmt" }
+}
 
 /**
  * A labeled statement.
@@ -1340,7 +1388,7 @@ class LabeledStmt extends Stmt, @labeled_stmt {
    *
    * For example, the `return` statement in
    *
-   * ```
+   * ```csharp
    * exit:
    *   return MetadataToken.Zero;
    * ```
@@ -1362,7 +1410,7 @@ class LabeledStmt extends Stmt, @labeled_stmt {
  * A statement defining a local function. For example,
  * the statement on lines 2--4 in
  *
- * ```
+ * ```csharp
  * int Choose(int n, int m) {
  *   int Fac(int x) {
  *     return x > 1 ? x * Fac(x - 1) : 1;
@@ -1377,4 +1425,6 @@ class LocalFunctionStmt extends Stmt, @local_function_stmt {
   LocalFunction getLocalFunction() { local_function_stmts(this, result) }
 
   override string toString() { result = getLocalFunction().getName() + "(...)" }
+
+  override string getAPrimaryQlClass() { result = "LocalFunctionStmt" }
 }

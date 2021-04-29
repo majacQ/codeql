@@ -34,7 +34,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * if (x < 0)
    *   x = -x;
    * ```
@@ -52,7 +52,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * if (!(x >= 0))
    *   x = -x;
    * ```
@@ -61,45 +61,6 @@ class BasicBlock extends TBasicBlockStart {
    * basic block on line 1.
    */
   BasicBlock getAFalseSuccessor() { result.getFirstNode() = getLastNode().getAFalseSuccessor() }
-
-  /**
-   * Gets an immediate `null` successor, if any.
-   *
-   * An immediate `null` successor is a successor that is reached when
-   * the expression that ends this basic block evaluates to `null`.
-   *
-   * Example:
-   *
-   * ```
-   * x?.M();
-   * return;
-   * ```
-   *
-   * The node on line 2 is an immediate `null` successor of the node
-   * `x` on line 1.
-   */
-  deprecated BasicBlock getANullSuccessor() {
-    result.getFirstNode() = getLastNode().getANullSuccessor()
-  }
-
-  /**
-   * Gets an immediate non-`null` successor, if any.
-   *
-   * An immediate non-`null` successor is a successor that is reached when
-   * the expression that ends this basic block evaluates to a non-`null` value.
-   *
-   * Example:
-   *
-   * ```
-   * x?.M();
-   * ```
-   *
-   * The node `x?.M()`, representing the call to `M`, is a non-`null` successor
-   * of the node `x`.
-   */
-  deprecated BasicBlock getANonNullSuccessor() {
-    result.getFirstNode() = getLastNode().getANonNullSuccessor()
-  }
 
   /** Gets the control flow node at a specific (zero-indexed) position in this basic block. */
   ControlFlow::Node getNode(int pos) { bbIndex(getFirstNode(), result, pos) }
@@ -114,7 +75,7 @@ class BasicBlock extends TBasicBlockStart {
   ControlFlow::Node getLastNode() { result = getNode(length() - 1) }
 
   /** Gets the callable that this basic block belongs to. */
-  Callable getCallable() { result = this.getAPredecessor().getCallable() }
+  final Callable getCallable() { result = this.getFirstNode().getEnclosingCallable() }
 
   /** Gets the length of this basic block. */
   int length() { result = strictcount(getANode()) }
@@ -128,7 +89,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -151,7 +112,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -173,7 +134,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -200,7 +161,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * if (x < 0) {
    *   x = -x;
    *   if (x > 10)
@@ -234,7 +195,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   if (s == null)
    *     throw new ArgumentNullException(nameof(s));
@@ -258,7 +219,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   try {
    *     return s.Length;
@@ -283,7 +244,7 @@ class BasicBlock extends TBasicBlockStart {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * int M(string s) {
    *   try {
    *     return s.Length;
@@ -336,9 +297,7 @@ private module Internal {
     or
     cfn.isJoin()
     or
-    exists(ControlFlow::Node pred | pred = cfn.getAPredecessor() |
-      strictcount(pred.getASuccessor()) > 1
-    )
+    cfn.getAPredecessor().isBranch()
   }
 
   /**
@@ -379,6 +338,7 @@ private module Internal {
   predicate bbIPostDominates(BasicBlock dom, BasicBlock bb) =
     idominance(exitBB/1, predBB/2)(_, dom, bb)
 }
+
 private import Internal
 
 /**
@@ -387,8 +347,6 @@ private import Internal
  */
 class EntryBasicBlock extends BasicBlock {
   EntryBasicBlock() { entryBB(this) }
-
-  override Callable getCallable() { result.getEntryPoint() = this.getFirstNode() }
 }
 
 /** Holds if `bb` is an entry basic block. */
@@ -400,13 +358,56 @@ private predicate entryBB(BasicBlock bb) {
  * An exit basic block, that is, a basic block whose last node is
  * the exit node of a callable.
  */
-class ExitBasicBlock extends BasicBlock { ExitBasicBlock() { exitBB(this) } }
+class ExitBasicBlock extends BasicBlock {
+  ExitBasicBlock() { exitBB(this) }
+}
 
 /** Holds if `bb` is an exit basic block. */
 private predicate exitBB(BasicBlock bb) { bb.getLastNode() instanceof ControlFlow::Nodes::ExitNode }
 
+private module JoinBlockPredecessors {
+  private import ControlFlow::Nodes
+
+  private class CallableOrCFE extends Element {
+    CallableOrCFE() { this instanceof Callable or this instanceof ControlFlowElement }
+  }
+
+  private predicate id(CallableOrCFE x, CallableOrCFE y) { x = y }
+
+  private predicate idOf(CallableOrCFE x, int y) = equivalenceRelation(id/2)(x, y)
+
+  int getId(JoinBlockPredecessor jbp) {
+    idOf(jbp.getFirstNode().(ElementNode).getElement(), result)
+    or
+    idOf(jbp.(EntryBasicBlock).getCallable(), result)
+  }
+
+  string getSplitString(JoinBlockPredecessor jbp) {
+    result = jbp.getFirstNode().(ElementNode).getSplitsString()
+    or
+    not exists(jbp.getFirstNode().(ElementNode).getSplitsString()) and
+    result = ""
+  }
+}
+
 /** A basic block with more than one predecessor. */
-class JoinBlock extends BasicBlock { JoinBlock() { getFirstNode().isJoin() } }
+class JoinBlock extends BasicBlock {
+  JoinBlock() { getFirstNode().isJoin() }
+
+  /**
+   * Gets the `i`th predecessor of this join block, with respect to some
+   * arbitrary order.
+   */
+  cached
+  JoinBlockPredecessor getJoinBlockPredecessor(int i) {
+    result =
+      rank[i + 1](JoinBlockPredecessor jbp |
+        jbp = this.getAPredecessor()
+      |
+        jbp order by JoinBlockPredecessors::getId(jbp), JoinBlockPredecessors::getSplitString(jbp)
+      )
+  }
+}
 
 /** A basic block that is an immediate predecessor of a join block. */
 class JoinBlockPredecessor extends BasicBlock {
@@ -446,7 +447,7 @@ class ConditionBlock extends BasicBlock {
      * all predecessors of `this.getATrueSuccessor()` are either `this` or dominated by `this.getATrueSuccessor()`.
      *
      * For example, in the following C# snippet:
-     * ```
+     * ```csharp
      * if (x)
      *   controlled;
      * false_successor;
@@ -454,7 +455,7 @@ class ConditionBlock extends BasicBlock {
      * ```
      * `false_successor` dominates `uncontrolled`, but not all of its predecessors are `this` (`if (x)`)
      *  or dominated by itself. Whereas in the following code:
-     * ```
+     * ```csharp
      * if (x)
      *   while (controlled)
      *     also_controlled;
@@ -471,81 +472,4 @@ class ConditionBlock extends BasicBlock {
 
     exists(BasicBlock succ | this.immediatelyControls(succ, s) | succ.dominates(controlled))
   }
-
-  /**
-   * Holds if basic block `controlled` is controlled by this basic block with
-   * nullness check `isNull`. That is, `controlled` can only be reached from
-   * the callable entry point by going via the `null` edge (`isNull = true`)
-   * or non-`null` edge (`isNull = false`) out of this basic block.
-   */
-  deprecated predicate controlsNullness(BasicBlock controlled, boolean isNull) {
-    this.controls(controlled, any(NullnessSuccessor s | s.getValue() = isNull))
-  }
-
-  /**
-   * Holds if basic block `controlled` is controlled by this basic block with
-   * Boolean value `testIsTrue`. That is, `controlled` can only be reached from
-   * the callable entry point by going via the true edge (`testIsTrue = true`)
-   * or false edge (`testIsTrue = false`) out of this basic block.
-   *
-   * Moreover, `cond` is a sub expression of the expression ending this basic
-   * block that must have evaluated to `condIsTrue`. For example, in
-   *
-   * ```
-   * if (x & !y)
-   *   f(x, y);
-   * ```
-   *
-   * `f(x, y)` is controlled by `x & !y` evaluating to `true`, but also by sub
-   * conditions `x` and `y` evaluating to `true` and `false`, respectively.
-   */
-  // Note that this is only needed when using non-short-circuit logic. When using
-  // short-circuit logic, the control flow graph will have appropriate true/false
-  // edges for the sub conditions:
-  //
-  // Short-circuit logic CFG -- `if (x && y) A B`:
-  //   x && y --> x --true--> y --true--> A
-  //              |           |
-  //              |         false
-  //              |           |
-  //              |           V
-  //              \--false--> B
-  //
-  // Non-short-circuit logic CFG -- `if (x & y) A B`:
-  //   x --> y --> x & y --true--> A
-  //                 \--false--> B
-  //
-  // In the former case, `x` and `y` control `A`, in the latter case
-  // only `x & y` controls `A` if we do not take sub conditions into account.
-  deprecated predicate controlsSubCond(
-    BasicBlock controlled, boolean testIsTrue, Expr cond, boolean condIsTrue
-  ) {
-    impliesSub(getLastNode().getElement(), cond, testIsTrue, condIsTrue) and
-    controls(controlled, any(BooleanSuccessor s | s.getValue() = testIsTrue))
-  }
-}
-
-/**
- * Holds if `e2` is a sub expression of (Boolean) expression `e1`, and
- * if `e1` has value `b1` then `e2` must have value `b2`.
- */
-deprecated private predicate impliesSub(Expr e1, Expr e2, boolean b1, boolean b2) {
-  if e1 instanceof LogicalNotExpr
-  then impliesSub(e1.(LogicalNotExpr).getOperand(), e2, b1.booleanNot(), b2)
-  else
-    if e1 instanceof BitwiseAndExpr or e1 instanceof LogicalAndExpr
-    then
-      impliesSub(e1.(BinaryOperation).getAnOperand(), e2, b1, b2) and
-      b1 = true
-    else
-      if e1 instanceof BitwiseOrExpr or e1 instanceof LogicalOrExpr
-      then (
-        impliesSub(e1.(BinaryOperation).getAnOperand(), e2, b1, b2) and
-        b1 = false
-      ) else (
-        e1.getType() instanceof BoolType and
-        e1 = e2 and
-        b1 = b2 and
-        (b1 = true or b1 = false)
-      )
 }

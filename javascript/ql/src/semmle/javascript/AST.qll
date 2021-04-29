@@ -3,6 +3,7 @@
  */
 
 import javascript
+private import internal.StmtContainers
 
 /**
  * A program element corresponding to JavaScript code, such as an expression
@@ -10,9 +11,22 @@ import javascript
  *
  * This class provides generic traversal methods applicable to all AST nodes,
  * such as obtaining the children of an AST node.
+ *
+ * Examples:
+ *
+ * ```
+ * function abs(x) {
+ *   return x < 0 ? -x : x;
+ * }
+ * abs(-42);
+ * ```
  */
-class ASTNode extends @ast_node, Locatable {
+class ASTNode extends @ast_node, NodeInStmtContainer {
   override Location getLocation() { hasLocation(this, result) }
+
+  override File getFile() {
+    result = getLocation().getFile() // Specialized for performance reasons
+  }
 
   /** Gets the first token belonging to this element. */
   Token getFirstToken() {
@@ -113,27 +127,84 @@ class ASTNode extends @ast_node, Locatable {
   predicate inExternsFile() { getTopLevel().isExterns() }
 
   /**
+   * Holds if this is an ambient node that is not a `TypeExpr` and is not inside a `.d.ts` file
+   *
+   * Since the overwhelming majority of ambient nodes are `TypeExpr` or inside `.d.ts` files,
+   * we avoid caching them.
+   */
+  cached
+  private predicate isAmbientInternal() {
+    getParent().isAmbientInternal()
+    or
+    not isAmbientTopLevel(getTopLevel()) and
+    (
+      this instanceof ExternalModuleDeclaration
+      or
+      this instanceof GlobalAugmentationDeclaration
+      or
+      this instanceof ExportAsNamespaceDeclaration
+      or
+      this instanceof TypeAliasDeclaration
+      or
+      this instanceof InterfaceDeclaration
+      or
+      has_declare_keyword(this)
+      or
+      has_type_keyword(this)
+      or
+      // An export such as `export declare function f()` should be seen as ambient.
+      has_declare_keyword(this.(ExportNamedDeclaration).getOperand())
+      or
+      exists(Function f |
+        this = f and
+        not f.hasBody()
+      )
+    )
+  }
+
+  /**
    * Holds if this is part of an ambient declaration or type annotation in a TypeScript file.
    *
    * A declaration is ambient if it occurs under a `declare` modifier or is
-   * an interface declaration, type alias, or type annotation.
+   * an interface declaration, type alias, type annotation, or type-only import/export declaration.
    *
    * The TypeScript compiler emits no code for ambient declarations, but they
    * can affect name resolution and type checking at compile-time.
    */
-  predicate isAmbient() { getParent().isAmbient() }
+  pragma[inline]
+  predicate isAmbient() {
+    isAmbientInternal()
+    or
+    isAmbientTopLevel(getTopLevel())
+    or
+    this instanceof TypeExpr
+  }
 }
+
+/**
+ * Holds if the given file is a `.d.ts` file.
+ */
+cached
+private predicate isAmbientTopLevel(TopLevel tl) { tl.getFile().getBaseName().matches("%.d.ts") }
 
 /**
  * A toplevel syntactic unit; that is, a stand-alone script, an inline script
  * embedded in an HTML `<script>` tag, a code snippet assigned to an HTML event
  * handler attribute, or a `javascript:` URL.
+ *
+ * Example:
+ *
+ * ```
+ * <script>
+ * window.done = true;
+ * </script>
+ * ```
  */
 class TopLevel extends @toplevel, StmtContainer {
   /** Holds if this toplevel is minified. */
   predicate isMinified() {
     // file name contains 'min' (not as part of a longer word)
-    getFile().getBaseName().regexpMatch(".*[^-.]*[-.]min([-.].*)?\\.\\w+")
+    getFile().getBaseName().regexpMatch(".*[^-._]*[-._]min([-._].*)?\\.\\w+")
     or
     exists(int numstmt | numstmt = strictcount(Stmt s | s.getTopLevel() = this) |
       // there are more than two statements per line on average
@@ -141,12 +212,16 @@ class TopLevel extends @toplevel, StmtContainer {
       // and there are at least ten statements overall
       numstmt >= 10
     )
+    or
+    // many variables, and they all have short names
+    count(VarDecl d | d.getTopLevel() = this) > 100 and
+    forall(VarDecl d | d.getTopLevel() = this | d.getName().length() <= 2)
   }
 
   /** Holds if this toplevel is an externs definitions file. */
   predicate isExterns() {
     // either it was explicitly extracted as an externs file...
-    isExterns(this)
+    is_externs(this)
     or
     // ...or it has a comment with an `@externs` tag in it
     exists(JSDocTag externs |
@@ -172,57 +247,126 @@ class TopLevel extends @toplevel, StmtContainer {
   override ControlFlowNode getFirstControlFlowNode() { result = getEntry() }
 
   override string toString() { result = "<toplevel>" }
-
-  override predicate isAmbient() {
-    getFile().getFileType().isTypeScript() and
-    getFile().getBaseName().matches("%.d.ts")
-  }
 }
 
 /**
  * A stand-alone file or script originating from an HTML `<script>` element.
+ *
+ * Example:
+ *
+ * ```
+ * <script>
+ * window.done = true;
+ * </script>
+ * ```
  */
-abstract class Script extends TopLevel { }
+class Script extends TopLevel {
+  Script() { this instanceof @script or this instanceof @inline_script }
+}
 
 /**
  * A stand-alone file or an external script originating from an HTML `<script>` element.
+ *
+ * Example:
+ *
+ * ```
+ * #! /usr/bin/node
+ * console.log("Hello, world!");
+ * ```
  */
 class ExternalScript extends @script, Script { }
 
 /**
  * A script embedded inline in an HTML `<script>` element.
+ *
+ * Example:
+ *
+ * ```
+ * <script>
+ * window.done = true;
+ * </script>
+ * ```
  */
 class InlineScript extends @inline_script, Script { }
 
 /**
  * A code snippet originating from an HTML attribute value.
+ *
+ * Examples:
+ *
+ * ```
+ * <div onclick="alert('hi')">Click me</div>
+ * <a href="javascript:alert('hi')">Click me</a>
+ * ```
  */
-abstract class CodeInAttribute extends TopLevel { }
+class CodeInAttribute extends TopLevel {
+  CodeInAttribute() { this instanceof @event_handler or this instanceof @javascript_url }
+}
 
 /**
  * A code snippet originating from an event handler attribute.
+ *
+ * Example:
+ *
+ * ```
+ * <div onclick="alert('hi')">Click me</div>
+ * ```
  */
 class EventHandlerCode extends @event_handler, CodeInAttribute { }
 
 /**
  * A code snippet originating from a URL with the `javascript:` URL scheme.
+ *
+ * Example:
+ *
+ * ```
+ * <a href="javascript:alert('hi')">Click me</a>
+ * ```
  */
 class JavaScriptURL extends @javascript_url, CodeInAttribute { }
 
 /**
  * A toplevel syntactic entity containing Closure-style externs definitions.
+ *
+ * Example:
+ *
+ * <pre>
+ * /** @externs *&#47;
+ * /** @typedef {String} *&#47;
+ * var MyString;
+ * </pre>
  */
-class Externs extends TopLevel { Externs() { isExterns() } }
+class Externs extends TopLevel {
+  Externs() { isExterns() }
+}
 
-/** A program element that is either an expression or a statement. */
-class ExprOrStmt extends @exprorstmt, ControlFlowNode, ASTNode { }
+/**
+ * A program element that is either an expression or a statement.
+ *
+ * Examples:
+ *
+ * ```
+ * var i = 0;
+ * i = 9
+ * ```
+ */
+class ExprOrStmt extends @expr_or_stmt, ControlFlowNode, ASTNode { }
 
 /**
  * A program element that contains statements, but isn't itself
  * a statement, in other words a toplevel or a function.
+ *
+ * Example:
+ *
+ * ```
+ * function f() {
+ *   g();
+ * }
+ * ```
  */
 class StmtContainer extends @stmt_container, ASTNode {
   /** Gets the innermost enclosing container in which this container is nested. */
+  cached
   StmtContainer getEnclosingContainer() { none() }
 
   /**
@@ -303,9 +447,17 @@ class StmtContainer extends @stmt_container, ASTNode {
  */
 module AST {
   /**
-   * A program element that evaluates to a value at runtime. This includes expressions,
-   * but also function and class declaration statements, as well as TypeScript
-   * namespace and enum declarations.
+   * A program element that evaluates to a value or destructures a value at runtime.
+   * This includes expressions and destructuring patterns, but also function and
+   * class declaration statements, as well as TypeScript namespace and enum declarations.
+   *
+   * Examples:
+   *
+   * ```
+   * 0                               // expression
+   * (function id(x) { return x; })  // parenthesized function expression
+   * function id(x) { return x; }    // function declaration
+   * ```
    */
   class ValueNode extends ASTNode, @dataflownode {
     /** Gets type inference results for this element. */

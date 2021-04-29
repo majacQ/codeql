@@ -14,13 +14,19 @@ namespace Semmle.Extraction.CIL
     /// </summary>
     partial class Context : IDisposable
     {
-        public Extraction.Context cx;
         readonly FileStream stream;
-        public readonly MetadataReader mdReader;
-        public readonly PEReader peReader;
-        public readonly string assemblyPath;
-        public Entities.Assembly assembly;
-        public PDB.IPdb pdb;
+        Entities.Assembly? assemblyNull;
+
+        public Extraction.Context cx { get; }
+        public MetadataReader mdReader { get; }
+        public PEReader peReader { get; }
+        public string assemblyPath { get; }
+        public Entities.Assembly assembly
+        {
+            get { return assemblyNull!; }
+            set { assemblyNull = value; }
+        }
+        public PDB.IPdb? pdb { get; }
 
         public Context(Extraction.Context cx, string assemblyPath, bool extractPdbs)
         {
@@ -31,19 +37,16 @@ namespace Semmle.Extraction.CIL
             mdReader = peReader.GetMetadataReader();
             TypeSignatureDecoder = new Entities.TypeSignatureDecoder(this);
 
-            globalNamespace = new Lazy<Entities.Namespace>(() => Populate(new Entities.Namespace(this, GetId(""), null)));
+            globalNamespace = new Lazy<Entities.Namespace>(() => Populate(new Entities.Namespace(this, "", null)));
             systemNamespace = new Lazy<Entities.Namespace>(() => Populate(new Entities.Namespace(this, "System")));
-            genericHandleFactory = new CachedFunction<GenericContext, Handle, ILabelledEntity>(CreateGenericHandle);
+            genericHandleFactory = new CachedFunction<GenericContext, Handle, IExtractedEntity>(CreateGenericHandle);
             namespaceFactory = new CachedFunction<StringHandle, Entities.Namespace>(n => CreateNamespace(mdReader.GetString(n)));
             namespaceDefinitionFactory = new CachedFunction<NamespaceDefinitionHandle, Entities.Namespace>(CreateNamespace);
             sourceFiles = new CachedFunction<PDB.ISourceFile, Entities.PdbSourceFile>(path => new Entities.PdbSourceFile(this, path));
-            folders = new CachedFunction<string, Entities.Folder>(path => new Entities.Folder(this, path));
+            folders = new CachedFunction<PathTransformer.ITransformedPath, Entities.Folder>(path => new Entities.Folder(this, path));
             sourceLocations = new CachedFunction<PDB.Location, Entities.PdbSourceLocation>(location => new Entities.PdbSourceLocation(this, location));
 
             defaultGenericContext = new EmptyContext(this);
-
-            var def = mdReader.GetAssemblyDefinition();
-            AssemblyPrefix = GetId(def.Name) + "_" + def.Version.ToString() + "::";
 
             if (extractPdbs)
             {
@@ -75,7 +78,14 @@ namespace Semmle.Extraction.CIL
             }
         }
 
-        public readonly Id AssemblyPrefix;
+        public void WriteAssemblyPrefix(TextWriter trapFile)
+        {
+            var def = mdReader.GetAssemblyDefinition();
+            trapFile.Write(GetString(def.Name));
+            trapFile.Write('_');
+            trapFile.Write(def.Version.ToString());
+            trapFile.Write("::");
+        }
 
         public readonly Entities.TypeSignatureDecoder TypeSignatureDecoder;
 
@@ -101,7 +111,7 @@ namespace Semmle.Extraction.CIL
         /// </summary>
         /// <param name="handle">The handle of the method.</param>
         /// <returns>The debugging information, or null if the information could not be located.</returns>
-        public PDB.IMethod GetMethodDebugInformation(MethodDefinitionHandle handle)
+        public PDB.IMethod? GetMethodDebugInformation(MethodDefinitionHandle handle)
         {
             return pdb == null ? null : pdb.GetMethod(handle.ToDebugInformationHandle());
         }
@@ -121,7 +131,8 @@ namespace Semmle.Extraction.CIL
         }
 
         /// <summary>
-        /// The list of generic type parameters.
+        /// The list of generic type parameters, including type parameters of
+        /// containing types.
         /// </summary>
         public abstract IEnumerable<Entities.Type> TypeParameters { get; }
 

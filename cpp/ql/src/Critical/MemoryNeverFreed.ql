@@ -8,8 +8,11 @@
  *       security
  *       external/cwe/cwe-401
  */
+
 import MemoryFreed
 
-from Expr alloc
-where isAllocationExpr(alloc) and not allocMayBeFreed(alloc)
+from AllocationExpr alloc
+where
+  alloc.requiresDealloc() and
+  not allocMayBeFreed(alloc)
 select alloc, "This memory is never freed"

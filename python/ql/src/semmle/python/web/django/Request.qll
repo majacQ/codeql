@@ -1,164 +1,78 @@
 import python
-import semmle.python.regex
-
-import semmle.python.security.TaintTracking
+import semmle.python.dataflow.TaintTracking
 import semmle.python.web.Http
-
+import semmle.python.web.django.General
 
 /** A django.request.HttpRequest object */
 class DjangoRequest extends TaintKind {
+  DjangoRequest() { this = "django.request.HttpRequest" }
 
-    DjangoRequest() {
-        this = "django.request.HttpRequest"
-    }
+  override TaintKind getTaintOfAttribute(string name) {
+    (name = "GET" or name = "POST") and
+    result instanceof DjangoQueryDict
+  }
 
-    override TaintKind getTaintOfAttribute(string name) {
-        (name = "GET" or name = "POST") and
-        result instanceof DjangoQueryDict
-    }
-
-    override TaintKind getTaintOfMethodResult(string name) {
-
-        (name = "body" or name = "path") and
-        result instanceof ExternalStringKind
-    }
+  override TaintKind getTaintOfMethodResult(string name) {
+    (name = "body" or name = "path") and
+    result instanceof ExternalStringKind
+  }
 }
 
 /* Helper for getTaintForStep() */
-pragma [noinline]
+pragma[noinline]
 private predicate subscript_taint(SubscriptNode sub, ControlFlowNode obj, TaintKind kind) {
-    sub.getValue() = obj and
-    kind instanceof ExternalStringKind
+  sub.getObject() = obj and
+  kind instanceof ExternalStringKind
 }
 
 /** A django.request.QueryDict object */
 class DjangoQueryDict extends TaintKind {
+  DjangoQueryDict() { this = "django.http.request.QueryDict" }
 
-    DjangoQueryDict() {
-        this = "django.http.request.QueryDict"
-    }
+  override TaintKind getTaintForFlowStep(ControlFlowNode fromnode, ControlFlowNode tonode) {
+    this.taints(fromnode) and
+    subscript_taint(tonode, fromnode, result)
+  }
 
-    override TaintKind getTaintForFlowStep(ControlFlowNode fromnode, ControlFlowNode tonode) {
-        this.taints(fromnode) and
-        subscript_taint(tonode, fromnode, result)
-    }
-
-    override TaintKind getTaintOfMethodResult(string name) {
-        name = "get" and result instanceof ExternalStringKind
-    }
-
+  override TaintKind getTaintOfMethodResult(string name) {
+    name = "get" and result instanceof ExternalStringKind
+  }
 }
 
-abstract class DjangoRequestSource extends TaintSource {
-
-    override string toString() {
-        result = "Django request source"
-    }
-
-    override predicate isSourceOf(TaintKind kind) {
-        kind instanceof DjangoRequest
-    }
-
-}
-
-/** Function based views 
- * https://docs.djangoproject.com/en/1.11/topics/http/views/
- */
-private class DjangoFunctionBasedViewRequestArgument extends DjangoRequestSource {
-
-    DjangoFunctionBasedViewRequestArgument() {
-        exists(FunctionObject view |
-            url_dispatch(_, _, view) and
-            this = view.getFunction().getArg(0).asName().getAFlowNode()
-        )
-    }
-
-}
-
-/** Class based views 
- * https://docs.djangoproject.com/en/1.11/topics/class-based-views/
- * 
- */
-private class DjangoView extends ClassObject {
-
-    DjangoView() {
-        any(ModuleObject m | m.getName() = "django.views.generic").getAttribute("View") = this.getAnImproperSuperType()
-    }
-}
-
-private FunctionObject djangoViewHttpMethod() {
-    exists(DjangoView view |
-        view.lookupAttribute(httpVerbLower()) = result
+/** A Django request parameter */
+class DjangoRequestSource extends HttpRequestTaintSource {
+  DjangoRequestSource() {
+    exists(DjangoRoute route, DjangoViewHandler view, int request_arg_index |
+      route.getViewHandler() = view and
+      request_arg_index = view.getRequestArgIndex() and
+      this = view.getScope().getArg(request_arg_index).asName().getAFlowNode()
     )
-}
+  }
 
-class DjangoClassBasedViewRequestArgument extends DjangoRequestSource {
+  override string toString() { result = "Django request source" }
 
-    DjangoClassBasedViewRequestArgument() {
-        this = djangoViewHttpMethod().getFunction().getArg(1).asName().getAFlowNode()
-    }
-
-}
-
-
-
-
-/* ***********  Routing  ********* */
-
-
-/* Function based views */
-predicate url_dispatch(CallNode call, ControlFlowNode regex, FunctionObject view) {
-    exists(FunctionObject url |
-        any(ModuleObject m | m.getName() = "django.conf.urls").getAttribute("url") = url and
-        url.getArgumentForCall(call, 0) = regex and
-        url.getArgumentForCall(call, 1).refersTo(view)
-    )
-}
-
-
-class UrlRegex extends RegexString {
-
-    UrlRegex() {
-        url_dispatch(_, this.getAFlowNode(), _)
-    }
-
-}
-
-class UrlRouting extends CallNode {
-
-    UrlRouting() {
-        url_dispatch(this, _, _)
-    }
-
-    FunctionObject getViewFunction() {
-        url_dispatch(this, _, result)
-    }
-
-    string getNamedArgument() {
-        exists(UrlRegex regex |
-            url_dispatch(this, regex.getAFlowNode(), _) and
-            regex.getGroupName(_, _) = result
-        )
-    }
-
+  override predicate isSourceOf(TaintKind kind) { kind instanceof DjangoRequest }
 }
 
 /** An argument specified in a url routing table */
-class HttpRequestParameter extends TaintSource {
+class DjangoRequestParameter extends HttpRequestTaintSource {
+  DjangoRequestParameter() {
+    exists(DjangoRoute route, Function f, DjangoViewHandler view, int request_arg_index |
+      route.getViewHandler() = view and
+      request_arg_index = view.getRequestArgIndex() and
+      f = view.getScope()
+    |
+      this.(ControlFlowNode).getNode() = f.getArgByName(route.getANamedArgument())
+      or
+      exists(int i | i >= 0 |
+        i < route.getNumPositionalArguments() and
+        // +1 because first argument is always the request
+        this.(ControlFlowNode).getNode() = f.getArg(request_arg_index + 1 + i)
+      )
+    )
+  }
 
-    HttpRequestParameter() {
-        exists(UrlRouting url |
-            this.(ControlFlowNode).getNode() = 
-            url.getViewFunction().getFunction().getArgByName(url.getNamedArgument())
-        )
-    }
+  override predicate isSourceOf(TaintKind kind) { kind instanceof ExternalStringKind }
 
-    override predicate isSourceOf(TaintKind kind) { 
-        kind instanceof ExternalStringKind
-    }
-
-    override string toString() {
-        result = "django.http.request.parameter"
-    }
+  override string toString() { result = "django.http.request.parameter" }
 }
-

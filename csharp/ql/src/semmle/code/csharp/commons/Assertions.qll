@@ -1,6 +1,7 @@
 /** Provides classes for assertions. */
 
 private import semmle.code.csharp.frameworks.system.Diagnostics
+private import semmle.code.csharp.frameworks.system.diagnostics.Contracts
 private import semmle.code.csharp.frameworks.test.VisualStudio
 private import semmle.code.csharp.frameworks.System
 private import ControlFlow
@@ -15,7 +16,7 @@ abstract class AssertMethod extends Method {
   final Parameter getAssertedParameter() { result = this.getParameter(this.getAssertionIndex()) }
 
   /** Gets the exception being thrown if the assertion fails, if any. */
-  abstract ExceptionClass getExceptionClass();
+  abstract Class getExceptionClass();
 }
 
 /** A positive assertion method. */
@@ -42,41 +43,81 @@ class Assertion extends MethodCall {
   /** Gets the expression that this assertion pertains to. */
   Expr getExpr() { result = this.getArgumentForParameter(target.getAssertedParameter()) }
 
+  /**
+   * Holds if basic block `succ` is immediately dominated by this assertion.
+   * That is, `succ` can only be reached from the callable entry point by
+   * going via *some* basic block `pred` containing this assertion, and `pred`
+   * is an immediate predecessor of `succ`.
+   *
+   * Moreover, this assertion corresponds to multiple control flow nodes,
+   * which is why
+   *
+   * ```ql
+   * exists(BasicBlock bb |
+   *   bb.getANode() = this.getAControlFlowNode() |
+   *   bb.immediatelyDominates(succ)
+   * )
+   * ```
+   *
+   * does not work.
+   */
   pragma[nomagic]
-  private JoinBlockPredecessor getAPossiblyDominatedPredecessor(JoinBlock jb) {
+  private predicate immediatelyDominatesBlockSplit(BasicBlock succ) {
     // Only calculate dominance by explicit recursion for split nodes;
     // all other nodes can use regular CFG dominance
     this instanceof ControlFlow::Internal::SplitControlFlowElement and
-    exists(BasicBlock bb | bb = this.getAControlFlowNode().getBasicBlock() |
-      result = bb.getASuccessor*()
-    ) and
-    result.getASuccessor() = jb and
-    not jb.dominates(result)
+    exists(BasicBlock bb | bb.getANode() = this.getAControlFlowNode() |
+      succ = bb.getASuccessor() and
+      forall(BasicBlock pred | pred = succ.getAPredecessor() and pred != bb |
+        succ.dominates(pred)
+        or
+        // `pred` might be another split of this element
+        pred.getANode().getElement() = this
+      )
+    )
   }
 
-  pragma[nomagic]
-  private predicate isPossiblyDominatedJoinBlock(JoinBlock jb) {
-    exists(this.getAPossiblyDominatedPredecessor(jb)) and
-    forall(BasicBlock pred | pred = jb.getAPredecessor() |
-      pred = this.getAPossiblyDominatedPredecessor(jb)
+  pragma[noinline]
+  private predicate strictlyDominatesJoinBlockPredecessor(JoinBlock jb, int i) {
+    this.strictlyDominatesSplit(jb.getJoinBlockPredecessor(i))
+  }
+
+  private predicate strictlyDominatesJoinBlockSplit(JoinBlock jb, int i) {
+    i = -1 and
+    this.strictlyDominatesJoinBlockPredecessor(jb, _)
+    or
+    this.strictlyDominatesJoinBlockSplit(jb, i - 1) and
+    (
+      this.strictlyDominatesJoinBlockPredecessor(jb, i)
       or
-      jb.dominates(pred)
+      this.getAControlFlowNode().getBasicBlock() = jb.getJoinBlockPredecessor(i)
     )
   }
 
   pragma[nomagic]
   private predicate strictlyDominatesSplit(BasicBlock bb) {
-    this.getAControlFlowNode().getBasicBlock().immediatelyDominates(bb)
+    this.immediatelyDominatesBlockSplit(bb)
     or
-    if bb instanceof JoinBlock
-    then
-      this.isPossiblyDominatedJoinBlock(bb) and
-      forall(BasicBlock pred | pred = this.getAPossiblyDominatedPredecessor(bb) |
-        this.strictlyDominatesSplit(pred)
-        or
-        this.getAControlFlowNode().getBasicBlock() = pred
-      )
-    else this.strictlyDominatesSplit(bb.getAPredecessor())
+    // Equivalent with
+    //
+    // ```ql
+    // exists(JoinBlockPredecessor pred | pred = bb.getAPredecessor() |
+    //   this.strictlyDominatesSplit(pred)
+    // ) and
+    // forall(JoinBlockPredecessor pred | pred = bb.getAPredecessor() |
+    //   this.strictlyDominatesSplit(pred)
+    //   or
+    //   this.getAControlFlowNode().getBasicBlock() = pred
+    // )
+    // ```
+    //
+    // but uses no universal recursion for better performance.
+    exists(int last | last = max(int i | exists(bb.(JoinBlock).getJoinBlockPredecessor(i))) |
+      this.strictlyDominatesJoinBlockSplit(bb, last)
+    )
+    or
+    not bb instanceof JoinBlock and
+    this.strictlyDominatesSplit(bb.getAPredecessor())
   }
 
   /**
@@ -122,9 +163,32 @@ class SystemDiagnosticsDebugAssertTrueMethod extends AssertTrueMethod {
 
   override int getAssertionIndex() { result = 0 }
 
-  override ExceptionClass getExceptionClass() {
+  override Class getExceptionClass() {
     // A failing assertion generates a message box, see
     // https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.debug.assert
+    none()
+  }
+}
+
+/**
+ * A `System.Diagnostics.Contracts.Contract` assertion method.
+ */
+class SystemDiagnosticsContractAssertTrueMethod extends AssertTrueMethod {
+  SystemDiagnosticsContractAssertTrueMethod() {
+    exists(SystemDiagnosticsContractsContractClass c |
+      this = c.getAnAssertMethod()
+      or
+      this = c.getAnAssumeMethod()
+      or
+      this = c.getARequiresMethod()
+    )
+  }
+
+  override int getAssertionIndex() { result = 0 }
+
+  override Class getExceptionClass() {
+    // A failing assertion generates a message box, see
+    // https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.contracts.contract.assert
     none()
   }
 }
@@ -165,16 +229,66 @@ class VSTestAssertNonNullMethod extends AssertNonNullMethod {
   override AssertFailedExceptionClass getExceptionClass() { any() }
 }
 
+/** An NUnit assertion method. */
+abstract class NUnitAssertMethod extends AssertMethod {
+  override int getAssertionIndex() { result = 0 }
+
+  override AssertionExceptionClass getExceptionClass() { any() }
+}
+
+/** An NUnit assertion method. */
+class NUnitAssertTrueMethod extends AssertTrueMethod, NUnitAssertMethod {
+  NUnitAssertTrueMethod() {
+    exists(NUnitAssertClass c |
+      this = c.getATrueMethod()
+      or
+      this = c.getAnIsTrueMethod()
+      or
+      this = c.getAThatMethod() and
+      this.getParameter(0).getType() instanceof BoolType
+    )
+  }
+}
+
+/** An NUnit negated assertion method. */
+class NUnitAssertFalseMethod extends AssertFalseMethod, NUnitAssertMethod {
+  NUnitAssertFalseMethod() {
+    exists(NUnitAssertClass c |
+      this = c.getAFalseMethod() or
+      this = c.getAnIsFalseMethod()
+    )
+  }
+}
+
+/** An NUnit `null` assertion method. */
+class NUnitAssertNullMethod extends AssertNullMethod, NUnitAssertMethod {
+  NUnitAssertNullMethod() {
+    exists(NUnitAssertClass c |
+      this = c.getANullMethod() or
+      this = c.getAnIsNullMethod()
+    )
+  }
+}
+
+/** An NUnit non-`null` assertion method. */
+class NUnitAssertNonNullMethod extends AssertNonNullMethod, NUnitAssertMethod {
+  NUnitAssertNonNullMethod() {
+    exists(NUnitAssertClass c |
+      this = c.getANotNullMethod() or
+      this = c.getAnIsNotNullMethod()
+    )
+  }
+}
+
 /** A method that forwards to another assertion method. */
 class ForwarderAssertMethod extends AssertMethod {
   Assertion a;
-
   Parameter p;
 
   ForwarderAssertMethod() {
     p = this.getAParameter() and
     strictcount(AssignableDefinition def | def.getTarget() = p) = 1 and
-    forex(ControlFlowElement body | body = this.getABody() |
+    forex(ControlFlowElement body | body = this.getBody() |
       bodyAsserts(this, body, a) and
       a.getExpr() = p.getAnAccess()
     )
@@ -182,7 +296,7 @@ class ForwarderAssertMethod extends AssertMethod {
 
   override int getAssertionIndex() { result = p.getPosition() }
 
-  override ExceptionClass getExceptionClass() {
+  override Class getExceptionClass() {
     result = this.getUnderlyingAssertMethod().getExceptionClass()
   }
 
@@ -192,7 +306,7 @@ class ForwarderAssertMethod extends AssertMethod {
 
 pragma[noinline]
 private predicate bodyAsserts(Callable c, ControlFlowElement body, Assertion a) {
-  c.getABody() = body and
+  c.getBody() = body and
   body = getAnAssertingElement(a)
 }
 

@@ -1,144 +1,156 @@
 package com.semmle.js.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import com.semmle.ts.ast.DecoratorList;
 import com.semmle.ts.ast.ITypeExpression;
 import com.semmle.ts.ast.TypeParameter;
+import com.semmle.util.data.IntList;
+import java.util.ArrayList;
+import java.util.List;
 
 public class AFunction<B> {
-	private final Identifier id;
-	private final List<IPattern> params, allParams;
-	private final List<Expression> rawParams, defaults;
-	private final IPattern rest;
-	private final B body;
-	private final boolean generator, async;
-	private final List<TypeParameter> typeParameters;
-	private final ITypeExpression returnType;
-	private final List<ITypeExpression> parameterTypes;
-	private final ITypeExpression thisParameterType;
-	private final List<DecoratorList> parameterDecorators;
+  private final Identifier id;
+  private final List<IPattern> params, allParams;
+  private final List<Expression> rawParams, defaults;
+  private final IPattern rest;
+  private final B body;
+  private final boolean generator, async;
+  private final List<TypeParameter> typeParameters;
+  private final ITypeExpression returnType;
+  private final List<ITypeExpression> parameterTypes;
+  private final ITypeExpression thisParameterType;
+  private final List<DecoratorList> parameterDecorators;
+  private final IntList optionalParameterIndices;
 
-	public AFunction(Identifier id, List<Expression> params, B body, boolean generator, boolean async,
-			List<TypeParameter> typeParameters, List<ITypeExpression> parameterTypes, List<DecoratorList> parameterDecorators,
-			ITypeExpression returnType, ITypeExpression thisParameterType) {
-		this.id = id;
-		this.params = new ArrayList<IPattern>(params.size());
-		this.defaults = new ArrayList<Expression>(params.size());
-		this.parameterTypes = parameterTypes;
-		this.body = body;
-		this.generator = generator;
-		this.async = async;
-		this.rawParams = params;
-		this.typeParameters = typeParameters;
-		this.returnType = returnType;
-		this.thisParameterType = thisParameterType;
-		this.parameterDecorators = parameterDecorators;
+  public static final IntList noOptionalParams = IntList.create(0, 0);
 
-		IPattern rest = null;
-		for (Expression param : params) {
-			if (param instanceof RestElement) {
-				rest = (IPattern)((RestElement) param).getArgument();
-			} else if (param instanceof AssignmentPattern) {
-				AssignmentPattern ap = (AssignmentPattern) param;
-				this.params.add((IPattern)ap.getLeft());
-				this.defaults.add(ap.getRight());
-			} else {
-				// workaround for parser bug, which currently (erroneously) accepts
-				// async arrow functions with parens around their parameters
-				param = param.stripParens();
-				this.params.add((IPattern) param);
-				this.defaults.add(null);
-			}
-		}
-		this.rest = rest;
+  public AFunction(
+      Identifier id,
+      List<Expression> params,
+      B body,
+      boolean generator,
+      boolean async,
+      List<TypeParameter> typeParameters,
+      List<ITypeExpression> parameterTypes,
+      List<DecoratorList> parameterDecorators,
+      ITypeExpression returnType,
+      ITypeExpression thisParameterType,
+      IntList optionalParameterIndices) {
+    this.id = id;
+    this.params = new ArrayList<IPattern>(params.size());
+    this.defaults = new ArrayList<Expression>(params.size());
+    this.parameterTypes = parameterTypes;
+    this.body = body;
+    this.generator = generator;
+    this.async = async;
+    this.rawParams = params;
+    this.typeParameters = typeParameters;
+    this.returnType = returnType;
+    this.thisParameterType = thisParameterType;
+    this.parameterDecorators = parameterDecorators;
+    this.optionalParameterIndices = optionalParameterIndices;
 
-		this.allParams = new ArrayList<IPattern>(this.params);
-		if (rest != null)
-			this.allParams.add(rest);
-	}
+    IPattern rest = null;
+    for (Expression param : params) {
+      if (param instanceof RestElement) {
+        rest = (IPattern) ((RestElement) param).getArgument();
+      } else if (param instanceof AssignmentPattern) {
+        AssignmentPattern ap = (AssignmentPattern) param;
+        this.params.add((IPattern) ap.getLeft());
+        this.defaults.add(ap.getRight());
+      } else {
+        // workaround for parser bug, which currently (erroneously) accepts
+        // async arrow functions with parens around their parameters
+        param = param.stripParens();
+        this.params.add((IPattern) param);
+        this.defaults.add(null);
+      }
+    }
+    this.rest = rest;
 
-	/**
-	 * Does this function have a name?
-	 */
-	public boolean hasId() {
-		return id != null;
-	}
+    this.allParams = new ArrayList<IPattern>(this.params);
+    if (rest != null) this.allParams.add(rest);
+  }
 
-	public Identifier getId() {
-		return id;
-	}
+  /** Does this function have a name? */
+  public boolean hasId() {
+    return id != null;
+  }
 
-	public List<IPattern> getParams() {
-		return params;
-	}
+  public Identifier getId() {
+    return id;
+  }
 
-	public boolean hasDefault(int i) {
-		return i < defaults.size();
-	}
+  public List<IPattern> getParams() {
+    return params;
+  }
 
-	public Expression getDefault(int i) {
-		if (i >= defaults.size())
-			return null;
-		return defaults.get(i);
-	}
+  public boolean hasDefault(int i) {
+    return i < defaults.size();
+  }
 
-	public boolean hasRest() {
-		return rest != null;
-	}
+  public Expression getDefault(int i) {
+    if (i >= defaults.size()) return null;
+    return defaults.get(i);
+  }
 
-	public IPattern getRest() {
-		return rest;
-	}
+  public boolean hasRest() {
+    return rest != null;
+  }
 
-	public B getBody() {
-		return body;
-	}
+  public IPattern getRest() {
+    return rest;
+  }
 
-	public boolean isGenerator() {
-		return generator;
-	}
+  public B getBody() {
+    return body;
+  }
 
-	public boolean isAsync() {
-		return async;
-	}
+  public boolean isGenerator() {
+    return generator;
+  }
 
-	public List<IPattern> getAllParams() {
-		return allParams;
-	}
+  public boolean isAsync() {
+    return async;
+  }
 
-	public List<Expression> getRawParams() {
-		return rawParams;
-	}
+  public List<IPattern> getAllParams() {
+    return allParams;
+  }
 
-	public ITypeExpression getReturnType() {
-		return returnType;
-	}
+  public List<Expression> getRawParams() {
+    return rawParams;
+  }
 
-	public boolean hasParameterType(int i) {
-		return getParameterType(i) != null;
-	}
+  public ITypeExpression getReturnType() {
+    return returnType;
+  }
 
-	public ITypeExpression getParameterType(int i) {
-		if (i >= parameterTypes.size())
-			return null;
-		return parameterTypes.get(i);
-	}
+  public boolean hasParameterType(int i) {
+    return getParameterType(i) != null;
+  }
 
-	public List<ITypeExpression> getParameterTypes() {
-		return parameterTypes;
-	}
+  public ITypeExpression getParameterType(int i) {
+    if (i >= parameterTypes.size()) return null;
+    return parameterTypes.get(i);
+  }
 
-	public List<TypeParameter> getTypeParameters() {
-		return typeParameters;
-	}
+  public List<ITypeExpression> getParameterTypes() {
+    return parameterTypes;
+  }
 
-	public ITypeExpression getThisParameterType() {
-		return thisParameterType;
-	}
+  public List<TypeParameter> getTypeParameters() {
+    return typeParameters;
+  }
 
-	public List<DecoratorList> getParameterDecorators() {
-		return parameterDecorators;
-	}
+  public ITypeExpression getThisParameterType() {
+    return thisParameterType;
+  }
+
+  public List<DecoratorList> getParameterDecorators() {
+    return parameterDecorators;
+  }
+
+  public IntList getOptionalParmaeterIndices() {
+    return optionalParameterIndices;
+  }
 }

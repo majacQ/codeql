@@ -5,11 +5,11 @@
 import csharp
 
 module LogForging {
-  import semmle.code.csharp.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
   import semmle.code.csharp.frameworks.System
   import semmle.code.csharp.frameworks.system.text.RegularExpressions
   import semmle.code.csharp.security.Sanitizers
-  import semmle.code.csharp.security.sinks.ExternalLocationSink
+  import semmle.code.csharp.security.dataflow.flowsinks.ExternalLocationSink
 
   /**
    * A data flow source for untrusted user input used in log entries.
@@ -40,7 +40,9 @@ module LogForging {
   }
 
   /** A source of remote user input. */
-  class RemoteSource extends Source { RemoteSource() { this instanceof RemoteFlowSource } }
+  class RemoteSource extends Source {
+    RemoteSource() { this instanceof RemoteFlowSource }
+  }
 
   class HtmlSanitizer extends Sanitizer {
     HtmlSanitizer() { this.asExpr() instanceof HtmlSanitizedExpr }
@@ -49,7 +51,9 @@ module LogForging {
   /**
    * A logger type that extends from an ILogger type.
    */
-  private class LoggerType extends RefType { LoggerType() { getABaseType*().hasName("ILogger") } }
+  private class LoggerType extends RefType {
+    LoggerType() { getABaseType*().hasName("ILogger") }
+  }
 
   /**
    * An argument to a call to a method on a logger class.

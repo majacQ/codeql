@@ -6,7 +6,7 @@
 import csharp
 
 module MissingXMLValidation {
-  import semmle.code.csharp.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
   import semmle.code.csharp.frameworks.system.Xml
   import semmle.code.csharp.security.Sanitizers
 
@@ -45,7 +45,9 @@ module MissingXMLValidation {
   }
 
   /** A source of remote user input. */
-  class RemoteSource extends Source { RemoteSource() { this instanceof RemoteFlowSource } }
+  class RemoteSource extends Source {
+    RemoteSource() { this instanceof RemoteFlowSource }
+  }
 
   /**
    * The input argument to a call to `XmlReader.Create` where the input will not be validated against

@@ -28,33 +28,60 @@ private newtype PropertyName =
   }
 
 /**
- * Gets the representation of the property name of `pacc`, if any.
+ * Gets an access to property `name` of access path `base` in basic block `bb`.
  */
-private PropertyName getPropertyName(PropAccess pacc) {
-  result = StaticPropertyName(pacc.getPropertyName())
-  or
-  exists(SsaVariable var |
-    pacc.getPropertyNameExpr() = var.getAUse() and
-    result = DynamicPropertyName(var)
+private PropAccess namedPropAccess(AccessPath base, PropertyName name, BasicBlock bb) {
+  result.getBase() = base.getAnInstanceIn(bb) and
+  (
+    name = StaticPropertyName(result.getPropertyName())
+    or
+    exists(SsaVariable var |
+      result.getPropertyNameExpr() = var.getAUse() and
+      name = DynamicPropertyName(var)
+    )
   )
 }
 
+private SsaVariable getRefinedVariable(SsaVariable variable) {
+  result = variable.getDefinition().(SsaRefinementNode).getAnInput()
+}
+
+private SsaVariable getARefinementOf(SsaVariable variable) { variable = getRefinedVariable(result) }
+
 /**
- * A representation of a (nested) property access on an SSA variable
+ * A representation of a (nested) property access on an SSA variable or captured variable
  * where each property name is either constant or itself an SSA variable.
  */
 private newtype TAccessPath =
-  MkSsaRoot(SsaVariable var) or
+  /**
+   * An access path rooted in an SSA variable.
+   *
+   * Refinement nodes are treated as no-ops so that all uses of a refined value are
+   * given the same access path. Refinement nodes are therefore never treated as roots.
+   */
+  MkSsaRoot(SsaVariable var) {
+    not exists(getRefinedVariable(var)) and
+    not var.getSourceVariable().isCaptured() // Handled by MkCapturedRoot
+  } or
+  /**
+   * An access path rooted in a captured variable.
+   *
+   * The SSA form for captured variables is too conservative for constructing
+   * access paths across function boundaries, so in this case we use the source
+   * variable as the root.
+   */
+  MkCapturedRoot(LocalVariable var) { var.isCaptured() } or
+  /**
+   * An access path rooted in the receiver of a function.
+   */
   MkThisRoot(Function function) { function.getThisBinder() = function } or
-  MkAccessStep(AccessPath base, PropertyName name) {
-    exists(PropAccess pacc |
-      pacc.getBase() = base.getAnInstance() and
-      getPropertyName(pacc) = name
-    )
-  }
+  /**
+   * A property access on an access path.
+   */
+  MkAccessStep(AccessPath base, PropertyName name) { exists(namedPropAccess(base, name, _)) }
 
 /**
- * A representation of a (nested) property access on an SSA variable
+ * A representation of a (nested) property access on an SSA variable or captured variable
  * where each property name is either constant or itself an SSA variable.
  */
 class AccessPath extends TAccessPath {
@@ -64,7 +91,13 @@ class AccessPath extends TAccessPath {
   Expr getAnInstanceIn(BasicBlock bb) {
     exists(SsaVariable var |
       this = MkSsaRoot(var) and
-      result = var.getAUseIn(bb)
+      result = getARefinementOf*(var).getAUseIn(bb)
+    )
+    or
+    exists(Variable var |
+      this = MkCapturedRoot(var) and
+      result = var.getAnAccess() and
+      result.getBasicBlock() = bb
     )
     or
     exists(ThisExpr this_ |
@@ -73,24 +106,9 @@ class AccessPath extends TAccessPath {
       this_.getBasicBlock() = bb
     )
     or
-    exists(PropertyName name |
-      result = getABaseInstanceIn(bb, name) and
-      getPropertyName(result) = name
-    )
-  }
-
-  /**
-   * Gets a property access in `bb` whose base is represented by the
-   * base of this access path, and where `name` is bound to the last
-   * component of this access path.
-   *
-   * This is an auxiliary predicate that's needed to enforce a better
-   * join order in `getAnInstanceIn` above.
-   */
-  pragma[noinline]
-  private PropAccess getABaseInstanceIn(BasicBlock bb, PropertyName name) {
-    exists(AccessPath base | this = MkAccessStep(base, name) |
-      result.getBase() = base.getAnInstanceIn(bb)
+    exists(AccessPath base, PropertyName name |
+      this = MkAccessStep(base, name) and
+      result = namedPropAccess(base, name, bb)
     )
   }
 
@@ -110,8 +128,9 @@ class AccessPath extends TAccessPath {
     exists(AccessPath base, PropertyName name, string rest |
       rest = "." + any(string s | name = StaticPropertyName(s))
       or
-      rest = "[" +
-          any(SsaVariable var | name = DynamicPropertyName(var)).getSourceVariable().getName() + "]"
+      rest =
+        "[" + any(SsaVariable var | name = DynamicPropertyName(var)).getSourceVariable().getName() +
+          "]"
     |
       result = base.toString() + rest and
       this = MkAccessStep(base, name)

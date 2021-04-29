@@ -64,7 +64,7 @@ namespace Semmle.Util
         /// Enumerates a possibly null enumerable.
         /// If the enumerable is null, the list is empty.
         /// </summary>
-        public static IEnumerable<T> EnumerateNull<T>(this IEnumerable<T> items)
+        public static IEnumerable<T> EnumerateNull<T>(this IEnumerable<T>? items)
         {
             if (items == null) yield break;
             foreach (var item in items) yield return item;
@@ -85,6 +85,20 @@ namespace Semmle.Util
         public static void Enumerate<T>(this IEnumerable<T> items)
         {
             items.ForEach(_ => { });
+        }
+
+        /// <summary>
+        /// Computes a hash of a sequence.
+        /// </summary>
+        /// <typeparam name="T">The type of the item.</typeparam>
+        /// <param name="items">The list of items to hash.</param>
+        /// <returns>The hash code.</returns>
+        public static int SequenceHash<T>(this IEnumerable<T> items) where T : notnull
+        {
+            int h = 0;
+            foreach (var i in items)
+                h = h * 7 + i.GetHashCode();
+            return h;
         }
     }
 }

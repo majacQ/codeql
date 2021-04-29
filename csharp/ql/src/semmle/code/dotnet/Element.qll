@@ -10,6 +10,7 @@ import semmle.code.csharp.Location
  */
 class Element extends @dotnet_element {
   /** Gets a textual representation of this element. */
+  cached
   string toString() { none() }
 
   /** Gets the location of this element. */
@@ -22,10 +23,10 @@ class Element extends @dotnet_element {
   Location getALocation() { none() }
 
   /** Gets the file containing this element. */
-  File getFile() { result = getLocation().getFile() }
+  final File getFile() { result = this.getLocation().getFile() }
 
   /** Holds if this element is from source code. */
-  predicate fromSource() { none() }
+  predicate fromSource() { this.getFile().fromSource() }
 
   /**
    * Gets the "language" of this program element, as defined by the extension of the filename.
@@ -49,7 +50,7 @@ class NamedElement extends Element, @dotnet_named_element {
    * Gets the fully qualified name of this element, for example the
    * fully qualified name of `M` on line 3 is `N.C.M` in
    *
-   * ```
+   * ```csharp
    * namespace N {
    *   class C {
    *     void M(int i, string s) { }

@@ -1,6 +1,6 @@
 import React from 'react';
 import autoBind from 'auto-bind';
-
+import reactAutobind from 'react-autobind';
 class Component0 extends React.Component {
 
     render() {
@@ -155,4 +155,38 @@ class Component3 extends React.Component {
     }
 }
 
-// semmle-extractor-options: --experimental
+class Component4 extends React.Component {
+
+    render() {
+        return <div>
+            <div onClick={this.bound_throughReactAutobind}/> // OK
+            </div>
+    }
+
+    constructor(props) {
+        super(props);
+        reactAutobind(this);
+    }
+
+    bound_throughReactAutobind() {
+        this.setState({ });
+    }
+}
+
+class Component5 extends React.Component {
+
+    render() {
+        return <div>
+            <div onClick={this.bound_throughSomeBinder}/> // OK
+            </div>
+    }
+
+    constructor(props) {
+        super(props);
+	    someBind(this, "bound_throughSomeBinder");
+    }
+
+    bound_throughSomeBinder() {
+        this.setState({ });
+    }
+}

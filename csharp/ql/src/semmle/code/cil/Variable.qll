@@ -28,7 +28,9 @@ class Variable extends DotNet::Variable, Declaration, DataFlowNode, @cil_variabl
 }
 
 /** A stack variable. Either a local variable (`LocalVariable`) or a parameter (`Parameter`). */
-class StackVariable extends Variable, @cil_stack_variable { }
+class StackVariable extends Variable, @cil_stack_variable {
+  override predicate hasQualifiedName(string qualifier, string name) { none() }
+}
 
 /**
  * A local variable.
@@ -88,7 +90,12 @@ class Parameter extends DotNet::Parameter, StackVariable, @cil_parameter {
   override string toStringWithTypes() { result = getPrefix() + getType().toStringWithTypes() }
 
   private string getPrefix() {
-    if isOut() then result = "out " else if isRef() then result = "ref " else result = ""
+    if isOut()
+    then result = "out "
+    else
+      if isRef()
+      then result = "ref "
+      else result = ""
   }
 
   override Location getLocation() { result = getMethod().getLocation() }

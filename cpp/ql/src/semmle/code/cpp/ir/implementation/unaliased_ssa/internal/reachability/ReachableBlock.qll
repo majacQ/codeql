@@ -1,15 +1,11 @@
 private import ReachableBlockInternal
-private import semmle.code.cpp.ir.internal.IntegerConstant
 private import IR
 private import ConstantAnalysis
 
 predicate isInfeasibleInstructionSuccessor(Instruction instr, EdgeKind kind) {
   exists(int conditionValue |
-    conditionValue = getValue(getConstantValue(instr.(ConditionalBranchInstruction).getCondition())) and
-    if conditionValue = 0 then
-      kind instanceof TrueEdge
-    else
-      kind instanceof FalseEdge
+    conditionValue = getConstantValue(instr.(ConditionalBranchInstruction).getCondition()) and
+    if conditionValue = 0 then kind instanceof TrueEdge else kind instanceof FalseEdge
   )
 }
 
@@ -26,9 +22,7 @@ private IRBlock getAFeasiblePredecessorBlock(IRBlock successor) {
 }
 
 private predicate isBlockReachable(IRBlock block) {
-  exists(FunctionIR f |
-    getAFeasiblePredecessorBlock*(block) = f.getEntryBlock()
-  )
+  exists(IRFunction f | getAFeasiblePredecessorBlock*(block) = f.getEntryBlock())
 }
 
 /**
@@ -36,34 +30,22 @@ private predicate isBlockReachable(IRBlock block) {
  * edges.
  */
 class ReachableBlock extends IRBlockBase {
-  ReachableBlock() {
-    isBlockReachable(this)
-  }
+  ReachableBlock() { isBlockReachable(this) }
 
-  final ReachableBlock getAFeasiblePredecessor() {
-    result = getAFeasiblePredecessorBlock(this)
-  }
+  final ReachableBlock getAFeasiblePredecessor() { result = getAFeasiblePredecessorBlock(this) }
 
-  final ReachableBlock getAFeasibleSuccessor() {
-    this = getAFeasiblePredecessorBlock(result)
-  }
+  final ReachableBlock getAFeasibleSuccessor() { this = getAFeasiblePredecessorBlock(result) }
 }
 
 /**
  * An instruction that is contained in a reachable block.
  */
 class ReachableInstruction extends Instruction {
-  ReachableInstruction() {
-    this.getBlock() instanceof ReachableBlock
-  }
+  ReachableInstruction() { this.getBlock() instanceof ReachableBlock }
 }
 
 module Graph {
-  predicate isEntryBlock(ReachableBlock block) {
-    exists(FunctionIR f |
-      block = f.getEntryBlock()
-    )
-  }
+  predicate isEntryBlock(ReachableBlock block) { exists(IRFunction f | block = f.getEntryBlock()) }
 
   predicate blockSuccessor(ReachableBlock pred, ReachableBlock succ) {
     succ = pred.getAFeasibleSuccessor()

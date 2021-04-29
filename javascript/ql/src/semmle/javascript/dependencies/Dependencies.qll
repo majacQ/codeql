@@ -23,7 +23,7 @@ abstract class Dependency extends Locatable {
   /**
    * A use of this dependency, which is of the given `kind`.
    *
-   * Currently, the only supported kind is `"import"`.
+   * Currently, the only supported kinds are `"import"` and `"use"`.
    */
   abstract Locatable getAUse(string kind);
 }
@@ -194,7 +194,8 @@ abstract class ScriptDependency extends Dependency {
   abstract Expr getAnApiUse();
 
   override Locatable getAUse(string kind) {
-    kind = "import" and result.(HTML::HtmlFile) = this.getFile()
+    kind = "import" and
+    result = this.getFile().(HTML::HtmlFile).getATopLevel()
     or
     kind = "use" and result = getAnApiUse()
   }
@@ -272,7 +273,7 @@ private class GWTDependency extends ScriptDependency {
  * A dependency on the Google Closure library indicated by
  * a call to `goog.require` or `goog.provide`.
  */
-private class GoogleClosureDep extends Dependency, @callexpr {
+private class GoogleClosureDep extends Dependency, @call_expr {
   GoogleClosureDep() {
     exists(MethodCallExpr mce |
       mce = this and mce.getReceiver().(GlobalVarAccess).getName() = "goog"

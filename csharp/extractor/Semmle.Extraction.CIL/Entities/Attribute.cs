@@ -14,16 +14,25 @@ namespace Semmle.Extraction.CIL.Entities
     /// <summary>
     /// Entity representing a CIL attribute.
     /// </summary>
-    class Attribute : UnlabelledEntity, IAttribute
+    sealed class Attribute : UnlabelledEntity, IAttribute
     {
+        readonly CustomAttributeHandle handle;
         readonly CustomAttribute attrib;
         readonly IEntity @object;
 
         public Attribute(Context cx, IEntity @object, CustomAttributeHandle handle) : base(cx)
         {
             attrib = cx.mdReader.GetCustomAttribute(handle);
+            this.handle = handle;
             this.@object = @object;
         }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is Attribute attribute && handle.Equals(attribute.handle);
+        }
+
+        public override int GetHashCode() => handle.GetHashCode();
 
         public override IEnumerable<IExtractionProduct> Contents
         {
@@ -49,13 +58,15 @@ namespace Semmle.Extraction.CIL.Entities
                 for (int index = 0; index < decoded.FixedArguments.Length; ++index)
                 {
                     object value = decoded.FixedArguments[index].Value;
-                    yield return Tuples.cil_attribute_positional_argument(this, index, value == null ? "null" : value.ToString());
+                    var stringValue = value?.ToString();
+                    yield return Tuples.cil_attribute_positional_argument(this, index, stringValue ?? "null");
                 }
 
                 foreach (var p in decoded.NamedArguments)
                 {
                     object value = p.Value;
-                    yield return Tuples.cil_attribute_named_argument(this, p.Name, value == null ? "null" : value.ToString());
+                    var stringValue = value?.ToString();
+                    yield return Tuples.cil_attribute_named_argument(this, p.Name, stringValue ?? "null");
                 }
             }
         }
@@ -78,7 +89,7 @@ namespace Semmle.Extraction.CIL.Entities
         readonly Context cx;
         public CustomAttributeDecoder(Context cx) { this.cx = cx; }
 
-        public Type GetPrimitiveType(PrimitiveTypeCode typeCode) => cx.Populate(new PrimitiveType(cx, typeCode));
+        public Type GetPrimitiveType(PrimitiveTypeCode typeCode) => cx.Create(typeCode);
 
         public Type GetSystemType() => throw new NotImplementedException();
 

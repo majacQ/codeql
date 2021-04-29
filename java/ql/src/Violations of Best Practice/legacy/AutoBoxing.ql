@@ -12,10 +12,14 @@
 import java
 
 /** An expression of primitive type. */
-class PrimitiveExpr extends Expr { PrimitiveExpr() { this.getType() instanceof PrimitiveType } }
+class PrimitiveExpr extends Expr {
+  PrimitiveExpr() { this.getType() instanceof PrimitiveType }
+}
 
 /** An expression of boxed type. */
-class BoxedExpr extends Expr { BoxedExpr() { this.getType() instanceof BoxedType } }
+class BoxedExpr extends Expr {
+  BoxedExpr() { this.getType() instanceof BoxedType }
+}
 
 /**
  * Relate expressions and the variables they flow into in one step,
@@ -75,7 +79,7 @@ where
   unboxed(e) and conv = "This expression is implicitly unboxed."
   or
   exists(Variable v | rebox(e, v) |
-    conv = "This expression implicitly unboxes, updates, and reboxes the value of '" + v.getName() +
-        "'."
+    conv =
+      "This expression implicitly unboxes, updates, and reboxes the value of '" + v.getName() + "'."
   )
 select e, conv

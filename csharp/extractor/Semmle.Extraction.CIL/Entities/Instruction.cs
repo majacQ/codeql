@@ -365,6 +365,11 @@ namespace Semmle.Extraction.CIL.Entities
             {
                 int offset = Offset;
 
+                if (Method.Implementation is null)
+                {
+                    yield break;
+                }
+
                 yield return Tuples.cil_instruction(this, (int)OpCode, Index, Method.Implementation);
 
                 switch (PayloadType)
@@ -409,16 +414,22 @@ namespace Semmle.Extraction.CIL.Entities
                         }
                         else
                         {
-                            throw new InternalError("Unable to create payload type {0} for opcode {1}", PayloadType, OpCode);
+                            throw new InternalError($"Unable to create payload type {PayloadType} for opcode {OpCode}");
                         }
                         break;
                     case Payload.Arg8:
                     case Payload.Arg16:
-                        yield return Tuples.cil_access(this, Method.Parameters[(int)UnsignedPayloadValue]);
+                        if (Method.Parameters is object)
+                        {
+                            yield return Tuples.cil_access(this, Method.Parameters[(int)UnsignedPayloadValue]);
+                        }
                         break;
                     case Payload.Local8:
                     case Payload.Local16:
-                        yield return Tuples.cil_access(this, Method.LocalVariables[(int)UnsignedPayloadValue]);
+                        if (Method.LocalVariables is object)
+                        {
+                            yield return Tuples.cil_access(this, Method.LocalVariables[(int)UnsignedPayloadValue]);
+                        }
                         break;
                     case Payload.None:
                     case Payload.Target8:
@@ -430,7 +441,7 @@ namespace Semmle.Extraction.CIL.Entities
                         // Some of these are handled by JumpContents().
                         break;
                     default:
-                        throw new InternalError("Unhandled payload type {0}", PayloadType);
+                        throw new InternalError($"Unhandled payload type {PayloadType}");
                 }
             }
         }
@@ -439,7 +450,7 @@ namespace Semmle.Extraction.CIL.Entities
         public IEnumerable<IExtractionProduct> JumpContents(Dictionary<int, IInstruction> jump_table)
         {
             int target;
-            IInstruction inst;
+            IInstruction? inst;
 
             switch (PayloadType)
             {
@@ -479,7 +490,7 @@ namespace Semmle.Extraction.CIL.Entities
                 // TODO: Find a solution to this.
 
                 // For now, just log the error
-                cx.cx.Extractor.Message(new Message { message = "A CIL instruction jumps outside the current method", severity = Util.Logging.Severity.Warning });
+                cx.cx.ExtractionError("A CIL instruction jumps outside the current method", "", Extraction.Entities.GeneratedLocation.Create(cx.cx), "", Util.Logging.Severity.Warning);
             }
         }
     }

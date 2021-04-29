@@ -19,7 +19,7 @@ import semmle.code.csharp.commons.StructuralComparison as SC
 class NestedForConditions extends SC::StructuralComparisonConfiguration {
   NestedForConditions() { this = "Compare nested for conditions" }
 
-  override predicate candidate(Element e1, Element e2) {
+  override predicate candidate(ControlFlowElement e1, ControlFlowElement e2) {
     exists(NestedForLoopSameVariable nested |
       e1 = nested.getInnerForStmt().getCondition() and
       e2 = nested.getOuterForStmt().getCondition()
@@ -30,11 +30,8 @@ class NestedForConditions extends SC::StructuralComparisonConfiguration {
 /** A nested `for` statement that shares the same iteration variable as an outer `for` statement. */
 class NestedForLoopSameVariable extends ForStmt {
   ForStmt outer;
-
   Variable iteration;
-
   MutatorOperation innerUpdate;
-
   MutatorOperation outerUpdate;
 
   NestedForLoopSameVariable() {
@@ -83,8 +80,9 @@ class NestedForLoopSameVariable extends ForStmt {
       location = outer.getLocation() and
       location.hasLocationInfo(_, startLine, _, _, _) and
       lineStr = startLine.toString() and
-      result = "Nested for statement uses loop variable " + name +
-          " of enclosing for statement (on line " + lineStr + ")."
+      result =
+        "Nested for statement uses loop variable " + name + " of enclosing for statement (on line " +
+          lineStr + ")."
     )
   }
 
@@ -92,11 +90,8 @@ class NestedForLoopSameVariable extends ForStmt {
   private ControlFlow::Node getAnUnguardedNode() {
     result.getElement().getParent+() = getOuterForStmt().getBody() and
     (
-      result = this
-            .getCondition()
-            .(ControlFlowElement)
-            .getAControlFlowExitNode()
-            .getAFalseSuccessor()
+      result =
+        this.getCondition().(ControlFlowElement).getAControlFlowExitNode().getAFalseSuccessor()
       or
       exists(ControlFlow::Node mid | mid = getAnUnguardedNode() |
         mid.getASuccessor() = result and

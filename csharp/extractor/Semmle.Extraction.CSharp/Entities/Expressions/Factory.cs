@@ -80,6 +80,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     case SyntaxKind.RightShiftAssignmentExpression:
                     case SyntaxKind.DivideAssignmentExpression:
                     case SyntaxKind.ModuloAssignmentExpression:
+                    case SyntaxKind.CoalesceAssignmentExpression:
                         return Assignment.Create(info);
 
                     case SyntaxKind.ObjectCreationExpression:
@@ -128,6 +129,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     case SyntaxKind.ArrayType:
                     case SyntaxKind.PredefinedType:
                     case SyntaxKind.NullableType:
+                    case SyntaxKind.TupleType:
                         return TypeAccess.Create(info);
 
                     case SyntaxKind.TypeOfExpression:
@@ -205,6 +207,9 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     case SyntaxKind.StackAllocArrayCreationExpression:
                         return StackAllocArrayCreation.Create(info);
 
+                    case SyntaxKind.ImplicitStackAllocArrayCreationExpression:
+                        return ImplicitStackAllocArrayCreation.Create(info);
+
                     case SyntaxKind.ArgListExpression:
                         return ArgList.Create(info);
 
@@ -232,8 +237,20 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     case SyntaxKind.IsPatternExpression:
                         return IsPattern.Create(info);
 
+                    case SyntaxKind.RangeExpression:
+                        return RangeExpression.Create(info);
+
+                    case SyntaxKind.IndexExpression:
+                        return Unary.Create(info.SetKind(ExprKind.INDEX));
+
+                    case SyntaxKind.SwitchExpression:
+                        return Switch.Create(info);
+
+                    case SyntaxKind.SuppressNullableWarningExpression:
+                        return PostfixUnary.Create(info.SetKind(ExprKind.SUPPRESS_NULLABLE_WARNING), ((PostfixUnaryExpressionSyntax)info.Node).Operand);
+
                     default:
-                        info.Context.ModelError(info.Node, "Unhandled expression '{0}' of kind '{1}'", info.Node, info.Node.Kind());
+                        info.Context.ModelError(info.Node, $"Unhandled expression '{info.Node}' of kind '{info.Node.Kind()}'");
                         return new Unknown(info);
                 }
             }

@@ -22,18 +22,18 @@ predicate testAndBranch(Expr e, Stmt branch) {
   )
 }
 
-predicate choice(LocalScopeVariable v, Stmt branch, string value) {
+predicate choice(StackVariable v, Stmt branch, string value) {
   exists(AnalysedExpr e |
     testAndBranch(e, branch) and
     (
-      (e.getNullSuccessor(v) = branch and value = "null")
+      e.getNullSuccessor(v) = branch and value = "null"
       or
-      (e.getNonNullSuccessor(v) = branch and value = "non-null")
+      e.getNonNullSuccessor(v) = branch and value = "non-null"
     )
   )
 }
 
-predicate guarded(LocalScopeVariable v, Stmt loopstart, AnalysedExpr child) {
+predicate guarded(StackVariable v, Stmt loopstart, AnalysedExpr child) {
   choice(v, loopstart, _) and
   loopstart.getChildStmt*() = child.getEnclosingStmt() and
   (definition(v, child) or exists(child.getNullSuccessor(v)))
@@ -47,9 +47,7 @@ predicate addressLeak(Variable v, Stmt leak) {
   )
 }
 
-from
-  LocalScopeVariable v, Stmt branch, AnalysedExpr cond, string context, string test,
-  string testresult
+from StackVariable v, Stmt branch, AnalysedExpr cond, string context, string test, string testresult
 where
   choice(v, branch, context) and
   forall(ControlFlowNode def | definition(v, def) and definitionReaches(def, cond) |
@@ -60,9 +58,9 @@ where
   exists(cond.getNullSuccessor(v)) and
   not addressLeak(v, branch.getChildStmt*()) and
   (
-    (cond.isNullCheck(v) and test = "null")
+    cond.isNullCheck(v) and test = "null"
     or
-    (cond.isValidCheck(v) and test = "non-null")
+    cond.isValidCheck(v) and test = "non-null"
   ) and
   (if context = test then testresult = "succeed" else testresult = "fail")
 select cond,

@@ -1,4 +1,6 @@
 using Semmle.Extraction.Entities;
+using System;
+using System.IO;
 
 namespace Semmle.Extraction
 {
@@ -20,11 +22,41 @@ namespace Semmle.Extraction
             get; set;
         }
 
+        public void WriteId(TextWriter writer)
+        {
+            writer.Write('*');
+        }
+
+        public void WriteQuotedId(TextWriter writer)
+        {
+            WriteId(writer);
+        }
+
+        protected abstract void Populate(TextWriter trapFile);
+
+        protected void TryPopulate()
+        {
+            cx.Try(null, null, () => Populate(cx.TrapWriter.Writer));
+        }
+
+        /// <summary>
+        /// For debugging.
+        /// </summary>
+        public string DebugContents
+        {
+            get
+            {
+                using (var writer = new StringWriter())
+                {
+                    Populate(writer);
+                    return writer.ToString();
+                }
+            }
+        }
+
         public override string ToString() => Label.ToString();
 
-        public IId Id => FreshId.Instance;
-
-        public virtual Microsoft.CodeAnalysis.Location ReportingLocation => null;
+        public virtual Microsoft.CodeAnalysis.Location? ReportingLocation => null;
 
         public abstract TrapStackBehaviour TrapStackBehaviour { get; }
     }

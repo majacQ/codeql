@@ -1,37 +1,50 @@
+/**
+ * Provides classes for heuristically identifying variables and functions that
+ * might contain or return a password or other sensitive information.
+ */
+
 import cpp
 
-private string suspicious() {
-  result = "%password%" or
-  result = "%passwd%" or
-  result = "%account%" or
-  result = "%accnt%" or
-  result = "%trusted%"
+/**
+ * Holds if the name `s` suggests something might contain or return a password
+ * or other sensitive information.
+ */
+bindingset[s]
+private predicate suspicious(string s) {
+  (
+    s.matches("%password%") or
+    s.matches("%passwd%") or
+    s.matches("%account%") or
+    s.matches("%accnt%") or
+    s.matches("%trusted%")
+  ) and
+  not (
+    s.matches("%hashed%") or
+    s.matches("%encrypted%") or
+    s.matches("%crypt%")
+  )
 }
 
-private string nonSuspicious() {
-  result = "%hashed%" or
-  result = "%encrypted%" or
-  result = "%crypt%"
+/**
+ * A variable that might contain a password or other sensitive information.
+ */
+class SensitiveVariable extends Variable {
+  SensitiveVariable() { suspicious(getName().toLowerCase()) }
 }
 
-abstract class SensitiveExpr extends Expr {}
+/**
+ * A function that might return a password or other sensitive information.
+ */
+class SensitiveFunction extends Function {
+  SensitiveFunction() { suspicious(getName().toLowerCase()) }
+}
 
-class SensitiveVarAccess extends SensitiveExpr {
-  SensitiveVarAccess() {
-    this instanceof VariableAccess and
-    exists(string s | this.toString().toLowerCase() = s |
-      s.matches(suspicious())and
-      not s.matches(nonSuspicious())
-    )
+/**
+ * An expression whose value might be a password or other sensitive information.
+ */
+class SensitiveExpr extends Expr {
+  SensitiveExpr() {
+    this.(VariableAccess).getTarget() instanceof SensitiveVariable or
+    this.(FunctionCall).getTarget() instanceof SensitiveFunction
   }
-}
-
-class SensitiveCall extends SensitiveExpr {
-  SensitiveCall() {
-    this instanceof FunctionCall and
-    exists(string s | this.toString().toLowerCase() = s |
-      s.matches(suspicious())and
-      not s.matches(nonSuspicious())
-    )
-  } 
 }

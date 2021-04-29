@@ -3,29 +3,30 @@ using Semmle.Extraction.Kinds;
 using Microsoft.CodeAnalysis;
 using Semmle.Extraction.CSharp.Populators;
 using Microsoft.CodeAnalysis.CSharp;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
     class Literal : Expression<LiteralExpressionSyntax>
     {
-        Literal(ExpressionNodeInfo info) : base(info.SetKind(GetKind(info)) ) { }
+        Literal(ExpressionNodeInfo info) : base(info.SetKind(GetKind(info))) { }
 
         public static Expression Create(ExpressionNodeInfo info) => new Literal(info).TryPopulate();
 
-        protected override void Populate() { }
+        protected override void PopulateExpression(TextWriter trapFile) { }
 
         static ExprKind GetKind(ExpressionNodeInfo info)
         {
-            switch(info.Node.Kind())
+            switch (info.Node.Kind())
             {
                 case SyntaxKind.DefaultLiteralExpression:
                     return ExprKind.DEFAULT;
                 case SyntaxKind.NullLiteralExpression:
-                    info.Type = Type.Create(info.Context, null);  // Don't use converted type.
+                    info.Type = Entities.NullType.Create(info.Context);  // Don't use converted type.
                     return ExprKind.NULL_LITERAL;
             }
 
-            var type = info.Type.symbol;
+            var type = info.Type.Type.symbol;
 
             switch (type.SpecialType)
             {

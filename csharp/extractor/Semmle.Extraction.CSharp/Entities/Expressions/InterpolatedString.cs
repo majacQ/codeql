@@ -1,7 +1,9 @@
-﻿using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Semmle.Extraction.Kinds;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Entities;
+using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
@@ -11,7 +13,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
 
         public static Expression Create(ExpressionNodeInfo info) => new InterpolatedString(info).TryPopulate();
 
-        protected override void Populate()
+        protected override void PopulateExpression(TextWriter trapFile)
         {
             var child = 0;
             foreach (var c in Syntax.Contents)
@@ -28,7 +30,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                         new Expression(new ExpressionInfo(cx, Type, cx.Create(c.GetLocation()), ExprKind.STRING_LITERAL, this, child++, false, interpolatedText.TextToken.Text));
                         break;
                     default:
-                        throw new InternalError(c, "Unhandled interpolation kind {0}", c.Kind());
+                        throw new InternalError(c, $"Unhandled interpolation kind {c.Kind()}");
                 }
             }
         }
