@@ -56,26 +56,6 @@ private DataFlow::Node isPowerOfTwoMinusOne() {
 }
 
 /**
- * Gets a Buffer/TypedArray containing cryptographically secure random numbers.
- */
-private DataFlow::SourceNode randomBufferSource() {
-  result = DataFlow::moduleMember("crypto", ["randomBytes", "randomFillSync"]).getACall()
-  or
-  exists(DataFlow::CallNode call |
-    call = DataFlow::moduleMember("crypto", ["randomFill", "randomFillSync"]) and
-    result = call.getArgument(0).getALocalSource()
-  )
-  or
-  result = DataFlow::globalVarRef("crypto").getAMethodCall("getRandomValues")
-  or
-  result = DataFlow::moduleImport("secure-random").getACall()
-  or
-  result =
-    DataFlow::moduleImport("secure-random")
-        .getAMethodCall(["randomArray", "randomUint8Array", "randomBuffer"])
-}
-
-/**
  * Gets the pseudo-property used to track elements inside a Buffer.
  * The API for `Set` is close enough to the API for `Buffer` that we can reuse the type-tracking steps.
  */
@@ -86,7 +66,7 @@ private string prop() { result = DataFlow::PseudoProperties::setElement() }
  */
 private DataFlow::Node goodRandom(DataFlow::TypeTracker t, DataFlow::SourceNode source) {
   t.startInProp(prop()) and
-  result = randomBufferSource() and
+  result = InsecureRandomness::randomBufferSource() and
   result = source
   or
   // Loading a number from a `Buffer`.
@@ -100,18 +80,12 @@ private DataFlow::Node goodRandom(DataFlow::TypeTracker t, DataFlow::SourceNode 
     // reading a number from a Buffer.
     exists(DataFlow::MethodCallNode call | result = call |
       call.getReceiver() = goodRandom(t2, source) and
-      call
-          .getMethodName()
+      call.getMethodName()
           .regexpMatch("read(BigInt|BigUInt|Double|Float|Int|UInt)(8|16|32|64)?(BE|LE)?")
     )
   )
   or
   exists(DataFlow::TypeTracker t2 | t = t2.smallstep(goodRandom(t2, source), result))
-  or
-  // re-using the collection steps for `Set`.
-  exists(DataFlow::TypeTracker t2 |
-    result = CollectionsTypeTracking::collectionStep(goodRandom(t2, source), t, t2)
-  )
   or
   InsecureRandomness::isAdditionalTaintStep(goodRandom(t.continue(), source), result) and
   // bit shifts and multiplication by powers of two are generally used for constructing larger numbers from smaller numbers.

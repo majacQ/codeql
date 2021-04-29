@@ -1,49 +1,65 @@
 import javascript
 private import semmle.javascript.dataflow.TypeTracking
+private import semmle.javascript.internal.CachedStages
 private import FlowSteps
 
-class PropertyName extends string {
-  PropertyName() {
-    this = any(DataFlow::PropRef pr).getPropertyName()
-    or
-    AccessPath::isAssignedInUniqueFile(this)
-    or
-    exists(AccessPath::getAnAssignmentTo(_, this))
-    or
-    this instanceof TypeTrackingPseudoProperty
+cached
+private module Cached {
+  cached
+  module Public {
+    cached
+    predicate forceStage() { Stages::TypeTracking::ref() }
+
+    cached
+    class PropertyName extends string {
+      cached
+      PropertyName() {
+        this = any(DataFlow::PropRef pr).getPropertyName()
+        or
+        AccessPath::isAssignedInUniqueFile(this)
+        or
+        exists(AccessPath::getAnAssignmentTo(_, this))
+        or
+        SharedTypeTrackingStep::loadStep(_, _, this)
+        or
+        SharedTypeTrackingStep::storeStep(_, _, this)
+        or
+        SharedTypeTrackingStep::loadStoreStep(_, _, this, _)
+        or
+        SharedTypeTrackingStep::loadStoreStep(_, _, _, this)
+      }
+    }
+
+    /**
+     * A description of a step on an inter-procedural data flow path.
+     */
+    cached
+    newtype TStepSummary =
+      LevelStep() or
+      CallStep() or
+      ReturnStep() or
+      StoreStep(PropertyName prop) or
+      LoadStep(PropertyName prop) or
+      CopyStep(PropertyName prop) or
+      LoadStoreStep(PropertyName fromProp, PropertyName toProp) {
+        SharedTypeTrackingStep::loadStoreStep(_, _, fromProp, toProp)
+      }
+  }
+
+  /**
+   * INTERNAL: Use `SourceNode.track()` or `SourceNode.backtrack()` instead.
+   */
+  cached
+  predicate step(DataFlow::SourceNode pred, DataFlow::SourceNode succ, StepSummary summary) {
+    exists(DataFlow::Node mid | pred.flowsTo(mid) | StepSummary::smallstep(mid, succ, summary))
   }
 }
+
+import Cached::Public
 
 class OptionalPropertyName extends string {
   OptionalPropertyName() { this instanceof PropertyName or this = "" }
 }
-
-/**
- * A pseudo-property that can be used in type-tracking.
- */
-abstract class TypeTrackingPseudoProperty extends string {
-  bindingset[this]
-  TypeTrackingPseudoProperty() { any() }
-
-  /**
-   * Gets a property name that `this` can be copied to in a `LoadStoreStep(this, result)`.
-   */
-  string getLoadStoreToProp() { none() }
-}
-
-/**
- * A description of a step on an inter-procedural data flow path.
- */
-newtype TStepSummary =
-  LevelStep() or
-  CallStep() or
-  ReturnStep() or
-  StoreStep(PropertyName prop) or
-  LoadStep(PropertyName prop) or
-  CopyStep(PropertyName prop) or
-  LoadStoreStep(PropertyName fromProp, PropertyName toProp) {
-    exists(TypeTrackingPseudoProperty prop | fromProp = prop and toProp = prop.getLoadStoreToProp())
-  }
 
 /**
  * INTERNAL: Use `TypeTracker` or `TypeBackTracker` instead.
@@ -75,10 +91,7 @@ module StepSummary {
   /**
    * INTERNAL: Use `SourceNode.track()` or `SourceNode.backtrack()` instead.
    */
-  cached
-  predicate step(DataFlow::SourceNode pred, DataFlow::SourceNode succ, StepSummary summary) {
-    exists(DataFlow::Node mid | pred.flowsTo(mid) | smallstep(mid, succ, summary))
-  }
+  predicate step = Cached::step/3;
 
   /**
    * INTERNAL: Use `TypeBackTracker.smallstep()` instead.
@@ -110,9 +123,23 @@ module StepSummary {
       or
       basicLoadStep(pred, succ, prop) and
       summary = LoadStep(prop)
+      or
+      SharedTypeTrackingStep::storeStep(pred, succ, prop) and
+      summary = StoreStep(prop)
+      or
+      SharedTypeTrackingStep::loadStep(pred, succ, prop) and
+      summary = LoadStep(prop)
+      or
+      SharedTypeTrackingStep::loadStoreStep(pred, succ, prop) and
+      summary = CopyStep(prop)
     )
     or
-    any(AdditionalTypeTrackingStep st).step(pred, succ) and
+    exists(string fromProp, string toProp |
+      SharedTypeTrackingStep::loadStoreStep(pred, succ, fromProp, toProp) and
+      summary = LoadStoreStep(fromProp, toProp)
+    )
+    or
+    SharedTypeTrackingStep::step(pred, succ) and
     summary = LevelStep()
     or
     // Store to global access path
@@ -143,9 +170,6 @@ module StepSummary {
       summary = LoadStep(name) and
       name != ""
     )
-    or
-    // Step in/out of a promise
-    succ = PromiseTypeTracking::promiseStep(pred, summary)
     or
     // Summarize calls with flow directly from a parameter to a return.
     exists(DataFlow::ParameterNode param, DataFlow::FunctionNode fun |

@@ -7,6 +7,8 @@ private import DataFlowPrivate
 private import semmle.code.java.dataflow.SSA
 private import semmle.code.java.dataflow.TypeFlow
 private import semmle.code.java.controlflow.Guards
+private import semmle.code.java.dataflow.ExternalFlow
+private import semmle.code.java.dataflow.FlowSteps
 import semmle.code.java.dataflow.InstanceAccess
 
 cached
@@ -78,15 +80,19 @@ class Node extends TNode {
     result = this.(ImplicitPostUpdateNode).getPreUpdateNode().getType()
   }
 
-  /** Gets the callable in which this node occurs. */
-  Callable getEnclosingCallable() {
+  private Callable getEnclosingCallableImpl() {
     result = this.asExpr().getEnclosingCallable() or
     result = this.asParameter().getCallable() or
     result = this.(ImplicitVarargsArray).getCall().getEnclosingCallable() or
     result = this.(InstanceParameterNode).getCallable() or
     result = this.(ImplicitInstanceAccess).getInstanceAccess().getEnclosingCallable() or
     result = this.(MallocNode).getClassInstanceExpr().getEnclosingCallable() or
-    result = this.(ImplicitPostUpdateNode).getPreUpdateNode().getEnclosingCallable()
+    result = this.(ImplicitPostUpdateNode).getPreUpdateNode().getEnclosingCallableImpl()
+  }
+
+  /** Gets the callable in which this node occurs. */
+  Callable getEnclosingCallable() {
+    result = unique(DataFlowCallable c | c = this.getEnclosingCallableImpl() | c)
   }
 
   private Type getImprovedTypeBound() {
@@ -400,6 +406,15 @@ predicate simpleLocalFlowStep(Node node1, Node node2) {
   node2.asExpr().(ChooseExpr).getAResultExpr() = node1.asExpr()
   or
   node2.asExpr().(AssignExpr).getSource() = node1.asExpr()
+  or
+  summaryStep(node1, node2, "value")
+  or
+  exists(MethodAccess ma, ValuePreservingMethod m, int argNo |
+    ma.getCallee().getSourceDeclaration() = m and m.returnsValue(argNo)
+  |
+    node2.asExpr() = ma and
+    node1.(ArgumentNode).argumentOf(ma, argNo)
+  )
 }
 
 /**

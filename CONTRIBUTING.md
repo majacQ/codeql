@@ -38,6 +38,8 @@ If you have an idea for a query that you would like to share with other CodeQL u
 
     - The queries and libraries must be autoformatted, for example using the "Format Document" command in [CodeQL for Visual Studio Code](https://help.semmle.com/codeql/codeql-for-vscode/procedures/about-codeql-for-vscode.html).
 
+    If you prefer, you can use this [pre-commit hook](misc/scripts/pre-commit) that automatically checks whether your files are correctly formatted. See the [pre-commit hook installation guide](docs/pre-commit-hook-setup.md) for instructions on how to install the hook.
+
 4. **Compilation**
 
     - Compilation of the query and any associated libraries and tests must be resilient to future development of the [supported](docs/supported-queries.md) libraries. This means that the functionality cannot use internal libraries, cannot depend on the output of `getAQlClass`, and cannot make use of regexp matching on `toString`.
@@ -47,20 +49,16 @@ If you have an idea for a query that you would like to share with other CodeQL u
 
     - The query must have at least one true positive result on some revision of a real project.
 
-Experimental queries and libraries may not be actively maintained as the [supported](docs/supported-queries.md) libraries evolve. They may also be changed in backwards-incompatible ways or may be removed entirely in the future without deprecation warnings.
+6. **Query help files and unit tests**
+
+	- Query help (`.qhelp`) files and unit tests are optional (but strongly encouraged!) for queries in the `experimental` directories. For more information about contributing query help files and unit tests, see [Supported CodeQL queries and libraries](docs/supported-queries.md).
+
+Experimental queries and libraries may not be actively maintained as the supported libraries evolve. They may also be changed in backwards-incompatible ways or may be removed entirely in the future without deprecation warnings.
 
 After the experimental query is merged, we welcome pull requests to improve it. Before a query can be moved out of the `experimental` subdirectory, it must satisfy [the requirements for being a supported query](docs/supported-queries.md).
 
 ## Using your personal data
 
-If you contribute to this project, we will record your name and email
-address (as provided by you with your contributions) as part of the code
-repositories, which are public. We might also use this information
-to contact you in relation to your contributions, as well as in the
-normal course of software development. We also store records of your
-CLA agreements. Under GDPR legislation, we do this
-on the basis of our legitimate interest in creating the CodeQL product.
+If you contribute to this project, we will record your name and email address (as provided by you with your contributions) as part of the code repositories, which are public. We might also use this information to contact you in relation to your contributions, as well as in the normal course of software development. We also store records of CLA agreements signed in the past, but no longer require contributors to sign a CLA. Under GDPR legislation, we do this on the basis of our legitimate interest in creating the CodeQL product. 
 
-Please do get in touch (privacy@github.com) if you have any questions about
-this or our data protection policies.
-
+Please do get in touch (privacy@github.com) if you have any questions about this or our data protection policies.

@@ -36,7 +36,7 @@ module ImproperCodeSanitization {
    * A call to `JSON.stringify()` seen as a source for improper code sanitization
    */
   class JSONStringifyAsSource extends Source {
-    JSONStringifyAsSource() { this = DataFlow::globalVarRef("JSON").getAMemberCall("stringify") }
+    JSONStringifyAsSource() { this instanceof JsonStringifyCall }
   }
 
   /**
@@ -53,8 +53,10 @@ module ImproperCodeSanitization {
         |
           functionLeaf
               .getStringValue()
-              .regexpMatch([".*function( )?([a-zA-Z0-9]+)?( )?\\(.*", ".*eval\\(.*",
-                    ".*new Function\\(.*", "(^|.*[^a-zA-Z0-9])\\(.*\\)( )?=>.*"])
+              .regexpMatch([
+                  ".*function( )?([a-zA-Z0-9]+)?( )?\\(.*", ".*eval\\(.*", ".*new Function\\(.*",
+                  "(^|.*[^a-zA-Z0-9])\\(.*\\)( )?=>.*"
+                ])
         )
       )
     }
