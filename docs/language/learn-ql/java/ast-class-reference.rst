@@ -1,5 +1,9 @@
-AST class reference
-===================
+Abstract syntax tree classes for working with Java programs
+===========================================================
+
+CodeQL has a large selection of classes for representing the abstract syntax tree of Java programs.
+
+.. include:: ../../reusables/abstract-syntax-tree.rst
 
 .. _Expr: https://help.semmle.com/qldoc/java/semmle/code/java/Expr.qll/type.Expr$Expr.html
 .. _Stmt: https://help.semmle.com/qldoc/java/semmle/code/java/Statement.qll/type.Statement$Stmt.html
@@ -272,3 +276,9 @@ Miscellaneous
 +------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------+
 | ``@Annot(key=val)``                                              | `Annotation <https://help.semmle.com/qldoc/java/semmle/code/java/Annotation.qll/type.Annotation$Annotation.html>`__   |                                                                             |
 +------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------+
+
+Further reading
+---------------
+
+.. include:: ../../reusables/java-further-reading.rst
+.. include:: ../../reusables/codeql-ref-tools-further-reading.rst

@@ -127,8 +127,8 @@ namespace Semmle.Util
 
             if (parent != null)
             {
-                string name = Path.GetFileName(path);
-                string parentPath = cache.GetCanonicalPath(parent.FullName);
+                var name = Path.GetFileName(path);
+                var parentPath = cache.GetCanonicalPath(parent.FullName);
                 try
                 {
                     string[] entries = Directory.GetFileSystemEntries(parentPath, name);
@@ -222,6 +222,29 @@ namespace Semmle.Util
             this.pathStrategy = pathStrategy;
         }
 
+
+        /// <summary>
+        /// Create a CanonicalPathCache.
+        /// </summary>
+        ///
+        /// <remarks>
+        /// Creates the appropriate PathStrategy object which encapsulates
+        /// the correct algorithm. Falls back to different implementations
+        /// depending on platform.
+        /// </remarks>
+        ///
+        /// <param name="maxCapacity">Size of the cache.</param>
+        /// <param name="symlinks">Policy for following symlinks.</param>
+        /// <returns>A new CanonicalPathCache.</returns>
+        public static CanonicalPathCache Create(ILogger logger, int maxCapacity)
+        {
+            var preserveSymlinks =
+                Environment.GetEnvironmentVariable("CODEQL_PRESERVE_SYMLINKS") == "true" ||
+                Environment.GetEnvironmentVariable("SEMMLE_PRESERVE_SYMLINKS") == "true";
+            return Create(logger, maxCapacity, preserveSymlinks ? CanonicalPathCache.Symlinks.Preserve : CanonicalPathCache.Symlinks.Follow);
+
+        }
+
         /// <summary>
         /// Create a CanonicalPathCache.
         /// </summary>
@@ -313,14 +336,15 @@ namespace Semmle.Util
         /// <returns>The canonical path.</returns>
         public string GetCanonicalPath(string path)
         {
-            string canonicalPath;
             lock (cache)
-                if (!cache.TryGetValue(path, out canonicalPath))
+            {
+                if (!cache.TryGetValue(path, out var canonicalPath))
                 {
                     canonicalPath = pathStrategy.GetCanonicalPath(path, this);
                     AddToCache(path, canonicalPath);
                 }
-            return canonicalPath;
+                return canonicalPath;
+            }
         }
     }
 }

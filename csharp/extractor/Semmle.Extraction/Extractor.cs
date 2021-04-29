@@ -50,13 +50,15 @@ namespace Semmle.Extraction
         /// Record a new error type.
         /// </summary>
         /// <param name="fqn">The display name of the type, qualified where possible.</param>
-        void MissingType(string fqn);
+        /// <param name="fromSource">If the missing type was referenced from a source file.</param>
+        void MissingType(string fqn, bool fromSource);
 
         /// <summary>
         /// Record an unresolved `using namespace` directive.
         /// </summary>
         /// <param name="fqn">The full name of the namespace.</param>
-        void MissingNamespace(string fqn);
+        /// <param name="fromSource">If the missing namespace was referenced from a source file.</param>
+        void MissingNamespace(string fqn, bool fromSource);
 
         /// <summary>
         /// The list of missing types.
@@ -78,6 +80,11 @@ namespace Semmle.Extraction
         /// The object used for logging.
         /// </summary>
         ILogger Logger { get; }
+
+        /// <summary>
+        /// The path transformer to apply.
+        /// </summary>
+        PathTransformer PathTransformer { get; }
 
         /// <summary>
         /// Creates a new context.
@@ -109,11 +116,14 @@ namespace Semmle.Extraction
         /// </summary>
         /// <param name="standalone">If the extraction is standalone.</param>
         /// <param name="outputPath">The name of the output DLL/EXE, or null if not specified (standalone extraction).</param>
-        public Extractor(bool standalone, string outputPath, ILogger logger)
+        /// <param name="logger">The object used for logging.</param>
+        /// <param name="pathTransformer">The object used for path transformations.</param>
+        public Extractor(bool standalone, string outputPath, ILogger logger, PathTransformer pathTransformer)
         {
             Standalone = standalone;
             OutputPath = outputPath;
             Logger = logger;
+            PathTransformer = pathTransformer;
         }
 
         // Limit the number of error messages in the log file
@@ -167,16 +177,22 @@ namespace Semmle.Extraction
         readonly ISet<string> missingTypes = new SortedSet<string>();
         readonly ISet<string> missingNamespaces = new SortedSet<string>();
 
-        public void MissingType(string fqn)
+        public void MissingType(string fqn, bool fromSource)
         {
-            lock (mutex)
-                missingTypes.Add(fqn);
+            if (fromSource)
+            {
+                lock (mutex)
+                    missingTypes.Add(fqn);
+            }
         }
 
-        public void MissingNamespace(string fqdn)
+        public void MissingNamespace(string fqdn, bool fromSource)
         {
-            lock (mutex)
-                missingNamespaces.Add(fqdn);
+            if (fromSource)
+            {
+                lock (mutex)
+                    missingNamespaces.Add(fqdn);
+            }
         }
 
         public Context CreateContext(Compilation c, TrapWriter trapWriter, IExtractionScope scope)
@@ -197,5 +213,7 @@ namespace Semmle.Extraction
         public ILogger Logger { get; private set; }
 
         public static string Version => $"{ThisAssembly.Git.BaseTag} ({ThisAssembly.Git.Sha})";
+
+        public PathTransformer PathTransformer { get; }
     }
 }

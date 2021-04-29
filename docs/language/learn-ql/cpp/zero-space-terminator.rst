@@ -1,10 +1,7 @@
-Example: Checking for allocations equal to ``strlen(string)`` without space for a null terminator
-=================================================================================================
+Detecting a potential buffer overflow
+=====================================
 
-Overview
---------
-
-This topic describes how a C/C++ query for detecting a potential buffer overflow was developed. For a full overview of the topics available for learning to write queries for C/C++ code, see :doc:`CodeQL for C/C++ <ql-for-cpp>`.
+You can use CodeQL to detect potential buffer overflows by checking for allocations equal to ``strlen`` in C and C++. This topic describes how a C/C++ query for detecting a potential buffer overflow was developed.
 
 Problem—detecting memory allocation that omits space for a null termination character
 -------------------------------------------------------------------------------------
@@ -87,6 +84,10 @@ Now we can write a query using these classes:
 
 Note that there is no need to check whether anything is added to the ``strlen`` expression, as it would be in the corrected C code ``malloc(strlen(string) + 1)``. This is because the corrected code would in fact be an ``AddExpr`` containing a ``StrlenCall``, not an instance of ``StrlenCall`` itself. A side-effect of this approach is that we omit certain unlikely patterns such as ``malloc(strlen(string) + 0``). In practice we can always come back and extend our query to cover this pattern if it is a concern.
 
+.. pull-quote::
+
+   Tip
+
    For some projects, this query may not return any results. Possibly the project you are querying does not have any problems of this kind, but it is also important to make sure the query itself is working properly. One solution is to set up a test project with examples of correct and incorrect code to run the query against (the C code at the very top of this page makes a good starting point). Another approach is to test each part of the query individually to make sure everything is working.
 
 When you have defined the basic query then you can refine the query to include further coding patterns or to exclude false positives:
@@ -94,7 +95,7 @@ When you have defined the basic query then you can refine the query to include f
 Improving the query using the 'SSA' library
 -------------------------------------------
 
-The ``SSA`` library represents variables in `static single assignment <http://en.wikipedia.org/wiki/Static_single_assignment_form>`__ (SSA) form. In this form, each variable is assigned exactly once and every variable is defined before it is used. The use of SSA variables simplifies queries considerably as much of the local data flow analysis has been done for us.
+The ``SSA`` library represents variables in static single assignment (SSA) form. In this form, each variable is assigned exactly once and every variable is defined before it is used. The use of SSA variables simplifies queries considerably as much of the local data flow analysis has been done for us. For more information, see `Static single assignment <http://en.wikipedia.org/wiki/Static_single_assignment_form>`__ on Wikipedia.
 
 Including examples where the string size is stored before use
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -220,8 +221,8 @@ The completed query will now identify cases where the result of ``strlen`` is st
    where malloc.getAllocatedSize() instanceof StrlenCall
    select malloc, "This allocation does not include space to null-terminate the string."
 
-What next?
-----------
+Further reading
+---------------
 
--  Find out more about QL in the `QL language handbook <https://help.semmle.com/QL/ql-handbook/index.html>`__ and `QL language specification <https://help.semmle.com/QL/ql-spec/language.html>`__.
--  Learn more about the query console in `Using the query console <https://lgtm.com/help/lgtm/using-query-console>`__.
+.. include:: ../../reusables/cpp-further-reading.rst
+.. include:: ../../reusables/codeql-ref-tools-further-reading.rst

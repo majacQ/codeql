@@ -25,7 +25,7 @@ namespace Semmle.Extraction.CSharp.Entities
         {
             if (symbol.TypeKind == TypeKind.Error)
             {
-                Context.Extractor.MissingType(symbol.ToString());
+                Context.Extractor.MissingType(symbol.ToString(), Context.FromSource);
                 return;
             }
 
@@ -57,9 +57,6 @@ namespace Semmle.Extraction.CSharp.Entities
 
                     for (int i = 0; i < symbol.TypeArguments.Length; ++i)
                     {
-                        var ta = symbol.TypeArgumentsNullableAnnotations[i].GetTypeAnnotation();
-                        if (ta != Kinds.TypeAnnotation.None)
-                            trapFile.type_argument_annotation(this, i, ta);
                         trapFile.type_arguments(TypeArguments[i].TypeRef, i, this);
                     }
                 }
@@ -166,7 +163,8 @@ namespace Semmle.Extraction.CSharp.Entities
             referencedType = Type.Create(cx, symbol);
         }
 
-        public static NamedTypeRef Create(Context cx, INamedTypeSymbol type) => NamedTypeRefFactory.Instance.CreateEntity2(cx, type);
+        public static NamedTypeRef Create(Context cx, INamedTypeSymbol type) =>
+            NamedTypeRefFactory.Instance.CreateEntity2(cx, type);
 
         class NamedTypeRefFactory : ICachedEntityFactory<INamedTypeSymbol, NamedTypeRef>
         {

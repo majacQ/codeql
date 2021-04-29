@@ -524,7 +524,8 @@ class RefType extends Type, Annotatable, Modifiable, @reftype {
    * Gets the JVM descriptor for this type, as used in bytecode.
    */
   override string getTypeDescriptor() {
-    result = "L" + this.getPackage().getName().replaceAll(".", "/") + "/" +
+    result =
+      "L" + this.getPackage().getName().replaceAll(".", "/") + "/" +
         this.getSourceDeclaration().nestedName() + ";"
   }
 
@@ -612,6 +613,15 @@ class Class extends RefType, @class {
       result = this.getASupertype().(Class).getAnAnnotation()
     )
   }
+}
+
+/**
+ * PREVIEW FEATURE in Java 14. Subject to removal in a future release.
+ *
+ * A record declaration.
+ */
+class Record extends Class {
+  Record() { isRecord(this) }
 }
 
 /** An intersection type. */

@@ -28,7 +28,7 @@ namespace Semmle.Extraction.CIL
             else
             {
                 e.Label = cx.GetNewLabel();
-                cx.DefineLabel(e, cx.TrapWriter.Writer);
+                cx.DefineLabel(e, cx.TrapWriter.Writer, cx.Extractor);
                 ids.Add(e, e.Label);
                 cx.PopulateLater(() =>
                 {
@@ -76,7 +76,7 @@ namespace Semmle.Extraction.CIL
             {
                 e = new PrimitiveType(this, code);
                 e.Label = cx.GetNewLabel();
-                cx.DefineLabel(e, cx.TrapWriter.Writer);
+                cx.DefineLabel(e, cx.TrapWriter.Writer, cx.Extractor);
                 primitiveTypes[(int)code] = e;
             }
 
@@ -201,7 +201,7 @@ namespace Semmle.Extraction.CIL
 
         #region Locations
         readonly CachedFunction<PDB.ISourceFile, PdbSourceFile> sourceFiles;
-        readonly CachedFunction<string, Folder> folders;
+        readonly CachedFunction<PathTransformer.ITransformedPath, Folder> folders;
         readonly CachedFunction<PDB.Location, PdbSourceLocation> sourceLocations;
 
         /// <summary>
@@ -216,7 +216,7 @@ namespace Semmle.Extraction.CIL
         /// </summary>
         /// <param name="path">The path of the folder.</param>
         /// <returns>A folder entity.</returns>
-        public Folder CreateFolder(string path) => folders[path];
+        public Folder CreateFolder(PathTransformer.ITransformedPath path) => folders[path];
 
         /// <summary>
         /// Creates a source location.
