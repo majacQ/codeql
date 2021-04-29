@@ -602,8 +602,7 @@ class SsaVariableCapture extends SsaImplicitDefinition, TCapture {
     string filepath, int startline, int startcolumn, int endline, int endcolumn
   ) {
     exists(ReachableBasicBlock bb, int i | definesAt(bb, i, _) |
-      bb
-          .getNode(i)
+      bb.getNode(i)
           .getLocation()
           .hasLocationInfo(filepath, startline, startcolumn, endline, endcolumn)
     )
@@ -737,6 +736,9 @@ class SsaRefinementNode extends SsaPseudoDefinition, TRefinement {
 }
 
 module SSA {
+  /** Gets the SSA definition corresponding to the implicit initialization of `v`. */
+  SsaImplicitInit implicitInit(SsaSourceVariable v) { result.getSourceVariable() = v }
+
   /** Gets the SSA definition corresponding to `d`. */
   SsaExplicitDefinition definition(VarDef d) { result.getDef() = d }
 

@@ -65,11 +65,10 @@ class ElementBase extends @element {
    * which they belong; for example, `AddExpr` is a primary class, but
    * `BinaryOperation` is not.
    *
-   * This predicate always has a result. If no primary class can be
-   * determined, the result is `"???"`. If multiple primary classes match,
-   * this predicate can have multiple results.
+   * This predicate can have multiple results if multiple primary classes match.
+   * For some elements, this predicate may not have a result.
    */
-  string getAPrimaryQlClass() { result = "???" }
+  string getAPrimaryQlClass() { none() }
 }
 
 /**
@@ -128,7 +127,7 @@ class Element extends ElementBase {
 
   /**
    * Gets the parent scope of this `Element`, if any.
-   * A scope is a `Type` (`Class` / `Enum`), a `Namespace`, a `Block`, a `Function`,
+   * A scope is a `Type` (`Class` / `Enum`), a `Namespace`, a `BlockStmt`, a `Function`,
    * or certain kinds of `Statement`.
    */
   Element getParentScope() {
@@ -161,7 +160,7 @@ class Element extends ElementBase {
     exists(EnumConstant e | this = e and result = e.getDeclaringEnum())
     or
     // result instanceof block|function
-    exists(Block b | this = b and blockscope(unresolveElement(b), unresolveElement(result)))
+    exists(BlockStmt b | this = b and blockscope(unresolveElement(b), unresolveElement(result)))
     or
     exists(TemplateFunction tf | this = tf.getATemplateArgument() and result = tf)
     or

@@ -12,6 +12,7 @@ private import semmle.code.csharp.frameworks.system.web.ui.WebControls
 private import semmle.code.csharp.frameworks.WCF
 private import semmle.code.csharp.frameworks.microsoft.Owin
 private import semmle.code.csharp.frameworks.microsoft.AspNetCore
+import semmle.code.csharp.frameworks.ServiceStack::Sources
 
 /** A data flow source of remote user input. */
 abstract class RemoteFlowSource extends DataFlow::Node {
@@ -191,8 +192,7 @@ class AspNetCoreQueryRemoteFlowSource extends AspNetCoreRemoteFlowSource, DataFl
     )
     or
     exists(Call c |
-      c
-          .getTarget()
+      c.getTarget()
           .getDeclaringType()
           .hasQualifiedName("Microsoft.AspNetCore.Http", "IQueryCollection") and
       c.getTarget().getName() = "TryGetValue" and

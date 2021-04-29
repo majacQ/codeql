@@ -1,7 +1,5 @@
-using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Kinds;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
@@ -85,6 +83,9 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
 
                     case SyntaxKind.ObjectCreationExpression:
                         return ExplicitObjectCreation.Create(info);
+
+                    case SyntaxKind.ImplicitObjectCreationExpression:
+                        return ImplicitObjectCreation.Create(info);
 
                     case SyntaxKind.ArrayCreationExpression:
                         return NormalArrayCreation.Create(info);
@@ -181,7 +182,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                         return ImplicitArrayCreation.Create(info);
 
                     case SyntaxKind.AnonymousObjectCreationExpression:
-                        return ImplicitObjectCreation.Create(info);
+                        return AnonymousObjectCreation.Create(info);
 
                     case SyntaxKind.ComplexElementInitializerExpression:
                         return CollectionInitializer.Create(info);

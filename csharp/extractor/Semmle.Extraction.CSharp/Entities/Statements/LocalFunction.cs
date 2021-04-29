@@ -7,9 +7,9 @@ using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class LocalFunction : Statement<LocalFunctionStatementSyntax>
+    internal class LocalFunction : Statement<LocalFunctionStatementSyntax>
     {
-        LocalFunction(Context cx, LocalFunctionStatementSyntax node, IStatementParentEntity parent, int child)
+        private LocalFunction(Context cx, LocalFunctionStatementSyntax node, IStatementParentEntity parent, int child)
             : base(cx, node, StmtKind.LOCAL_FUNCTION, parent, child, cx.Create(node.GetLocation())) { }
 
         public static LocalFunction Create(Context cx, LocalFunctionStatementSyntax node, IStatementParentEntity parent, int child)
@@ -22,24 +22,19 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
         /// <summary>
         /// Gets the IMethodSymbol for this local function statement.
         /// </summary>
-        IMethodSymbol Symbol
+        private IMethodSymbol Symbol
         {
             get
             {
-                // Ideally model.GetDeclaredSymbol(Stmt) would do
-                // the right thing but it doesn't exist.
-                // So instead, we have to do the lookup via GetEnclosingSymbol.
-
                 var m = cx.GetModel(Stmt);
-                var body = Stmt.Body == null ? Stmt.ExpressionBody : (CSharpSyntaxNode)Stmt.Body;
-                return m.GetEnclosingSymbol(body.GetLocation().SourceSpan.Start) as IMethodSymbol;
+                return m.GetDeclaredSymbol(Stmt) as IMethodSymbol;
             }
         }
 
         /// <summary>
         /// Gets the function defined by this local statement.
         /// </summary>
-        Entities.LocalFunction Function => Entities.LocalFunction.Create(cx, Symbol);
+        private Entities.LocalFunction Function => Entities.LocalFunction.Create(cx, Symbol);
 
         protected override void PopulateStatement(TextWriter trapFile)
         {

@@ -1,14 +1,15 @@
 /** Provides classes for types. */
 
-import Location
-import Namespace
 import Callable
-import Property
 import Event
 import Generics
+import Location
+import Namespace
+import Property
 private import Conversion
-private import semmle.code.csharp.metrics.Coupling
 private import dotnet
+private import semmle.code.csharp.metrics.Coupling
+private import TypeRef
 
 /**
  * A type.
@@ -20,7 +21,7 @@ private import dotnet
 class Type extends DotNet::Type, Member, TypeContainer, @type {
   override string getName() { types(this, _, result) }
 
-  override Type getSourceDeclaration() { result = this }
+  override Type getUnboundDeclaration() { result = this }
 
   /** Holds if this type is implicitly convertible to `that` type. */
   predicate isImplicitlyConvertibleTo(Type that) { implicitConversion(this, that) }
@@ -44,6 +45,9 @@ class Type extends DotNet::Type, Member, TypeContainer, @type {
   /** Holds if this type is a value type, or a type parameter that is a value type. */
   predicate isValueType() { none() }
 }
+
+pragma[nomagic]
+private predicate isObjectClass(Class c) { c instanceof ObjectType }
 
 /**
  * A value or reference type.
@@ -111,7 +115,15 @@ class ValueOrRefType extends DotNet::ValueOrRefType, Type, Attributable, @value_
   }
 
   /** Gets the immediate base class of this class, if any. */
-  Class getBaseClass() { extend(this, getTypeRef(result)) }
+  final Class getBaseClass() {
+    extend(this, getTypeRef(result))
+    or
+    not extend(this, _) and
+    not isObjectClass(this) and
+    not this instanceof DynamicType and
+    not this instanceof NullType and
+    isObjectClass(result)
+  }
 
   /** Gets an immediate base interface of this type, if any. */
   Interface getABaseInterface() { implement(this, getTypeRef(result)) }
@@ -246,8 +258,11 @@ class ValueOrRefType extends DotNet::ValueOrRefType, Type, Attributable, @value_
     getAMember().(Virtualizable).getOverridee() = v
   }
 
+  /** Gets a field (or member constant) with the given name. */
+  Field getField(string name) { result = getAMember() and result.hasName(name) }
+
   /** Gets a field (or member constant) of this type, if any. */
-  Field getAField() { result = getAMember() }
+  Field getAField() { result = this.getField(_) }
 
   /** Gets a member constant of this type, if any. */
   MemberConstant getAConstant() { result = getAMember() }
@@ -352,11 +367,11 @@ class ValueOrRefType extends DotNet::ValueOrRefType, Type, Attributable, @value_
   /** Gets the number of callables in this type. */
   int getNumberOfCallables() { result = count(Callable c | this.getAMember() = c) }
 
-  override ValueOrRefType getSourceDeclaration() {
+  override ValueOrRefType getUnboundDeclaration() {
     result = this and
     not this instanceof NestedType
     or
-    // We must use `nested_types` here, rather than overriding `getSourceDeclaration`
+    // We must use `nested_types` here, rather than overriding `getUnboundDeclaration`
     // in the class `NestedType` below. Otherwise, the overrides in `UnboundGenericType`
     // and its subclasses will not work
     nested_types(this, _, result)
@@ -920,7 +935,7 @@ class UnknownType extends Type, @unknown_type { }
  */
 class TupleType extends ValueType, @tuple_type {
   /** Gets the underlying type of this tuple, which is of type `System.ValueTuple`. */
-  ConstructedStruct getUnderlyingType() { tuple_underlying_type(this, getTypeRef(result)) }
+  Struct getUnderlyingType() { tuple_underlying_type(this, getTypeRef(result)) }
 
   /**
    * Gets the `n`th element of this tuple, indexed from 0.
@@ -1001,16 +1016,4 @@ class TypeMention extends @type_mention {
 
   /** Gets the location of this type mention. */
   Location getLocation() { type_mention_location(this, result) }
-}
-
-/**
- * INTERNAL: Do not use.
- * Gets a type reference for a given type `type`.
- * This is used for extensionals that can be supplied
- * as either type references or types.
- */
-@type_or_ref getTypeRef(@type type) {
-  result = type
-  or
-  typeref_type(result, type)
 }

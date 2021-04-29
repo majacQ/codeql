@@ -85,7 +85,7 @@ module UnsafeShellCommandConstruction {
       this = root.getALeaf() and
       root = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
       exists(string prev | prev = this.getPreviousLeaf().getStringValue() |
-        prev.regexpMatch(".* ('|\")?[0-9a-zA-Z/]*")
+        prev.regexpMatch(".* ('|\")?[0-9a-zA-Z/:_-]*")
       )
     }
 
@@ -105,8 +105,10 @@ module UnsafeShellCommandConstruction {
 
     ArrayAppendEndingInCommandExecutinSink() {
       this =
-        [array.(DataFlow::ArrayCreationNode).getAnElement(),
-            array.getAMethodCall(["push", "unshift"]).getAnArgument()] and
+        [
+          array.(DataFlow::ArrayCreationNode).getAnElement(),
+          array.getAMethodCall(["push", "unshift"]).getAnArgument()
+        ] and
       exists(DataFlow::MethodCallNode joinCall | array.getAMethodCall("join") = joinCall |
         joinCall = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
         joinCall.getNumArgument() = 1 and
@@ -132,7 +134,7 @@ module UnsafeShellCommandConstruction {
       this = call.getFormatArgument(_) and
       call = isExecutedAsShellCommand(DataFlow::TypeBackTracker::end(), sys) and
       exists(string formatString | call.getFormatString().mayHaveStringValue(formatString) |
-        formatString.regexpMatch(".* ('|\")?[0-9a-zA-Z/]*%.*")
+        formatString.regexpMatch(".* ('|\")?[0-9a-zA-Z/:_-]*%.*")
       )
     }
 
