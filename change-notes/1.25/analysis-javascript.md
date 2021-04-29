@@ -6,8 +6,10 @@
   - [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise)
   - [bluebird](http://bluebirdjs.com/)
   - [express](https://www.npmjs.com/package/express)
+  - [execa](https://www.npmjs.com/package/execa)
   - [fancy-log](https://www.npmjs.com/package/fancy-log)
   - [fastify](https://www.npmjs.com/package/fastify)
+  - [foreground-child](https://www.npmjs.com/package/foreground-child)
   - [fstream](https://www.npmjs.com/package/fstream)
   - [jGrowl](https://github.com/stanlemon/jGrowl)
   - [jQuery](https://jquery.com/)
@@ -17,6 +19,7 @@
   - [mssql](https://www.npmjs.com/package/mssql)
   - [mysql](https://www.npmjs.com/package/mysql)
   - [npmlog](https://www.npmjs.com/package/npmlog)
+  - [opener](https://www.npmjs.com/package/opener)
   - [pg](https://www.npmjs.com/package/pg)
   - [sequelize](https://www.npmjs.com/package/sequelize)
   - [spanner](https://www.npmjs.com/package/spanner)
@@ -27,7 +30,7 @@
   - [yargs](https://www.npmjs.com/package/yargs)
   - [webpack-dev-server](https://www.npmjs.com/package/webpack-dev-server)
 
-* TypeScript 3.9 is now supported.
+* TypeScript 4.0 is now supported.
 
 * TypeScript code embedded in HTML and Vue files is now extracted and analyzed.
 

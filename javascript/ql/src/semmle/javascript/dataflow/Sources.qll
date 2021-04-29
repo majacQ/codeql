@@ -2,7 +2,7 @@
  * Provides support for intra-procedural tracking of a customizable
  * set of data flow nodes.
  *
- * Note that unlike `TrackedNodes`, this library only performs
+ * Note that unlike `TypeTracking.qll`, this library only performs
  * local tracking within a function.
  */
 
@@ -307,7 +307,8 @@ module SourceNode {
         astNode instanceof FunctionBindExpr or
         astNode instanceof DynamicImportExpr or
         astNode instanceof ImportSpecifier or
-        astNode instanceof ImportMetaExpr
+        astNode instanceof ImportMetaExpr or
+        astNode instanceof TaggedTemplateExpr
       )
       or
       DataFlow::parameterNode(this, _)
@@ -319,6 +320,9 @@ module SourceNode {
       this = DataFlow::destructuredModuleImportNode(_)
       or
       this = DataFlow::globalAccessPathRootPseudoNode()
+      or
+      // Include return nodes because they model the implicit Promise creation in async functions.
+      DataFlow::functionReturnNode(this, _)
     }
   }
 }

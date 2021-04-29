@@ -117,11 +117,11 @@ class ResolvedES2015PromiseDefinition extends ResolvedPromiseDefinition {
 }
 
 /**
- * An aggregated promise produced either by `Promise.all` or `Promise.race`.
+ * An aggregated promise produced either by `Promise.all`, `Promise.race`, or `Promise.any`.
  */
 class AggregateES2015PromiseDefinition extends PromiseCreationCall {
   AggregateES2015PromiseDefinition() {
-    exists(string m | m = "all" or m = "race" |
+    exists(string m | m = "all" or m = "race" or m = "any" |
       this = DataFlow::globalVarRef("Promise").getAMemberCall(m)
     )
   }
@@ -249,7 +249,7 @@ private class PromiseStep extends PreCallGraphStep {
  * This module defines how data-flow propagates into and out of a Promise.
  * The data-flow is based on pseudo-properties rather than tainting the Promise object (which is what `PromiseTaintStep` does).
  */
-private module PromiseFlow {
+module PromiseFlow {
   private predicate valueProp = Promises::valueProp/0;
 
   private predicate errorProp = Promises::errorProp/0;
@@ -299,8 +299,10 @@ private module PromiseFlow {
       or
       prop = errorProp() and
       value =
-        [promise.getRejectParameter().getACall().getArgument(0),
-            promise.getExecutor().getExceptionalReturn()]
+        [
+          promise.getRejectParameter().getACall().getArgument(0),
+          promise.getExecutor().getExceptionalReturn()
+        ]
     )
     or
     // promise creation call, e.g. `Promise.resolve`.
@@ -440,6 +442,18 @@ predicate promiseTaintStep(DataFlow::Node pred, DataFlow::Node succ) {
     pred.getEnclosingExpr() = await.getOperand() and
     succ.getEnclosingExpr() = await
   )
+  or
+  exists(DataFlow::CallNode mapSeries |
+    mapSeries = DataFlow::moduleMember("bluebird", "mapSeries").getACall()
+  |
+    // from `xs` to `x` in `require("bluebird").mapSeries(xs, (x) => {...})`.
+    pred = mapSeries.getArgument(0) and
+    succ = mapSeries.getABoundCallbackParameter(1, 0)
+    or
+    // from `y` to `require("bluebird").mapSeries(x, x => y)`.
+    pred = mapSeries.getCallback(1).getAReturn() and
+    succ = mapSeries
+  )
 }
 
 /**
@@ -452,6 +466,49 @@ private class PromiseTaintStep extends TaintTracking::AdditionalTaintStep {
 
   override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
     pred = source and succ = this
+  }
+}
+
+/**
+ * Defines flow steps for return on async functions.
+ */
+private module AsyncReturnSteps {
+  private predicate valueProp = Promises::valueProp/0;
+
+  private predicate errorProp = Promises::errorProp/0;
+
+  private import semmle.javascript.dataflow.internal.FlowSteps
+
+  /**
+   * A data-flow step for ordinary and exceptional returns from async functions.
+   */
+  private class AsyncReturn extends PreCallGraphStep {
+    override predicate storeStep(DataFlow::Node pred, DataFlow::SourceNode succ, string prop) {
+      exists(DataFlow::FunctionNode f | f.getFunction().isAsync() |
+        // ordinary return
+        prop = valueProp() and
+        pred = f.getAReturn() and
+        succ = f.getReturnNode()
+        or
+        // exceptional return
+        prop = errorProp() and
+        localExceptionStepWithAsyncFlag(pred, succ, true)
+      )
+    }
+  }
+
+  /**
+   * A data-flow step for ordinary return from an async function in a taint configuration.
+   */
+  private class AsyncTaintReturn extends TaintTracking::AdditionalTaintStep, DataFlow::FunctionNode {
+    Function f;
+
+    AsyncTaintReturn() { this.getFunction() = f and f.isAsync() }
+
+    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
+      returnExpr(f, pred, _) and
+      succ.(DataFlow::FunctionReturnNode).getFunction() = f
+    }
   }
 }
 
@@ -584,5 +641,41 @@ private module ClosurePromise {
     }
 
     override predicate step(DataFlow::Node src, DataFlow::Node dst) { src = pred and dst = this }
+  }
+}
+
+private module DynamicImportSteps {
+  /**
+   * A step from an export value to its uses via dynamic imports.
+   *
+   * For example:
+   * ```js
+   * // foo.js
+   * export default Foo
+   *
+   * // bar.js
+   * let Foo = await import('./foo');
+   * ```
+   */
+  class DynamicImportStep extends PreCallGraphStep {
+    override predicate storeStep(DataFlow::Node pred, DataFlow::SourceNode succ, string prop) {
+      exists(DynamicImportExpr imprt |
+        pred = imprt.getImportedModule().getAnExportedValue("default") and
+        succ = imprt.flow() and
+        prop = Promises::valueProp()
+      )
+    }
+
+    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
+      // Special-case code like `(await import(x)).Foo` to boost type tracking depth.
+      exists(
+        DynamicImportExpr imprt, string name, DataFlow::Node mid, DataFlow::SourceNode awaited
+      |
+        pred = imprt.getImportedModule().getAnExportedValue(name) and
+        mid.getALocalSource() = imprt.flow() and
+        PromiseFlow::loadStep(mid, awaited, Promises::valueProp()) and
+        succ = awaited.getAPropertyRead(name)
+      )
+    }
   }
 }

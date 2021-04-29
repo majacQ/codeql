@@ -145,6 +145,11 @@ class Variable extends Declaration, @variable {
   predicate isConstexpr() { this.hasSpecifier("is_constexpr") }
 
   /**
+   * Holds if this variable is declared `constinit`.
+   */
+  predicate isConstinit() { this.hasSpecifier("declared_constinit") }
+
+  /**
    * Holds if this variable is `thread_local`.
    */
   predicate isThreadLocal() { this.hasSpecifier("is_thread_local") }
@@ -582,7 +587,7 @@ class TemplateVariable extends Variable {
  *   float a;
  * }
  *
- * template<type T>
+ * template<typename T>
  * void myTemplateFunction() {
  *   T b;
  * }

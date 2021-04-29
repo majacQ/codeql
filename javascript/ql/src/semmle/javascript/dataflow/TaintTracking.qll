@@ -327,7 +327,7 @@ module TaintTracking {
    * taint to flow from `v` to any read of `c2.state.p`, where `c2`
    * also is an instance of `C`.
    */
-  private class ReactComponentStateTaintStep extends AdditionalTaintStep, DataFlow::ValueNode {
+  private class ReactComponentStateTaintStep extends AdditionalTaintStep {
     DataFlow::Node source;
 
     ReactComponentStateTaintStep() {
@@ -358,7 +358,7 @@ module TaintTracking {
    * taint to flow from `v` to any read of `c2.props.p`, where `c2`
    * also is an instance of `C`.
    */
-  private class ReactComponentPropsTaintStep extends AdditionalTaintStep, DataFlow::ValueNode {
+  private class ReactComponentPropsTaintStep extends AdditionalTaintStep {
     DataFlow::Node source;
 
     ReactComponentPropsTaintStep() {
@@ -427,6 +427,7 @@ module TaintTracking {
         name = "padStart" or
         name = "repeat" or
         name = "replace" or
+        name = "replaceAll" or
         name = "slice" or
         name = "small" or
         name = "split" or
@@ -452,7 +453,7 @@ module TaintTracking {
       exists(int i | pred.asExpr() = succ.getAstNode().(MethodCallExpr).getArgument(i) |
         name = "concat"
         or
-        name = "replace" and i = 1
+        name = ["replace", "replaceAll"] and i = 1
       )
     )
     or
@@ -543,8 +544,8 @@ module TaintTracking {
   /**
    * A taint propagating data flow edge arising from JSON unparsing.
    */
-  private class JsonStringifyTaintStep extends AdditionalTaintStep, DataFlow::MethodCallNode {
-    JsonStringifyTaintStep() { this = DataFlow::globalVarRef("JSON").getAMemberCall("stringify") }
+  private class JsonStringifyTaintStep extends AdditionalTaintStep, DataFlow::CallNode {
+    JsonStringifyTaintStep() { this instanceof JsonStringifyCall }
 
     override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
       pred = getArgument(0) and succ = this
@@ -693,25 +694,15 @@ module TaintTracking {
     }
   }
 
-  /**
-   * A taint step through the Node.JS function `util.inspect(..)`.
-   */
-  class UtilInspectTaintStep extends AdditionalTaintStep, DataFlow::InvokeNode {
-    UtilInspectTaintStep() { this = DataFlow::moduleImport("util").getAMemberCall("inspect") }
-
-    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-      succ = this and
-      this.getAnArgument() = pred
-    }
-  }
-
   private module RegExpCaptureSteps {
     /** Gets a reference to a string derived from the most recent RegExp match, such as `RegExp.$1`. */
     private DataFlow::PropRead getAStaticCaptureRef() {
       result =
         DataFlow::globalVarRef("RegExp")
-            .getAPropertyRead(["$" + [1 .. 9], "input", "lastMatch", "leftContext", "rightContext",
-                  "$&", "$^", "$`"])
+            .getAPropertyRead([
+                "$" + [1 .. 9], "input", "lastMatch", "leftContext", "rightContext", "$&", "$^",
+                "$`"
+              ])
     }
 
     /**
@@ -719,7 +710,8 @@ module TaintTracking {
      */
     private ControlFlowNode getACaptureSetter(DataFlow::Node input) {
       exists(DataFlow::MethodCallNode call | result = call.asExpr() |
-        call.getMethodName() = ["search", "replace", "match"] and input = call.getReceiver()
+        call.getMethodName() = ["search", "replace", "replaceAll", "match"] and
+        input = call.getReceiver()
         or
         call.getMethodName() = ["test", "exec"] and input = call.getArgument(0)
       )

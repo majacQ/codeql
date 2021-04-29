@@ -228,7 +228,7 @@ module DataFlow {
      *
      * Doesn't take field types and function return types into account.
      */
-    private JSDocTypeExpr getFallbackTypeAnnotation() {
+    private TypeAnnotation getFallbackTypeAnnotation() {
       exists(BindingPattern pattern |
         this = valueNode(pattern) and
         not ast_node_type(pattern, _) and
@@ -236,6 +236,11 @@ module DataFlow {
       )
       or
       result = getAPredecessor().getFallbackTypeAnnotation()
+      or
+      exists(DataFlow::ClassNode cls, string fieldName |
+        this = cls.getAReceiverNode().getAPropertyRead(fieldName) and
+        result = cls.getFieldTypeAnnotation(fieldName)
+      )
     }
 
     /**
@@ -331,8 +336,7 @@ module DataFlow {
     override predicate hasLocationInfo(
       string filepath, int startline, int startcolumn, int endline, int endcolumn
     ) {
-      prop
-          .(Locatable)
+      prop.(Locatable)
           .getLocation()
           .hasLocationInfo(filepath, startline, startcolumn, endline, endcolumn)
     }
@@ -624,7 +628,11 @@ module DataFlow {
     override string getPropertyName() { result = astNode.getArgument(1).getStringValue() }
 
     override Node getRhs() {
-      result = astNode.getArgument(2).(ObjectExpr).getPropertyByName("value").getInit().flow()
+      exists(ObjectExpr obj | obj = astNode.getArgument(2) |
+        result = obj.getPropertyByName("value").getInit().flow()
+        or
+        result = obj.getPropertyByName("get").getInit().flow().(DataFlow::FunctionNode).getAReturn()
+      )
     }
 
     override ControlFlowNode getWriteNode() { result = astNode }
@@ -704,7 +712,9 @@ module DataFlow {
       result = thisNode(prop.getDeclaringClass().getConstructor().getBody())
     }
 
-    override Expr getPropertyNameExpr() { result = prop.getNameExpr() }
+    override Expr getPropertyNameExpr() {
+      none() // The parameter value is not the name of the field
+    }
 
     override string getPropertyName() { result = prop.getName() }
 
@@ -912,10 +922,36 @@ module DataFlow {
       function.getLocation().hasLocationInfo(filepath, startline, startcolumn, endline, endcolumn)
     }
 
-    override BasicBlock getBasicBlock() { result = function.(ExprOrStmt).getBasicBlock() }
+    override BasicBlock getBasicBlock() { result = function.getExit().getBasicBlock() }
 
     /**
      * Gets the function corresponding to this exceptional return node.
+     */
+    Function getFunction() { result = function }
+
+    override File getFile() { result = function.getFile() }
+  }
+
+  /**
+   * A data flow node representing the values returned by a function.
+   */
+  class FunctionReturnNode extends DataFlow::Node, TFunctionReturnNode {
+    Function function;
+
+    FunctionReturnNode() { this = TFunctionReturnNode(function) }
+
+    override string toString() { result = "return of " + function.describe() }
+
+    override predicate hasLocationInfo(
+      string filepath, int startline, int startcolumn, int endline, int endcolumn
+    ) {
+      function.getLocation().hasLocationInfo(filepath, startline, startcolumn, endline, endcolumn)
+    }
+
+    override BasicBlock getBasicBlock() { result = function.getExit().getBasicBlock() }
+
+    /**
+     * Gets the function corresponding to this return node.
      */
     Function getFunction() { result = function }
 
@@ -1266,6 +1302,13 @@ module DataFlow {
   }
 
   /**
+   * INTERNAL: Use `FunctionReturnNode` instead.
+   */
+  predicate functionReturnNode(DataFlow::Node nd, Function function) {
+    nd = TFunctionReturnNode(function)
+  }
+
+  /**
    * Gets the data flow node corresponding the given l-value expression, if
    * such a node exists.
    *
@@ -1459,6 +1502,11 @@ module DataFlow {
         predExpr = f.getAReturnedExpr() and
         localCall(succExpr, f)
       )
+    )
+    or
+    // from returned expr to the FunctionReturnNode.
+    exists(Function f | not f.isAsyncOrGenerator() |
+      DataFlow::functionReturnNode(succ, f) and pred = valueNode(f.getAReturnedExpr())
     )
   }
 

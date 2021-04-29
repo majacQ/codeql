@@ -5,6 +5,7 @@
 import Customizations
 import semmle.javascript.Aliases
 import semmle.javascript.AMD
+import semmle.javascript.ApiGraphs
 import semmle.javascript.Arrays
 import semmle.javascript.AST
 import semmle.javascript.BasicBlocks
@@ -27,6 +28,7 @@ import semmle.javascript.Extend
 import semmle.javascript.Externs
 import semmle.javascript.Files
 import semmle.javascript.Functions
+import semmle.javascript.Generators
 import semmle.javascript.GlobalAccessPaths
 import semmle.javascript.HTML
 import semmle.javascript.HtmlSanitizers
@@ -34,6 +36,7 @@ import semmle.javascript.InclusionTests
 import semmle.javascript.JSDoc
 import semmle.javascript.JSON
 import semmle.javascript.JsonParsers
+import semmle.javascript.JsonStringifiers
 import semmle.javascript.JSX
 import semmle.javascript.Lines
 import semmle.javascript.Locations
@@ -62,6 +65,7 @@ import semmle.javascript.YAML
 import semmle.javascript.dataflow.DataFlow
 import semmle.javascript.dataflow.TaintTracking
 import semmle.javascript.dataflow.TypeInference
+import semmle.javascript.frameworks.Angular2
 import semmle.javascript.frameworks.AngularJS
 import semmle.javascript.frameworks.AsyncPackage
 import semmle.javascript.frameworks.AWS
@@ -69,17 +73,20 @@ import semmle.javascript.frameworks.Azure
 import semmle.javascript.frameworks.Babel
 import semmle.javascript.frameworks.Cheerio
 import semmle.javascript.frameworks.ComposedFunctions
+import semmle.javascript.frameworks.Classnames
 import semmle.javascript.frameworks.ClientRequests
 import semmle.javascript.frameworks.ClosureLibrary
 import semmle.javascript.frameworks.CookieLibraries
 import semmle.javascript.frameworks.Credentials
 import semmle.javascript.frameworks.CryptoLibraries
+import semmle.javascript.frameworks.DateFunctions
 import semmle.javascript.frameworks.DigitalOcean
 import semmle.javascript.frameworks.Electron
 import semmle.javascript.frameworks.EventEmitter
 import semmle.javascript.frameworks.Files
 import semmle.javascript.frameworks.Firebase
 import semmle.javascript.frameworks.jQuery
+import semmle.javascript.frameworks.JWT
 import semmle.javascript.frameworks.Handlebars
 import semmle.javascript.frameworks.LazyCache
 import semmle.javascript.frameworks.LodashUnderscore
@@ -91,6 +98,7 @@ import semmle.javascript.frameworks.PropertyProjection
 import semmle.javascript.frameworks.React
 import semmle.javascript.frameworks.ReactNative
 import semmle.javascript.frameworks.Request
+import semmle.javascript.frameworks.ServerLess
 import semmle.javascript.frameworks.ShellJS
 import semmle.javascript.frameworks.SystemCommandExecutors
 import semmle.javascript.frameworks.SQL
