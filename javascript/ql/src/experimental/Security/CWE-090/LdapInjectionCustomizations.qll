@@ -5,9 +5,10 @@
  */
 
 import javascript
-import Ldapjs::Ldapjs
 
 module LdapInjection {
+  import Ldapjs::Ldapjs
+
   /**
    * A data flow source for LDAP injection vulnerabilities.
    */
@@ -64,22 +65,9 @@ module LdapInjection {
         sanitize = "(?:escape|saniti[sz]e|validate|filter)" and
         input = "[Ii]nput?"
       |
-        this
-            .getCalleeName()
+        this.getCalleeName()
             .regexpMatch("(?i)(" + sanitize + input + ")" + "|(" + input + sanitize + ")")
       )
-    }
-  }
-
-  /**
-   * A step through the parseFilter API (https://github.com/ldapjs/node-ldapjs/issues/181).
-   */
-  class StepThroughParseFilter extends TaintTracking::AdditionalTaintStep, DataFlow::CallNode {
-    StepThroughParseFilter() { this instanceof LdapjsParseFilter }
-
-    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-      pred = this.getArgument(0) and
-      succ = this
     }
   }
 }

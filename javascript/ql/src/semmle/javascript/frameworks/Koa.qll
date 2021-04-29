@@ -47,7 +47,7 @@ module Koa {
     /**
      * Gets the parameter of the route handler that contains the context object.
      */
-    SimpleParameter getContextParameter() { result = function.getParameter(0) }
+    Parameter getContextParameter() { result = function.getParameter(0) }
 
     /**
      * Gets an expression that contains the "context" object of
@@ -298,9 +298,8 @@ module Koa {
 
     ResponseSendArgument() {
       exists(DataFlow::PropWrite pwn |
-        pwn
-            .writes(DataFlow::valueNode(rh.getAResponseOrContextExpr()), "body",
-              DataFlow::valueNode(this))
+        pwn.writes(DataFlow::valueNode(rh.getAResponseOrContextExpr()), "body",
+          DataFlow::valueNode(this))
       )
     }
 
