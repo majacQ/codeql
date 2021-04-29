@@ -291,7 +291,23 @@ struct A {
 Point *NewAliasing(int x) {
   Point* p = new Point;
   Point* q = new Point;
-  int j = new A(new A(x))->i;
+  int j = (new A(new A(x)))->i;
   A* a = new A;
   return p;
 }
+
+void unknownFunction(int argc, char **argv);
+
+int main(int argc, char **argv) {
+  unknownFunction(argc, argv);
+  unknownFunction(argc, argv);
+  return **argv; // Chi chain goes through side effects from unknownFunction
+}
+
+class ThisAliasTest {
+  int x, y;
+  
+  void setX(int arg) {
+    this->x = arg;
+  }
+};

@@ -7,6 +7,7 @@
 import javascript
 import semmle.javascript.dataflow.Configuration
 import semmle.javascript.dataflow.internal.CallGraphs
+private import semmle.javascript.internal.CachedStages
 
 /**
  * Holds if flow should be tracked through properties of `obj`.
@@ -24,7 +25,9 @@ predicate shouldTrackProperties(AbstractValue obj) {
  */
 pragma[noinline]
 predicate returnExpr(Function f, DataFlow::Node source, DataFlow::Node sink) {
-  sink.asExpr() = f.getAReturnedExpr() and source = sink
+  sink.asExpr() = f.getAReturnedExpr() and
+  source = sink and
+  not f = any(SetterMethodDeclaration decl).getBody()
 }
 
 /**
@@ -38,9 +41,9 @@ predicate localFlowStep(
 ) {
   pred = succ.getAPredecessor() and predlbl = succlbl
   or
-  any(DataFlow::AdditionalFlowStep afs).step(pred, succ) and predlbl = succlbl
+  DataFlow::SharedFlowStep::step(pred, succ) and predlbl = succlbl
   or
-  any(DataFlow::AdditionalFlowStep afs).step(pred, succ, predlbl, succlbl)
+  DataFlow::SharedFlowStep::step(pred, succ, predlbl, succlbl)
   or
   exists(boolean vp | configuration.isAdditionalFlowStep(pred, succ, vp) |
     vp = true and
@@ -61,13 +64,42 @@ predicate localFlowStep(
  * Holds if an exception thrown from `pred` can propagate locally to `succ`.
  */
 predicate localExceptionStep(DataFlow::Node pred, DataFlow::Node succ) {
+  localExceptionStepWithAsyncFlag(pred, succ, false)
+}
+
+/**
+ * Holds if an exception thrown from `pred` can propagate locally to `succ`.
+ *
+ * The `async` flag is true if the step involves wrapping the exception in a rejected Promise.
+ */
+predicate localExceptionStepWithAsyncFlag(DataFlow::Node pred, DataFlow::Node succ, boolean async) {
+  exists(DataFlow::Node target | target = getThrowTarget(pred) |
+    // this also covers generators - as the behavior of exceptions is close enough to the behavior of ordinary
+    // functions when it comes to exceptions (assuming that the iterator does not cross function boundaries).
+    async = false and
+    succ = target and
+    not succ = any(DataFlow::FunctionNode f | f.getFunction().isAsync()).getExceptionalReturn()
+    or
+    async = true and
+    exists(DataFlow::FunctionNode f | f.getExceptionalReturn() = target |
+      succ = f.getReturnNode() // returns a rejected promise - therefore using the ordinary return node.
+    )
+  )
+}
+
+/**
+ * Gets the dataflow-node that an exception thrown at `thrower` will flow to.
+ *
+ * The predicate that all functions are not async.
+ */
+DataFlow::Node getThrowTarget(DataFlow::Node thrower) {
   exists(Expr expr |
     expr = any(ThrowStmt throw).getExpr() and
-    pred = expr.flow()
+    thrower = expr.flow()
     or
-    DataFlow::exceptionalInvocationReturnNode(pred, expr)
+    DataFlow::exceptionalInvocationReturnNode(thrower, expr)
   |
-    succ = expr.getExceptionTarget()
+    result = expr.getExceptionTarget()
   )
 }
 
@@ -78,11 +110,11 @@ predicate localExceptionStep(DataFlow::Node pred, DataFlow::Node succ) {
 cached
 private module CachedSteps {
   /**
-   * Holds if `f` captures the variable defined by `def` in `cap`.
+   * Holds if `f` captures the given `variable` in `cap`.
    */
   cached
-  predicate captures(Function f, SsaExplicitDefinition def, SsaVariableCapture cap) {
-    def.getSourceVariable() = cap.getSourceVariable() and
+  predicate captures(Function f, LocalVariable variable, SsaVariableCapture cap) {
+    variable = cap.getSourceVariable() and
     f = cap.getContainer()
   }
 
@@ -90,7 +122,18 @@ private module CachedSteps {
    * Holds if `invk` may invoke `f`.
    */
   cached
-  predicate calls(DataFlow::InvokeNode invk, Function f) { f = invk.getACallee(0) }
+  predicate calls(DataFlow::SourceNode invk, Function f) {
+    f = invk.(DataFlow::InvokeNode).getACallee(0)
+    or
+    f = invk.(DataFlow::PropRef).getAnAccessorCallee().getFunction()
+  }
+
+  private predicate callsBoundInternal(
+    DataFlow::InvokeNode invk, Function f, int boundArgs, boolean contextDependent
+  ) {
+    CallGraph::getABoundFunctionReference(f.flow(), boundArgs, contextDependent)
+        .flowsTo(invk.getCalleeNode())
+  }
 
   /**
    * Holds if `invk` may invoke a bound version of `f` with `boundArgs` already bound.
@@ -101,7 +144,7 @@ private module CachedSteps {
    */
   cached
   predicate callsBound(DataFlow::InvokeNode invk, Function f, int boundArgs) {
-    CallGraph::getABoundFunctionReference(f.flow(), boundArgs, false).flowsTo(invk.getCalleeNode())
+    callsBoundInternal(invk, f, boundArgs, false)
   }
 
   /**
@@ -111,10 +154,10 @@ private module CachedSteps {
    */
   cached
   predicate exploratoryBoundInvokeStep(DataFlow::Node pred, DataFlow::Node succ) {
-    exists(DataFlow::InvokeNode invk, DataFlow::FunctionNode f, int i, int boundArgs |
-      CallGraph::getABoundFunctionReference(f, boundArgs, _).flowsTo(invk.getCalleeNode()) and
+    exists(DataFlow::InvokeNode invk, Function f, int i, int boundArgs |
+      callsBoundInternal(invk, f, boundArgs, _) and
       pred = invk.getArgument(i) and
-      succ = f.getParameter(i + boundArgs)
+      succ = DataFlow::parameterNode(f.getParameter(i + boundArgs))
     )
   }
 
@@ -140,25 +183,35 @@ private module CachedSteps {
    */
   cached
   predicate argumentPassing(
-    DataFlow::InvokeNode invk, DataFlow::ValueNode arg, Function f, DataFlow::SourceNode parm
+    DataFlow::SourceNode invk, DataFlow::Node arg, Function f, DataFlow::SourceNode parm
   ) {
     calls(invk, f) and
     (
-      exists(int i, Parameter p |
-        f.getParameter(i) = p and
-        not p.isRestParameter() and
-        arg = invk.getArgument(i) and
-        parm = DataFlow::parameterNode(p)
+      exists(int i | arg = invk.(DataFlow::InvokeNode).getArgument(i) |
+        exists(Parameter p |
+          f.getParameter(i) = p and
+          not p.isRestParameter() and
+          parm = DataFlow::parameterNode(p)
+        )
+        or
+        parm = reflectiveParameterAccess(f, i)
       )
       or
       arg = invk.(DataFlow::CallNode).getReceiver() and
       parm = DataFlow::thisNode(f)
+      or
+      arg = invk.(DataFlow::PropRef).getBase() and
+      parm = DataFlow::thisNode(f)
+      or
+      arg = invk.(DataFlow::PropWrite).getRhs() and
+      parm = DataFlow::parameterNode(f.getParameter(0))
     )
     or
-    exists(DataFlow::Node callback, int i, Parameter p |
+    exists(DataFlow::Node callback, int i, Parameter p, Function target |
       invk.(DataFlow::PartialInvokeNode).isPartialArgument(callback, arg, i) and
       partiallyCalls(invk, callback, f) and
-      f.getParameter(i) = p and
+      f = pragma[only_bind_into](target) and
+      target.getParameter(i) = p and
       not p.isRestParameter() and
       parm = DataFlow::parameterNode(p)
     )
@@ -173,9 +226,25 @@ private module CachedSteps {
       callsBound(invk, f, boundArgs) and
       f.getParameter(boundArgs + i) = p and
       not p.isRestParameter() and
-      arg = invk.getArgument(i) and
+      arg = invk.(DataFlow::InvokeNode).getArgument(i) and
       parm = DataFlow::parameterNode(p)
     )
+  }
+
+  /**
+   * Gets a data-flow node inside `f` that refers to the `arguments` object of `f`.
+   */
+  private DataFlow::Node argumentsAccess(Function f) {
+    result.getContainer().getEnclosingContainer*() = f and
+    result.analyze().getAValue().(AbstractArguments).getFunction() = f
+  }
+
+  /**
+   * Gets a data-flow node that refers to the `i`th parameter of `f` through its `arguments`
+   * object.
+   */
+  private DataFlow::SourceNode reflectiveParameterAccess(Function f, int i) {
+    result.(DataFlow::PropRead).accesses(argumentsAccess(f), any(string p | i = p.toInt()))
   }
 
   /**
@@ -187,14 +256,14 @@ private module CachedSteps {
 
   /**
    * Holds if there is a flow step from `pred` to `succ` through:
-   * - returning a value from a function call, or
+   * - returning a value from a function call (from the special `FunctionReturnNode`), or
    * - throwing an exception out of a function call, or
    * - the receiver flowing out of a constructor call.
    */
   cached
   predicate returnStep(DataFlow::Node pred, DataFlow::Node succ) {
     exists(Function f | calls(succ, f) or callsBound(succ, f, _) |
-      returnExpr(f, pred, _)
+      DataFlow::functionReturnNode(pred, f)
       or
       succ instanceof DataFlow::NewNode and
       DataFlow::thisNode(pred, f)
@@ -323,6 +392,7 @@ private module CachedSteps {
    */
   cached
   predicate basicLoadStep(DataFlow::Node pred, DataFlow::PropRead succ, string prop) {
+    Stages::TypeTracking::ref() and
     succ.accesses(pred, prop)
   }
 
@@ -348,6 +418,7 @@ private module CachedSteps {
    */
   cached
   predicate callback(DataFlow::Node arg, DataFlow::SourceNode cb) {
+    Stages::TypeTracking::ref() and
     exists(DataFlow::InvokeNode invk, DataFlow::ParameterNode cbParm, DataFlow::Node cbArg |
       arg = invk.getAnArgument() and
       cbParm.flowsTo(invk.getCalleeNode()) and
@@ -377,6 +448,18 @@ private module CachedSteps {
   cached
   predicate receiverPropWrite(Function f, string prop, DataFlow::Node rhs) {
     DataFlow::thisNode(f).hasPropertyWrite(prop, rhs)
+  }
+
+  /**
+   * A step from `pred` to `succ` through a call to an identity function.
+   */
+  cached
+  predicate identityFunctionStep(DataFlow::Node pred, DataFlow::CallNode succ) {
+    exists(DataFlow::GlobalVarRefNode global |
+      global.getName() = "Object" and
+      succ.(DataFlow::MethodCallNode).calls(global, ["freeze", "seal"]) and
+      pred = succ.getArgument(0)
+    )
   }
 }
 

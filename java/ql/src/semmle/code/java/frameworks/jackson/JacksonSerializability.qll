@@ -8,7 +8,11 @@ import semmle.code.java.Serializability
 import semmle.code.java.Reflection
 import semmle.code.java.dataflow.DataFlow
 import semmle.code.java.dataflow.DataFlow5
+import semmle.code.java.dataflow.FlowSteps
 
+/**
+ * A `@com.fasterxml.jackson.annotation.JsonIgnore` annoation.
+ */
 class JacksonJSONIgnoreAnnotation extends NonReflectiveAnnotation {
   JacksonJSONIgnoreAnnotation() {
     exists(AnnotationType anntp | anntp = this.getType() |
@@ -17,13 +21,14 @@ class JacksonJSONIgnoreAnnotation extends NonReflectiveAnnotation {
   }
 }
 
+/** A type whose values may be serialized using the Jackson JSON framework. */
 abstract class JacksonSerializableType extends Type { }
 
 /**
  * A method used for serializing objects using Jackson. The final parameter is the object to be
  * serialized.
  */
-library class JacksonWriteValueMethod extends Method {
+library class JacksonWriteValueMethod extends Method, TaintPreservingCallable {
   JacksonWriteValueMethod() {
     (
       getDeclaringType().hasQualifiedName("com.fasterxml.jackson.databind", "ObjectWriter") or
@@ -32,8 +37,20 @@ library class JacksonWriteValueMethod extends Method {
     getName().matches("writeValue%") and
     getParameter(getNumberOfParameters() - 1).getType() instanceof TypeObject
   }
+
+  override predicate returnsTaintFrom(int arg) {
+    getNumberOfParameters() = 1 and
+    arg = 0
+  }
+
+  override predicate transfersTaint(int src, int sink) {
+    getNumberOfParameters() > 1 and
+    src = getNumberOfParameters() - 1 and
+    sink = 0
+  }
 }
 
+/** A type whose values are explicitly serialized in a call to a Jackson method. */
 library class ExplicitlyWrittenJacksonSerializableType extends JacksonSerializableType {
   ExplicitlyWrittenJacksonSerializableType() {
     exists(MethodAccess ma |
@@ -45,12 +62,14 @@ library class ExplicitlyWrittenJacksonSerializableType extends JacksonSerializab
   }
 }
 
+/** A type used in a `JacksonSerializableField` declaration. */
 library class FieldReferencedJacksonSerializableType extends JacksonSerializableType {
   FieldReferencedJacksonSerializableType() {
     exists(JacksonSerializableField f | usesType(f.getType(), this))
   }
 }
 
+/** A type whose values may be deserialized by the Jackson JSON framework. */
 abstract class JacksonDeserializableType extends Type { }
 
 private class TypeLiteralToJacksonDatabindFlowConfiguration extends DataFlow5::Configuration {
@@ -76,6 +95,7 @@ private class TypeLiteralToJacksonDatabindFlowConfiguration extends DataFlow5::C
   TypeLiteral getSourceWithFlowToJacksonDatabind() { hasFlow(DataFlow::exprNode(result), _) }
 }
 
+/** A type whose values are explicitly deserialized in a call to a Jackson method. */
 library class ExplicitlyReadJacksonDeserializableType extends JacksonDeserializableType {
   ExplicitlyReadJacksonDeserializableType() {
     exists(TypeLiteralToJacksonDatabindFlowConfiguration conf |
@@ -84,12 +104,14 @@ library class ExplicitlyReadJacksonDeserializableType extends JacksonDeserializa
   }
 }
 
+/** A type used in a `JacksonDeserializableField` declaration. */
 library class FieldReferencedJacksonDeSerializableType extends JacksonDeserializableType {
   FieldReferencedJacksonDeSerializableType() {
     exists(JacksonDeserializableField f | usesType(f.getType(), this))
   }
 }
 
+/** A field that may be serialized using the Jackson JSON framework. */
 class JacksonSerializableField extends SerializableField {
   JacksonSerializableField() {
     exists(JacksonSerializableType superType |
@@ -101,6 +123,7 @@ class JacksonSerializableField extends SerializableField {
   }
 }
 
+/** A field that may be deserialized using the Jackson JSON framework. */
 class JacksonDeserializableField extends DeserializableField {
   JacksonDeserializableField() {
     exists(JacksonDeserializableType superType |
@@ -183,6 +206,7 @@ class JacksonMixinType extends ClassOrInterface {
   }
 }
 
+/** A callable used as a Jackson mixin callable. */
 class JacksonMixedInCallable extends Callable {
   JacksonMixedInCallable() {
     exists(JacksonMixinType mixinType | this = mixinType.getAMixedInCallable())

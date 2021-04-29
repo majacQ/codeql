@@ -3,6 +3,8 @@
  */
 
 import javascript
+private import internal.StmtContainers
+private import semmle.javascript.internal.CachedStages
 
 /**
  * A program element corresponding to JavaScript code, such as an expression
@@ -20,8 +22,12 @@ import javascript
  * abs(-42);
  * ```
  */
-class ASTNode extends @ast_node, Locatable {
+class ASTNode extends @ast_node, NodeInStmtContainer {
   override Location getLocation() { hasLocation(this, result) }
+
+  override File getFile() {
+    result = getLocation().getFile() // Specialized for performance reasons
+  }
 
   /** Gets the first token belonging to this element. */
   Token getFirstToken() {
@@ -70,7 +76,7 @@ class ASTNode extends @ast_node, Locatable {
 
   /** Gets the toplevel syntactic unit to which this element belongs. */
   cached
-  TopLevel getTopLevel() { result = getParent().getTopLevel() }
+  TopLevel getTopLevel() { Stages::Ast::ref() and result = getParent().getTopLevel() }
 
   /**
    * Gets the `i`th child node of this node.
@@ -113,13 +119,51 @@ class ASTNode extends @ast_node, Locatable {
   int getNumChildStmt() { result = count(getAChildStmt()) }
 
   /** Gets the parent node of this node, if any. */
-  ASTNode getParent() { this = result.getAChild() }
+  cached
+  ASTNode getParent() { Stages::Ast::ref() and this = result.getAChild() }
 
   /** Gets the first control flow node belonging to this syntactic entity. */
   ControlFlowNode getFirstControlFlowNode() { result = this }
 
   /** Holds if this syntactic entity belongs to an externs file. */
   predicate inExternsFile() { getTopLevel().isExterns() }
+
+  /**
+   * Holds if this is an ambient node that is not a `TypeExpr` and is not inside a `.d.ts` file
+   *
+   * Since the overwhelming majority of ambient nodes are `TypeExpr` or inside `.d.ts` files,
+   * we avoid caching them.
+   */
+  cached
+  private predicate isAmbientInternal() {
+    Stages::Ast::ref() and
+    getParent().isAmbientInternal()
+    or
+    not isAmbientTopLevel(getTopLevel()) and
+    (
+      this instanceof ExternalModuleDeclaration
+      or
+      this instanceof GlobalAugmentationDeclaration
+      or
+      this instanceof ExportAsNamespaceDeclaration
+      or
+      this instanceof TypeAliasDeclaration
+      or
+      this instanceof InterfaceDeclaration
+      or
+      has_declare_keyword(this)
+      or
+      has_type_keyword(this)
+      or
+      // An export such as `export declare function f()` should be seen as ambient.
+      has_declare_keyword(this.(ExportNamedDeclaration).getOperand())
+      or
+      exists(Function f |
+        this = f and
+        not f.hasBody()
+      )
+    )
+  }
 
   /**
    * Holds if this is part of an ambient declaration or type annotation in a TypeScript file.
@@ -130,7 +174,22 @@ class ASTNode extends @ast_node, Locatable {
    * The TypeScript compiler emits no code for ambient declarations, but they
    * can affect name resolution and type checking at compile-time.
    */
-  predicate isAmbient() { getParent().isAmbient() }
+  pragma[inline]
+  predicate isAmbient() {
+    isAmbientInternal()
+    or
+    isAmbientTopLevel(getTopLevel())
+    or
+    this instanceof TypeExpr
+  }
+}
+
+/**
+ * Holds if the given file is a `.d.ts` file.
+ */
+cached
+private predicate isAmbientTopLevel(TopLevel tl) {
+  Stages::Ast::ref() and tl.getFile().getBaseName().matches("%.d.ts")
 }
 
 /**
@@ -167,7 +226,7 @@ class TopLevel extends @toplevel, StmtContainer {
   /** Holds if this toplevel is an externs definitions file. */
   predicate isExterns() {
     // either it was explicitly extracted as an externs file...
-    isExterns(this)
+    is_externs(this)
     or
     // ...or it has a comment with an `@externs` tag in it
     exists(JSDocTag externs |
@@ -193,11 +252,6 @@ class TopLevel extends @toplevel, StmtContainer {
   override ControlFlowNode getFirstControlFlowNode() { result = getEntry() }
 
   override string toString() { result = "<toplevel>" }
-
-  override predicate isAmbient() {
-    getFile().getFileType().isTypeScript() and
-    getFile().getBaseName().matches("%.d.ts")
-  }
 }
 
 /**
@@ -251,7 +305,11 @@ class InlineScript extends @inline_script, Script { }
  * ```
  */
 class CodeInAttribute extends TopLevel {
-  CodeInAttribute() { this instanceof @event_handler or this instanceof @javascript_url }
+  CodeInAttribute() {
+    this instanceof @event_handler or
+    this instanceof @javascript_url or
+    this instanceof @angular_template_toplevel
+  }
 }
 
 /**
@@ -301,7 +359,7 @@ class Externs extends TopLevel {
  * i = 9
  * ```
  */
-class ExprOrStmt extends @exprorstmt, ControlFlowNode, ASTNode { }
+class ExprOrStmt extends @expr_or_stmt, ControlFlowNode, ASTNode { }
 
 /**
  * A program element that contains statements, but isn't itself
@@ -398,9 +456,9 @@ class StmtContainer extends @stmt_container, ASTNode {
  */
 module AST {
   /**
-   * A program element that evaluates to a value at runtime. This includes expressions,
-   * but also function and class declaration statements, as well as TypeScript
-   * namespace and enum declarations.
+   * A program element that evaluates to a value or destructures a value at runtime.
+   * This includes expressions and destructuring patterns, but also function and
+   * class declaration statements, as well as TypeScript namespace and enum declarations.
    *
    * Examples:
    *

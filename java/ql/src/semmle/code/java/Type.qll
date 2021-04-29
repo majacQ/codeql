@@ -318,6 +318,8 @@ class Array extends RefType, @array {
    * Gets the JVM descriptor for this type, as used in bytecode.
    */
   override string getTypeDescriptor() { result = "[" + this.getComponentType().getTypeDescriptor() }
+
+  override string getAPrimaryQlClass() { result = "Array" }
 }
 
 /**
@@ -597,6 +599,13 @@ class Class extends RefType, @class {
   /** Holds if this class is a local class. */
   predicate isLocal() { isLocalClass(this, _) }
 
+  /** Holds if this class is package protected, that is, neither public nor private nor protected. */
+  predicate isPackageProtected() {
+    not isPrivate() and
+    not isProtected() and
+    not isPublic()
+  }
+
   override RefType getSourceDeclaration() { classes(this, _, _, result) }
 
   /**
@@ -613,6 +622,17 @@ class Class extends RefType, @class {
       result = this.getASupertype().(Class).getAnAnnotation()
     )
   }
+
+  override string getAPrimaryQlClass() { result = "Class" }
+}
+
+/**
+ * PREVIEW FEATURE in Java 14. Subject to removal in a future release.
+ *
+ * A record declaration.
+ */
+class Record extends Class {
+  Record() { isRecord(this) }
 }
 
 /** An intersection type. */
@@ -628,10 +648,12 @@ class IntersectionType extends RefType, @class {
 
   private RefType superInterface() { implInterface(this, result) }
 
+  /** Gets a textual representation of this type that includes all the intersected types. */
   string getLongName() {
     result = superType().toString() + concat(" & " + superInterface().toString())
   }
 
+  /** Gets the first bound of this intersection type. */
   RefType getFirstBound() { extendsReftype(this, result) }
 }
 
@@ -685,6 +707,8 @@ class AnonymousClass extends NestedClass {
    * the string `"<anonymous class>"` as a placeholder.
    */
   override string getQualifiedName() { result = "<anonymous class>" }
+
+  override string getAPrimaryQlClass() { result = "AnonymousClass" }
 }
 
 /** A local class. */
@@ -693,6 +717,8 @@ class LocalClass extends NestedClass {
 
   /** Gets the statement that declares this local class. */
   LocalClassDeclStmt getLocalClassDeclStmt() { isLocalClass(this, result) }
+
+  override string getAPrimaryQlClass() { result = "LocalClass" }
 }
 
 /** A top-level type. */
@@ -796,6 +822,15 @@ class Interface extends RefType, @interface {
     // JLS 9.1.1.1: "Every interface is implicitly abstract"
     any()
   }
+
+  /** Holds if this interface is package protected, that is, neither public nor private nor protected. */
+  predicate isPackageProtected() {
+    not isPrivate() and
+    not isProtected() and
+    not isPublic()
+  }
+
+  override string getAPrimaryQlClass() { result = "Interface" }
 }
 
 /** A class or interface. */
@@ -858,11 +893,15 @@ class PrimitiveType extends Type, @primitive {
     getName().regexpMatch("(float|double|int|short|byte|long)") and
     result.getLiteral().regexpMatch("0(\\.0)?+[lLfFdD]?+")
   }
+
+  override string getAPrimaryQlClass() { result = "PrimitiveType" }
 }
 
 /** The type of the `null` literal. */
 class NullType extends Type, @primitive {
   NullType() { this.hasName("<nulltype>") }
+
+  override string getAPrimaryQlClass() { result = "NullType" }
 }
 
 /** The `void` type. */
@@ -873,6 +912,8 @@ class VoidType extends Type, @primitive {
    * Gets the JVM descriptor for this type, as used in bytecode.
    */
   override string getTypeDescriptor() { result = "V" }
+
+  override string getAPrimaryQlClass() { result = "VoidType" }
 }
 
 /**

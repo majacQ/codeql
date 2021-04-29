@@ -1,5 +1,5 @@
 /**
- * Provides an abstract class for modelling functions and expressions that
+ * Provides an abstract class for modeling functions and expressions that
  * allocate memory, such as the standard `malloc` function.  To use this QL
  * library, create one or more QL classes extending a class here with a
  * characteristic predicate that selects the functions or expressions you are
@@ -73,10 +73,43 @@ abstract class AllocationExpr extends Expr {
   Expr getReallocPtr() { none() }
 
   /**
+   * Gets the type of the elements that are allocated, if it can be determined.
+   */
+  Type getAllocatedElementType() { none() }
+
+  /**
    * Whether or not this allocation requires a corresponding deallocation of
    * some sort (most do, but `alloca` for example does not).  If it is unclear,
    * we default to no (for example a placement `new` allocation may or may not
    * require a corresponding `delete`).
    */
   predicate requiresDealloc() { any() }
+}
+
+/**
+ * An `operator new` or `operator new[]` function that may be associated with
+ * `new` or `new[]` expressions.  Note that `new` and `new[]` are not function
+ * calls, but these functions may also be called directly.
+ */
+class OperatorNewAllocationFunction extends AllocationFunction {
+  OperatorNewAllocationFunction() {
+    hasGlobalName([
+        "operator new", // operator new(bytes, ...)
+        "operator new[]" // operator new[](bytes, ...)
+      ])
+  }
+
+  override int getSizeArg() { result = 0 }
+
+  override predicate requiresDealloc() { not exists(getPlacementArgument()) }
+
+  /**
+   * Gets the position of the placement pointer if this is a placement
+   * `operator new` function.
+   */
+  int getPlacementArgument() {
+    getNumberOfParameters() = 2 and
+    getParameter(1).getType() instanceof VoidPointerType and
+    result = 1
+  }
 }

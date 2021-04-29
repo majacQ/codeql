@@ -376,6 +376,41 @@ public class E
         }
         return -1;
     }
+
+    static bool Ex37(E e1, E e2)
+    {
+        if ((e1 == null && e2 != null) || (e1 != null && e2 == null))
+            return false;
+        if (e1 == null && e2 == null)
+            return true;
+        return e1.Long == e2.Long; // GOOD (false positive)
+    }
+
+    int Ex38(int? i)
+    {
+        i ??= 0;
+        return i.Value; // GOOD
+    }
+
+    System.Drawing.Color Ex39(System.Drawing.Color? color)
+    {
+        color ??= System.Drawing.Color.White;
+        return color.Value; // GOOD
+    }
+
+    int Ex40()
+    {
+        int? i = null;
+        i ??= null;
+        return i.Value; // BAD (always)
+    }
+
+    int Ex41()
+    {
+        int? i = 1;
+        i ??= null;
+        return i.Value; // GOOD
+    }
 }
 
 public static class Extensions
@@ -384,4 +419,4 @@ public static class Extensions
     public static int M2(this string s) => s.Length;
 }
 
-// semmle-extractor-options: /r:System.Linq.dll
+// semmle-extractor-options: /r:System.Linq.dll /r:System.Drawing.Primitives.dll

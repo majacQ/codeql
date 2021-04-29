@@ -1,10 +1,27 @@
+/**
+ * Provides classes for modeling namespaces, `using` directives and `using` declarations.
+ */
+
 import semmle.code.cpp.Element
 import semmle.code.cpp.Type
 import semmle.code.cpp.metrics.MetricNamespace
 
 /**
- * A C++ namespace.
+ * A C++ namespace. For example the (single) namespace `A` in the following
+ * code:
+ * ```
+ * namespace A
+ * {
+ *   // ...
+ * }
  *
+ * // ...
+ *
+ * namespace A
+ * {
+ *   // ...
+ * }
+ * ```
  * Note that namespaces are somewhat nebulous entities, as they do not in
  * general have a single well-defined location in the source code. The
  * related notion of a `NamespaceDeclarationEntry` is rather more concrete,
@@ -79,7 +96,10 @@ class Namespace extends NameQualifyingElement, @namespace {
   /** Gets the metric namespace. */
   MetricNamespace getMetrics() { result = this }
 
-  override string toString() { result = this.getQualifiedName() }
+  /** Gets a version of the `QualifiedName` that is more suitable for display purposes. */
+  string getFriendlyName() { result = this.getQualifiedName() }
+
+  final override string toString() { result = getFriendlyName() }
 
   /** Gets a declaration of (part of) this namespace. */
   NamespaceDeclarationEntry getADeclarationEntry() { result.getNamespace() = this }
@@ -89,10 +109,22 @@ class Namespace extends NameQualifyingElement, @namespace {
 }
 
 /**
- * A declaration of (part of) a C++ namespace.
+ * A declaration of (part of) a C++ namespace. This corresponds to a single
+ * `namespace N { ... }` occurrence in the source code. For example the two
+ * mentions of `A` in the following code:
+ * ```
+ * namespace A
+ * {
+ *   // ...
+ * }
  *
- * This corresponds to a single `namespace N { ... }` occurrence in the
- * source code.
+ * // ...
+ *
+ * namespace A
+ * {
+ *   // ...
+ * }
+ * ```
  */
 class NamespaceDeclarationEntry extends Locatable, @namespace_decl {
   /**
@@ -104,7 +136,7 @@ class NamespaceDeclarationEntry extends Locatable, @namespace_decl {
     namespace_decls(underlyingElement(this), unresolveElement(result), _, _)
   }
 
-  override string toString() { result = this.getNamespace().toString() }
+  override string toString() { result = this.getNamespace().getFriendlyName() }
 
   /**
    * Gets the location of the token preceding the namespace declaration
@@ -124,20 +156,21 @@ class NamespaceDeclarationEntry extends Locatable, @namespace_decl {
    */
   Location getBodyLocation() { namespace_decls(underlyingElement(this), _, _, result) }
 
-  override string getCanonicalQLClass() { result = "NamespaceDeclarationEntry" }
+  override string getAPrimaryQlClass() { result = "NamespaceDeclarationEntry" }
 }
 
 /**
  * A C++ `using` directive or `using` declaration.
  */
-abstract class UsingEntry extends Locatable, @using {
+class UsingEntry extends Locatable, @using {
   override Location getLocation() { usings(underlyingElement(this), _, result) }
 }
 
 /**
  * A C++ `using` declaration. For example:
- *
- *   `using std::string;`
+ * ```
+ * using std::string;
+ * ```
  */
 class UsingDeclarationEntry extends UsingEntry {
   UsingDeclarationEntry() {
@@ -150,13 +183,14 @@ class UsingDeclarationEntry extends UsingEntry {
    */
   Declaration getDeclaration() { usings(underlyingElement(this), unresolveElement(result), _) }
 
-  override string toString() { result = "using " + this.getDeclaration().toString() }
+  override string toString() { result = "using " + this.getDeclaration().getDescription() }
 }
 
 /**
  * A C++ `using` directive. For example:
- *
- *   `using namespace std;`
+ * ```
+ * using namespace std;
+ * ```
  */
 class UsingDirectiveEntry extends UsingEntry {
   UsingDirectiveEntry() {
@@ -169,7 +203,7 @@ class UsingDirectiveEntry extends UsingEntry {
    */
   Namespace getNamespace() { usings(underlyingElement(this), unresolveElement(result), _) }
 
-  override string toString() { result = "using namespace " + this.getNamespace().toString() }
+  override string toString() { result = "using namespace " + this.getNamespace().getFriendlyName() }
 }
 
 /**
@@ -204,7 +238,7 @@ class GlobalNamespace extends Namespace {
    */
   deprecated string getFullName() { result = this.getName() }
 
-  override string toString() { result = "(global namespace)" }
+  override string getFriendlyName() { result = "(global namespace)" }
 }
 
 /**

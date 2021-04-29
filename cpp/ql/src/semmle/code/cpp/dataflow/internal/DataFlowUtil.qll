@@ -6,6 +6,7 @@ private import cpp
 private import semmle.code.cpp.dataflow.internal.FlowVar
 private import semmle.code.cpp.models.interfaces.DataFlow
 private import semmle.code.cpp.controlflow.Guards
+private import semmle.code.cpp.dataflow.internal.AddressFlow
 
 cached
 private newtype TNode =
@@ -20,10 +21,12 @@ private newtype TNode =
   TInstanceParameterNode(MemberFunction f) { exists(f.getBlock()) and not f.isStatic() } or
   TPreConstructorInitThis(ConstructorFieldInit cfi) or
   TPostConstructorInitThis(ConstructorFieldInit cfi) or
-  TThisArgumentPostUpdate(ThisExpr ta) {
-    exists(Call c, int i |
-      ta = c.getArgument(i) and
-      not c.getTarget().getParameter(i).getUnderlyingType().(PointerType).getBaseType().isConst()
+  TInnerPartialDefinitionNode(Expr e) {
+    exists(PartialDefinition def, Expr outer |
+      def.definesExpressions(e, outer) and
+      // This condition ensures that we don't get two post-update nodes sharing
+      // the same pre-update node.
+      e != outer
     )
   } or
   TUninitializedNode(LocalVariable v) { not v.hasInitializer() } or
@@ -43,18 +46,30 @@ class Node extends TNode {
   /**
    * INTERNAL: Do not use. Alternative name for `getFunction`.
    */
-  Function getEnclosingCallable() { result = this.getFunction() }
+  final Function getEnclosingCallable() { result = unique(Function f | f = this.getFunction() | f) }
 
   /** Gets the type of this node. */
   Type getType() { none() } // overridden in subclasses
 
-  /** Gets the expression corresponding to this node, if any. */
+  /**
+   * Gets the expression corresponding to this node, if any. This predicate
+   * only has a result on nodes that represent the value of evaluating the
+   * expression. For data flowing _out of_ an expression, like when an
+   * argument is passed by reference, use `asDefiningArgument` instead of
+   * `asExpr`.
+   */
   Expr asExpr() { result = this.(ExprNode).getExpr() }
 
   /** Gets the parameter corresponding to this node, if any. */
   Parameter asParameter() { result = this.(ExplicitParameterNode).getParameter() }
 
-  /** Gets the argument that defines this `DefinitionByReferenceNode`, if any. */
+  /**
+   * Gets the argument that defines this `DefinitionByReferenceNode`, if any.
+   * This predicate should be used instead of `asExpr` when referring to the
+   * value of a reference argument _after_ the call has returned. For example,
+   * in `f(&x)`, this predicate will have `&x` as its result for the `Node`
+   * that represents the new value of `x`.
+   */
   Expr asDefiningArgument() { result = this.(DefinitionByReferenceNode).getArgument() }
 
   /**
@@ -66,7 +81,7 @@ class Node extends TNode {
    * a partial definition of `&x`).
    */
   Expr asPartialDefinition() {
-    result = this.(PartialDefinitionNode).getPartialDefinition().getDefinedExpr()
+    this.(PartialDefinitionNode).getPartialDefinition().definesExpressions(_, result)
   }
 
   /**
@@ -114,31 +129,10 @@ class ExprNode extends Node, TExprNode {
 
   override string toString() { result = expr.toString() }
 
-  override Location getLocation() {
-    result = getExprLocationOverride(expr)
-    or
-    not exists(getExprLocationOverride(expr)) and
-    result = expr.getLocation()
-  }
+  override Location getLocation() { result = expr.getLocation() }
 
   /** Gets the expression corresponding to this node. */
   Expr getExpr() { result = expr }
-}
-
-/**
- * Gets a location for `e` that's more accurate than `e.getLocation()`, if any.
- */
-private Location getExprLocationOverride(Expr e) {
-  // Base case: the parent has a better location than `e`.
-  e.getLocation() instanceof UnknownExprLocation and
-  result = e.getParent().getLocation() and
-  not result instanceof UnknownLocation
-  or
-  // Recursive case: the parent has a location override that's better than what
-  // `e` has.
-  e.getLocation() instanceof UnknownExprLocation and
-  result = getExprLocationOverride(e.getParent()) and
-  not result instanceof UnknownLocation
 }
 
 abstract class ParameterNode extends Node, TNode {
@@ -189,33 +183,32 @@ class ImplicitParameterNode extends ParameterNode, TInstanceParameterNode {
 }
 
 /**
- * A node that represents the value of a variable after a function call that
- * may have changed the variable because it's passed by reference.
+ * INTERNAL: do not use.
  *
- * A typical example would be a call `f(&x)`. Firstly, there will be flow into
- * `x` from previous definitions of `x`. Secondly, there will be a
- * `DefinitionByReferenceNode` to represent the value of `x` after the call has
- * returned. This node will have its `getArgument()` equal to `&x`.
+ * A node that represents the value of a variable after a function call that
+ * may have changed the variable because it's passed by reference or because an
+ * iterator for it was passed by value or by reference.
  */
-class DefinitionByReferenceNode extends PartialDefinitionNode {
-  VariableAccess va;
+class DefinitionByReferenceOrIteratorNode extends PartialDefinitionNode {
+  Expr inner;
   Expr argument;
 
-  DefinitionByReferenceNode() {
-    exists(DefinitionByReference def |
-      def = this.getPartialDefinition() and
-      argument = def.getDefinedExpr() and
-      va = def.getVariableAccess()
+  DefinitionByReferenceOrIteratorNode() {
+    this.getPartialDefinition().definesExpressions(inner, argument) and
+    (
+      this.getPartialDefinition() instanceof DefinitionByReference
+      or
+      this.getPartialDefinition() instanceof DefinitionByIterator
     )
   }
 
-  override Function getFunction() { result = va.getEnclosingFunction() }
+  override Function getFunction() { result = inner.getEnclosingFunction() }
 
-  override Type getType() { result = va.getType() }
-
-  override string toString() { result = "ref arg " + argument.toString() }
+  override Type getType() { result = inner.getType() }
 
   override Location getLocation() { result = argument.getLocation() }
+
+  override ExprNode getPreUpdateNode() { result.getExpr() = argument }
 
   /** Gets the argument corresponding to this node. */
   Expr getArgument() { result = argument }
@@ -227,6 +220,21 @@ class DefinitionByReferenceNode extends PartialDefinitionNode {
       result = call.getTarget().getParameter(i)
     )
   }
+}
+
+/**
+ * A node that represents the value of a variable after a function call that
+ * may have changed the variable because it's passed by reference.
+ *
+ * A typical example would be a call `f(&x)`. Firstly, there will be flow into
+ * `x` from previous definitions of `x`. Secondly, there will be a
+ * `DefinitionByReferenceNode` to represent the value of `x` after the call has
+ * returned. This node will have its `getArgument()` equal to `&x`.
+ */
+class DefinitionByReferenceNode extends DefinitionByReferenceOrIteratorNode {
+  override VariablePartialDefinition pd;
+
+  override string toString() { result = "ref arg " + argument.toString() }
 }
 
 /**
@@ -292,28 +300,53 @@ abstract class PostUpdateNode extends Node {
   override Location getLocation() { result = getPreUpdateNode().getLocation() }
 }
 
-private class PartialDefinitionNode extends PostUpdateNode, TPartialDefinitionNode {
+abstract private class PartialDefinitionNode extends PostUpdateNode, TPartialDefinitionNode {
   PartialDefinition pd;
 
   PartialDefinitionNode() { this = TPartialDefinitionNode(pd) }
 
-  override Node getPreUpdateNode() { result.asExpr() = pd.getDefinedExpr() }
-
-  override Location getLocation() { result = pd.getLocation() }
+  override Location getLocation() { result = pd.getActualLocation() }
 
   PartialDefinition getPartialDefinition() { result = pd }
 
   override string toString() { result = getPreUpdateNode().toString() + " [post update]" }
 }
 
-private class ThisArgumentPostUpdateNode extends PostUpdateNode, TThisArgumentPostUpdate {
-  ThisExpr thisExpr;
+private class VariablePartialDefinitionNode extends PartialDefinitionNode {
+  override VariablePartialDefinition pd;
 
-  ThisArgumentPostUpdateNode() { this = TThisArgumentPostUpdate(thisExpr) }
+  override Node getPreUpdateNode() { pd.definesExpressions(_, result.asExpr()) }
+}
 
-  override Node getPreUpdateNode() { result.asExpr() = thisExpr }
+/**
+ * INTERNAL: do not use.
+ *
+ * A synthetic data flow node used for flow into a collection when an iterator
+ * write occurs in a callee.
+ */
+class IteratorPartialDefinitionNode extends PartialDefinitionNode {
+  override IteratorPartialDefinition pd;
 
-  override string toString() { result = "ref arg this" }
+  override Node getPreUpdateNode() { pd.definesExpressions(_, result.asExpr()) }
+}
+
+/**
+ * A post-update node on the `e->f` in `f(&e->f)` (and other forms).
+ */
+private class InnerPartialDefinitionNode extends TInnerPartialDefinitionNode, PostUpdateNode {
+  Expr e;
+
+  InnerPartialDefinitionNode() { this = TInnerPartialDefinitionNode(e) }
+
+  override ExprNode getPreUpdateNode() { result.getExpr() = e }
+
+  override Function getFunction() { result = e.getEnclosingFunction() }
+
+  override Type getType() { result = e.getType() }
+
+  override string toString() { result = e.toString() + " [inner post update]" }
+
+  override Location getLocation() { result = e.getLocation() }
 }
 
 /**
@@ -395,7 +428,9 @@ class PreConstructorInitThis extends Node, TPreConstructorInitThis {
 }
 
 /**
- * Gets the `Node` corresponding to `e`.
+ * Gets the `Node` corresponding to the value of evaluating `e`. For data
+ * flowing _out of_ an expression, like when an argument is passed by
+ * reference, use `definitionByReferenceNodeFromArgument` instead.
  */
 ExprNode exprNode(Expr e) { result.getExpr() = e }
 
@@ -496,7 +531,16 @@ predicate simpleLocalFlowStep(Node nodeFrom, Node nodeTo) {
   // Expr -> Expr
   exprToExprStep_nocfg(nodeFrom.asExpr(), nodeTo.asExpr())
   or
-  exprToExprStep_nocfg(nodeFrom.(PostUpdateNode).getPreUpdateNode().asExpr(), nodeTo.asExpr())
+  // Assignment -> LValue post-update node
+  //
+  // This is used for assignments whose left-hand side is not a variable
+  // assignment or a storeStep but is still modeled by other means. It could be
+  // a call to `operator*` or `operator[]` where taint should flow to the
+  // post-update node of the qualifier.
+  exists(AssignExpr assign |
+    nodeFrom.asExpr() = assign and
+    nodeTo.(PostUpdateNode).getPreUpdateNode().asExpr() = assign.getLValue()
+  )
   or
   // Node -> FlowVar -> VariableAccess
   exists(FlowVar var |
@@ -520,6 +564,27 @@ predicate simpleLocalFlowStep(Node nodeFrom, Node nodeTo) {
   or
   // post-update-`this` -> following-`this`-ref
   ThisFlow::adjacentThisRefs(nodeFrom.(PostUpdateNode).getPreUpdateNode(), nodeTo)
+  or
+  // In `f(&x->a)`, this step provides the flow from post-`&` to post-`x->a`,
+  // from which there is field flow to `x` via reverse read.
+  exists(PartialDefinition def, Expr inner, Expr outer |
+    def.definesExpressions(inner, outer) and
+    inner = nodeTo.(InnerPartialDefinitionNode).getPreUpdateNode().asExpr() and
+    outer = nodeFrom.(PartialDefinitionNode).getPreUpdateNode().asExpr()
+  )
+  or
+  // Reverse flow: data that flows from the post-update node of a reference
+  // returned by a function call, back into the qualifier of that function.
+  // This allows data to flow 'in' through references returned by a modeled
+  // function such as `operator[]`.
+  exists(DataFlowFunction f, Call call, FunctionInput inModel, FunctionOutput outModel |
+    call.getTarget() = f and
+    inModel.isReturnValueDeref() and
+    outModel.isQualifierObject() and
+    f.hasDataFlow(inModel, outModel) and
+    nodeFrom.(PostUpdateNode).getPreUpdateNode().asExpr() = call and
+    nodeTo.asDefiningArgument() = call.getQualifier()
+  )
 }
 
 /**
@@ -578,6 +643,15 @@ private predicate exprToExprStep_nocfg(Expr fromExpr, Expr toExpr) {
   or
   toExpr.(AddressOfExpr).getOperand() = fromExpr
   or
+  // This rule enables flow from an array to its elements. Example: `a` to
+  // `a[i]` or `*a`, where `a` is an array type. It does not enable flow from a
+  // pointer to its indirection as in `p[i]` where `p` is a pointer type.
+  exists(Expr toConverted |
+    variablePartiallyAccessed(fromExpr, toConverted) and
+    toExpr = toConverted.getUnconverted() and
+    not toExpr = fromExpr
+  )
+  or
   toExpr.(BuiltInOperationBuiltInAddressOf).getOperand() = fromExpr
   or
   // The following case is needed to track the qualifier object for flow
@@ -597,14 +671,30 @@ private predicate exprToExprStep_nocfg(Expr fromExpr, Expr toExpr) {
   // `ClassAggregateLiteral` (`{ capture1, ..., captureN }`).
   toExpr.(LambdaExpression).getInitializer() = fromExpr
   or
+  // Data flow through a function model.
   toExpr =
     any(Call call |
-      exists(DataFlowFunction f, FunctionInput inModel, FunctionOutput outModel, int iIn |
-        call.getTarget() = f and
+      exists(DataFlowFunction f, FunctionInput inModel, FunctionOutput outModel |
         f.hasDataFlow(inModel, outModel) and
-        outModel.isReturnValue() and
-        inModel.isParameter(iIn) and
-        fromExpr = call.getArgument(iIn)
+        (
+          exists(int iIn |
+            inModel.isParameterDeref(iIn) and
+            call.passesByReference(iIn, fromExpr)
+          )
+          or
+          exists(int iIn |
+            inModel.isParameter(iIn) and
+            fromExpr = call.getArgument(iIn)
+          )
+          or
+          inModel.isQualifierObject() and
+          fromExpr = call.getQualifier()
+          or
+          inModel.isQualifierAddress() and
+          fromExpr = call.getQualifier()
+        ) and
+        call.getTarget() = f and
+        outModel.isReturnValue()
       )
     )
 }
@@ -657,7 +747,7 @@ private module FieldFlow {
     exists(FieldConfiguration cfg | cfg.hasFlow(node1, node2)) and
     // This configuration should not be able to cross function boundaries, but
     // we double-check here just to be sure.
-    node1.getFunction() = node2.getFunction()
+    node1.getEnclosingCallable() = node2.getEnclosingCallable()
   }
 }
 

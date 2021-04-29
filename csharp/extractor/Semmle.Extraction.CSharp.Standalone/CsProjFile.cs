@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml;
@@ -8,28 +9,43 @@ namespace Semmle.BuildAnalyser
     /// <summary>
     /// Represents a .csproj file and reads information from it.
     /// </summary>
-    class CsProjFile
+    internal class CsProjFile
     {
+        private string Filename { get; }
+
+        private string Directory { get; }
+
         /// <summary>
         /// Reads the .csproj file.
         /// </summary>
         /// <param name="filename">The .csproj file.</param>
         public CsProjFile(FileInfo filename)
         {
+            Filename = filename.FullName;
+
+            var directoryName = Path.GetDirectoryName(Filename);
+
+            if (directoryName is null)
+            {
+                throw new Extraction.InternalError($"Directory of file '{Filename}' is null");
+            }
+
+            Directory = directoryName;
+
             try
             {
                 // This can fail if the .csproj is invalid or has
                 // unrecognised content or is the wrong version.
                 // This currently always fails on Linux because
                 // Microsoft.Build is not cross platform.
-                ReadMsBuildProject(filename);
+                (csFiles, references) = ReadMsBuildProject(filename);
             }
             catch  // lgtm[cs/catch-of-all-exceptions]
             {
                 // There was some reason why the project couldn't be loaded.
                 // Fall back to reading the Xml document directly.
                 // This method however doesn't handle variable expansion.
-                ReadProjectFileAsXml(filename);
+                (csFiles, references) = ReadProjectFileAsXml(filename, Directory);
             }
         }
 
@@ -39,21 +55,22 @@ namespace Semmle.BuildAnalyser
         /// and there seems to be no way to make it succeed. Fails on Linux.
         /// </summary>
         /// <param name="filename">The file to read.</param>
-        public void ReadMsBuildProject(FileInfo filename)
+        private static (string[] csFiles, string[] references) ReadMsBuildProject(FileInfo filename)
         {
             var msbuildProject = new Microsoft.Build.Execution.ProjectInstance(filename.FullName);
 
-            references = msbuildProject.
-                Items.
-                Where(item => item.ItemType == "Reference").
-                Select(item => item.EvaluatedInclude).
-                ToArray();
+            var references = msbuildProject.Items
+                .Where(item => item.ItemType == "Reference")
+                .Select(item => item.EvaluatedInclude)
+                .ToArray();
 
-            csFiles = msbuildProject.Items
+            var csFiles = msbuildProject.Items
                 .Where(item => item.ItemType == "Compile")
                 .Select(item => item.GetMetadataValue("FullPath"))
                 .Where(fn => fn.EndsWith(".cs"))
                 .ToArray();
+
+            return (csFiles, references);
         }
 
         /// <summary>
@@ -61,36 +78,79 @@ namespace Semmle.BuildAnalyser
         /// This doesn't handle variables etc, and should only used as a
         /// fallback if ReadMsBuildProject() fails.
         /// </summary>
-        /// <param name="filename">The .csproj file.</param>
-        public void ReadProjectFileAsXml(FileInfo filename)
+        /// <param name="fileName">The .csproj file.</param>
+        private static (string[] csFiles, string[] references) ReadProjectFileAsXml(FileInfo fileName, string directoryName)
         {
             var projFile = new XmlDocument();
             var mgr = new XmlNamespaceManager(projFile.NameTable);
             mgr.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003");
-            projFile.Load(filename.FullName);
-            var projDir = filename.Directory;
+            projFile.Load(fileName.FullName);
+            var projDir = fileName.Directory;
             var root = projFile.DocumentElement;
 
-            references =
-                root.SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Reference/@Include", mgr).
-                NodeList().
-                Select(node => node.Value).
-                ToArray();
+            if (root is null)
+            {
+                throw new NotSupportedException("Project file without root is not supported.");
+            }
 
-            var relativeCsIncludes =
-                root.SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Compile/@Include", mgr).
-                NodeList().
-                Select(node => node.Value).
-                ToArray();
+            // Figure out if it's dotnet core
 
-            csFiles = relativeCsIncludes.
-                Select(cs => Path.DirectorySeparatorChar == '/' ? cs.Replace("\\", "/") : cs).
-                Select(f => Path.GetFullPath(Path.Combine(projDir.FullName, f))).
-                ToArray();
+            var netCoreProjectFile = root.GetAttribute("Sdk") == "Microsoft.NET.Sdk";
+
+            if (netCoreProjectFile)
+            {
+                var explicitCsFiles = root
+                    .SelectNodes("/Project/ItemGroup/Compile/@Include", mgr)
+                    ?.NodeList()
+                    .Select(node => node.Value)
+                    .Select(cs => GetFullPath(cs, projDir))
+                    .Where(s => s is not null)
+                    ?? Enumerable.Empty<string>();
+
+                var additionalCsFiles = System.IO.Directory.GetFiles(directoryName, "*.cs", SearchOption.AllDirectories);
+
+#nullable disable warnings
+                return (explicitCsFiles.Concat(additionalCsFiles).ToArray(), Array.Empty<string>());
+#nullable restore warnings
+            }
+
+            var references = root
+                .SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Reference/@Include", mgr)
+                ?.NodeList()
+                .Select(node => node.Value)
+                .Where(s => s is not null)
+                .ToArray()
+                ?? Array.Empty<string>();
+
+            var relativeCsIncludes = root
+                .SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Compile/@Include", mgr)
+                ?.NodeList()
+                .Select(node => node.Value)
+                .ToArray()
+                ?? Array.Empty<string>();
+
+            var csFiles = relativeCsIncludes
+                .Select(cs => GetFullPath(cs, projDir))
+                .Where(s => s is not null)
+                .ToArray();
+
+#nullable disable warnings
+            return (csFiles, references);
+#nullable restore warnings
         }
 
-        string[] references;
-        string[] csFiles;
+        private static string? GetFullPath(string? file, DirectoryInfo? projDir)
+        {
+            if (file is null)
+            {
+                return null;
+            }
+
+            return Path.GetFullPath(Path.Combine(projDir?.FullName ?? string.Empty, Path.DirectorySeparatorChar == '/' ? file.Replace("\\", "/") : file));
+        }
+
+        private readonly string[] references;
+        private readonly string[] csFiles;
 
         /// <summary>
         /// The list of references as a list of assembly IDs.
@@ -103,7 +163,7 @@ namespace Semmle.BuildAnalyser
         public IEnumerable<string> Sources => csFiles;
     }
 
-    static class XmlNodeHelper
+    internal static class XmlNodeHelper
     {
         /// <summary>
         /// Helper to convert an XmlNodeList into an IEnumerable.
@@ -113,8 +173,7 @@ namespace Semmle.BuildAnalyser
         /// <returns>A more useful data type.</returns>
         public static IEnumerable<XmlNode> NodeList(this XmlNodeList list)
         {
-            foreach (var i in list)
-                yield return i as XmlNode;
+            return list.OfType<XmlNode>();
         }
     }
 }

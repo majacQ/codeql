@@ -115,18 +115,28 @@ module Closure {
     override DefaultClosureModuleDeclaration range;
   }
 
+  private GlobalVariable googVariable() { variables(result, "goog", any(GlobalScope sc)) }
+
+  pragma[nomagic]
+  private MethodCallExpr googModuleDeclExpr() {
+    result.getReceiver() = googVariable().getAnAccess() and
+    result.getMethodName() = ["module", "declareModuleId"]
+  }
+
+  pragma[nomagic]
+  private MethodCallExpr googModuleDeclExprInContainer(StmtContainer container) {
+    result = googModuleDeclExpr() and
+    container = result.getContainer()
+  }
+
+  pragma[noinline]
+  private ClosureRequireCall getARequireInTopLevel(ClosureModule m) { result.getTopLevel() = m }
+
   /**
    * A module using the Closure module system, declared using `goog.module()` or `goog.declareModuleId()`.
    */
   class ClosureModule extends Module {
-    ClosureModule() {
-      // Use AST-based predicate to cut recursive dependencies.
-      exists(MethodCallExpr call |
-        getAStmt().(ExprStmt).getExpr() = call and
-        call.getReceiver().(GlobalVarAccess).getName() = "goog" and
-        (call.getMethodName() = "module" or call.getMethodName() = "declareModuleId")
-      )
-    }
+    ClosureModule() { exists(googModuleDeclExprInContainer(this)) }
 
     /**
      * Gets the call to `goog.module` or `goog.declareModuleId` in this module.
@@ -139,10 +149,8 @@ module Closure {
     string getClosureNamespace() { result = getModuleDeclaration().getClosureNamespace() }
 
     override Module getAnImportedModule() {
-      exists(ClosureRequireCall imprt |
-        imprt.getTopLevel() = this and
-        result.(ClosureModule).getClosureNamespace() = imprt.getClosureNamespace()
-      )
+      result.(ClosureModule).getClosureNamespace() =
+        getARequireInTopLevel(this).getClosureNamespace()
     }
 
     /**
@@ -158,9 +166,9 @@ module Closure {
       result = getScope().getVariable("exports")
     }
 
-    override predicate exports(string name, ASTNode export) {
+    override DataFlow::Node getAnExportedValue(string name) {
       exists(DataFlow::PropWrite write, Expr base |
-        write.getAstNode() = export and
+        result = write.getRhs() and
         write.writes(base.flow(), name, _) and
         (
           base = getExportsVariable().getAReference()

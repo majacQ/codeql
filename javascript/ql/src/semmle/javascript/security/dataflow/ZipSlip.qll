@@ -12,18 +12,41 @@ import javascript
 module ZipSlip {
   import ZipSlipCustomizations::ZipSlip
 
+  // Materialize flow labels
+  private class ConcretePosixPath extends TaintedPath::Label::PosixPath {
+    ConcretePosixPath() { this = this }
+  }
+
+  private class ConcreteSplitPath extends TaintedPath::Label::SplitPath {
+    ConcreteSplitPath() { this = this }
+  }
+
   /** A taint tracking configuration for unsafe archive extraction. */
-  class Configuration extends TaintTracking::Configuration {
+  class Configuration extends DataFlow::Configuration {
     Configuration() { this = "ZipSlip" }
 
-    override predicate isSource(DataFlow::Node source) { source instanceof Source }
+    override predicate isSource(DataFlow::Node source, DataFlow::FlowLabel label) {
+      label = source.(Source).getAFlowLabel()
+    }
 
-    override predicate isSink(DataFlow::Node sink) { sink instanceof Sink }
+    override predicate isSink(DataFlow::Node sink, DataFlow::FlowLabel label) {
+      label = sink.(Sink).getAFlowLabel()
+    }
 
-    override predicate isSanitizer(DataFlow::Node sanitizer) { sanitizer instanceof Sanitizer }
+    override predicate isBarrier(DataFlow::Node node) {
+      super.isBarrier(node) or
+      node instanceof TaintedPath::Sanitizer
+    }
 
-    override predicate isSanitizerGuard(TaintTracking::SanitizerGuardNode nd) {
-      nd instanceof SanitizerGuard
+    override predicate isBarrierGuard(DataFlow::BarrierGuardNode guard) {
+      guard instanceof TaintedPath::BarrierGuardNode
+    }
+
+    override predicate isAdditionalFlowStep(
+      DataFlow::Node src, DataFlow::Node dst, DataFlow::FlowLabel srclabel,
+      DataFlow::FlowLabel dstlabel
+    ) {
+      TaintedPath::isAdditionalTaintedPathFlowStep(src, dst, srclabel, dstlabel)
     }
   }
 }

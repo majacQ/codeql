@@ -5,6 +5,8 @@
 import cpp
 private import semmle.code.cpp.controlflow.SSA
 private import semmle.code.cpp.dataflow.internal.SubBasicBlocks
+private import semmle.code.cpp.dataflow.internal.AddressFlow
+private import semmle.code.cpp.models.implementations.Iterator
 
 /**
  * A conceptual variable that is assigned only once, like an SSA variable. This
@@ -56,15 +58,9 @@ class FlowVar extends TFlowVar {
   abstract predicate definedByExpr(Expr e, ControlFlowNode node);
 
   /**
-   * Holds if this `FlowVar` corresponds to the data written by a call that
-   * passes a variable as argument `arg`.
-   */
-  cached
-  abstract predicate definedByReference(Expr arg);
-
-  /**
-   * Holds if this `FlowVar` is a `PartialDefinition` whose defined expression
-   * is `e`.
+   * Holds if this `FlowVar` is a `PartialDefinition` whose outer defined
+   * expression is `e`. For example, in `f(&x)`, the outer defined expression
+   * is `&x`.
    */
   cached
   abstract predicate definedPartiallyAt(Expr e);
@@ -113,44 +109,12 @@ class FlowVar extends TFlowVar {
  * ```
  */
 private module PartialDefinitions {
-  private newtype TPartialDefinition =
-    TExplicitFieldStoreQualifier(Expr qualifier, ControlFlowNode node) {
-      exists(FieldAccess fa | qualifier = fa.getQualifier() |
-        isInstanceFieldWrite(fa, node)
-        or
-        exists(PartialDefinition pd |
-          node = pd.getSubBasicBlockStart() and
-          fa = pd.getDefinedExpr()
-        )
-      )
-    } or
-    TExplicitCallQualifier(Expr qualifier) {
-      exists(Call call |
-        qualifier = call.getQualifier() and
-        not call.getTarget().hasSpecifier("const")
-      )
-    } or
-    TReferenceArgument(Expr arg, VariableAccess va) { referenceArgument(va, arg) }
-
-  private predicate isInstanceFieldWrite(FieldAccess fa, ControlFlowNode node) {
-    assignmentLikeOperation(node, _, fa, _)
-  }
-
-  class PartialDefinition extends TPartialDefinition {
-    Expr definedExpr;
+  abstract class PartialDefinition extends Expr {
     ControlFlowNode node;
 
-    PartialDefinition() {
-      this = TExplicitFieldStoreQualifier(definedExpr, node)
-      or
-      this = TExplicitCallQualifier(definedExpr) and node = definedExpr
-      or
-      this = TReferenceArgument(definedExpr, node)
-    }
+    abstract deprecated predicate partiallyDefines(Variable v);
 
-    predicate partiallyDefines(Variable v) { definedExpr = v.getAnAccess() }
-
-    predicate partiallyDefinesThis(ThisExpr e) { definedExpr = e }
+    abstract deprecated predicate partiallyDefinesThis(ThisExpr e);
 
     /**
      * Gets the subBasicBlock where this `PartialDefinition` is defined.
@@ -158,69 +122,139 @@ private module PartialDefinitions {
     ControlFlowNode getSubBasicBlockStart() { result = node }
 
     /**
-     * Gets the expression that is being partially defined. For example in the
-     * following code:
-     * ```
-     * x.y = 1;
-     * ```
-     * The expression `x` is being partially defined.
+     * Holds if this `PartialDefinition` defines variable `v` at control-flow
+     * node `cfn`.
      */
-    Expr getDefinedExpr() { result = definedExpr }
+    // does this work with a dispred?
+    pragma[noinline]
+    abstract predicate partiallyDefinesVariableAt(Variable v, ControlFlowNode cfn);
 
-    Location getLocation() {
-      not exists(definedExpr.getLocation()) and result = definedExpr.getParent().getLocation()
+    /**
+     * Holds if this partial definition may modify `inner` (or what it points
+     * to) through `outer`. These expressions will never be `Conversion`s.
+     *
+     * For example, in `f(& (*a).x)`, there are two results:
+     * - `inner` = `... .x`, `outer` = `&...`
+     * - `inner` = `a`, `outer` = `*`
+     */
+    abstract predicate definesExpressions(Expr inner, Expr outer);
+
+    /**
+     * Gets the location of this element, adjusted to avoid unknown locations
+     * on compiler-generated `ThisExpr`s.
+     */
+    Location getActualLocation() {
+      not exists(this.getLocation()) and result = this.getParent().getLocation()
       or
-      definedExpr.getLocation() instanceof UnknownLocation and
-      result = definedExpr.getParent().getLocation()
+      this.getLocation() instanceof UnknownLocation and
+      result = this.getParent().getLocation()
       or
-      result = definedExpr.getLocation() and not result instanceof UnknownLocation
+      result = this.getLocation() and not result instanceof UnknownLocation
+    }
+  }
+
+  class IteratorPartialDefinition extends PartialDefinition {
+    Variable collection;
+    Expr innerDefinedExpr;
+
+    IteratorPartialDefinition() {
+      exists(Expr convertedInner |
+        not this instanceof Conversion and
+        valueToUpdate(convertedInner, this.getFullyConverted(), node) and
+        innerDefinedExpr = convertedInner.getUnconverted() and
+        (
+          innerDefinedExpr.(Call).getQualifier() = getAnIteratorAccess(collection)
+          or
+          innerDefinedExpr.(Call).getQualifier() = collection.getAnAccess() and
+          collection instanceof IteratorParameter
+        ) and
+        innerDefinedExpr.(Call).getTarget() instanceof IteratorPointerDereferenceMemberOperator
+      )
+      or
+      // iterators passed by value without a copy constructor
+      exists(Call call |
+        call = node and
+        call.getAnArgument() = innerDefinedExpr and
+        innerDefinedExpr = this and
+        this = getAnIteratorAccess(collection) and
+        not call.getTarget() instanceof IteratorPointerDereferenceMemberOperator
+      )
+      or
+      // iterators passed by value with a copy constructor
+      exists(Call call, ConstructorCall copy |
+        copy.getTarget() instanceof CopyConstructor and
+        call = node and
+        call.getAnArgument() = copy and
+        copy.getArgument(0) = getAnIteratorAccess(collection) and
+        innerDefinedExpr = this and
+        this = copy and
+        not call.getTarget() instanceof IteratorPointerDereferenceMemberOperator
+      )
     }
 
-    string toString() { result = "partial def of " + definedExpr }
+    deprecated override predicate partiallyDefines(Variable v) { v = collection }
+
+    deprecated override predicate partiallyDefinesThis(ThisExpr e) { none() }
+
+    override predicate definesExpressions(Expr inner, Expr outer) {
+      inner = innerDefinedExpr and
+      outer = this
+    }
+
+    override predicate partiallyDefinesVariableAt(Variable v, ControlFlowNode cfn) {
+      v = collection and
+      cfn = node
+    }
+  }
+
+  class VariablePartialDefinition extends PartialDefinition {
+    Expr innerDefinedExpr;
+
+    VariablePartialDefinition() {
+      not this instanceof Conversion and
+      exists(Expr convertedInner |
+        valueToUpdate(convertedInner, this.getFullyConverted(), node) and
+        innerDefinedExpr = convertedInner.getUnconverted()
+      )
+    }
+
+    deprecated override predicate partiallyDefines(Variable v) {
+      innerDefinedExpr = v.getAnAccess()
+    }
+
+    deprecated override predicate partiallyDefinesThis(ThisExpr e) { innerDefinedExpr = e }
+
+    /**
+     * Holds if this partial definition may modify `inner` (or what it points
+     * to) through `outer`. These expressions will never be `Conversion`s.
+     *
+     * For example, in `f(& (*a).x)`, there are two results:
+     * - `inner` = `... .x`, `outer` = `&...`
+     * - `inner` = `a`, `outer` = `*`
+     */
+    override predicate definesExpressions(Expr inner, Expr outer) {
+      inner = innerDefinedExpr and
+      outer = this
+    }
+
+    override predicate partiallyDefinesVariableAt(Variable v, ControlFlowNode cfn) {
+      innerDefinedExpr = v.getAnAccess() and
+      cfn = node
+    }
+  }
+
+  /**
+   * A partial definition that's a definition via an output iterator.
+   */
+  class DefinitionByIterator extends IteratorPartialDefinition {
+    DefinitionByIterator() { exists(Call c | this = c.getAnArgument() or this = c.getQualifier()) }
   }
 
   /**
    * A partial definition that's a definition by reference.
    */
-  class DefinitionByReference extends PartialDefinition, TReferenceArgument {
-    VariableAccess va;
-
-    DefinitionByReference() {
-      // `this` is not restricted in this charpred. That's because the full
-      // extent of this class includes the charpred of the superclass, which
-      // relates `this` to `definedExpr`, and `va` is functionally determined
-      // by `definedExpr`.
-      referenceArgument(va, definedExpr)
-    }
-
-    VariableAccess getVariableAccess() { result = va }
-
-    override predicate partiallyDefines(Variable v) { va = v.getAnAccess() }
-  }
-
-  private predicate referenceArgument(VariableAccess va, Expr argument) {
-    argument = any(Call c).getAnArgument() and
-    exists(Type argumentType |
-      argumentType = argument.getFullyConverted().getType().stripTopLevelSpecifiers()
-    |
-      argumentType instanceof ReferenceType and
-      not argumentType.(ReferenceType).getBaseType().isConst() and
-      va = argument
-      or
-      argumentType instanceof PointerType and
-      not argumentType.(PointerType).getBaseType().isConst() and
-      (
-        // f(variable)
-        va = argument
-        or
-        // f(&variable)
-        va = argument.(AddressOfExpr).getOperand()
-        or
-        // f(&array[0])
-        va.getType().getUnspecifiedType() instanceof ArrayType and
-        va = argument.(AddressOfExpr).getOperand().(ArrayExpr).getArrayBase()
-      )
-    )
+  class DefinitionByReference extends VariablePartialDefinition {
+    DefinitionByReference() { exists(Call c | this = c.getAnArgument() or this = c.getQualifier()) }
   }
 }
 
@@ -248,7 +282,7 @@ module FlowVar_internal {
   predicate fullySupportedSsaVariable(Variable v) {
     v = any(SsaDefinition def).getAVariable() and
     // A partially-defined variable is handled using the partial definitions logic.
-    not any(PartialDefinition p).partiallyDefines(v) and
+    not any(PartialDefinition p).partiallyDefinesVariableAt(v, _) and
     // SSA variables do not exist before their first assignment, but one
     // feature of this data flow library is to track where uninitialized data
     // ends up.
@@ -261,7 +295,8 @@ module FlowVar_internal {
     // The SSA library has a theoretically accurate treatment of reference types,
     // treating them as immutable, but for data flow it gives better results in
     // practice to make the variable synonymous with its contents.
-    not v.getUnspecifiedType() instanceof ReferenceType
+    not v.getUnspecifiedType() instanceof ReferenceType and
+    not v instanceof IteratorParameter
   }
 
   /**
@@ -290,9 +325,9 @@ module FlowVar_internal {
       (
         initializer(v, sbb.getANode())
         or
-        assignmentLikeOperation(sbb, v, _, _)
+        assignmentLikeOperation(sbb, v, _)
         or
-        sbb = any(PartialDefinition p | p.partiallyDefines(v)).getSubBasicBlockStart()
+        exists(PartialDefinition p | p.partiallyDefinesVariableAt(v, sbb))
         or
         blockVarDefinedByVariable(sbb, v)
       )
@@ -335,10 +370,6 @@ module FlowVar_internal {
         then node = v.getInitializer()
         else node = def.getDefinition()
       )
-    }
-
-    override predicate definedByReference(Expr arg) {
-      none() // Not supported for SSA. See `fullySupportedSsaVariable`.
     }
 
     override predicate definedPartiallyAt(Expr e) { none() }
@@ -413,7 +444,7 @@ module FlowVar_internal {
     }
 
     override predicate definedByExpr(Expr e, ControlFlowNode node) {
-      assignmentLikeOperation(node, v, _, e) and
+      assignmentLikeOperation(node, v, e) and
       node = sbb
       or
       // We pick the defining `ControlFlowNode` of an `Initializer` to be its
@@ -425,19 +456,10 @@ module FlowVar_internal {
       node = sbb.getANode()
     }
 
-    override predicate definedByReference(Expr arg) {
-      exists(DefinitionByReference def |
-        def.partiallyDefines(v) and
-        sbb = def.getSubBasicBlockStart() and
-        arg = def.getDefinedExpr()
-      )
-    }
-
     override predicate definedPartiallyAt(Expr e) {
       exists(PartialDefinition p |
-        p.partiallyDefines(v) and
-        sbb = p.getSubBasicBlockStart() and
-        e = p.getDefinedExpr()
+        p.partiallyDefinesVariableAt(v, sbb) and
+        p.definesExpressions(_, e)
       )
     }
 
@@ -450,11 +472,6 @@ module FlowVar_internal {
       this.definedByInitialValue(_) and
       result = "initial value of " + v
       or
-      exists(Expr arg |
-        this.definedByReference(arg) and
-        result = "definition by reference of " + v
-      )
-      or
       exists(Expr partialDef |
         this.definedPartiallyAt(partialDef) and
         result = "partial definition at " + partialDef
@@ -463,7 +480,6 @@ module FlowVar_internal {
       // impossible case
       not this.definedByExpr(_, _) and
       not this.definedByInitialValue(_) and
-      not this.definedByReference(_) and
       not this.definedPartiallyAt(_) and
       result = "undefined " + v
     }
@@ -505,7 +521,7 @@ module FlowVar_internal {
     /**
      * Gets a variable that is assigned in this loop and read outside the loop.
      */
-    private Variable getARelevantVariable() {
+    Variable getARelevantVariable() {
       result = this.getAVariableAssignedInLoop() and
       exists(VariableAccess va |
         va.getTarget() = result and
@@ -518,7 +534,7 @@ module FlowVar_internal {
     pragma[noinline]
     private Variable getAVariableAssignedInLoop() {
       exists(BasicBlock bbAssign |
-        assignmentLikeOperation(bbAssign.getANode(), result, _, _) and
+        assignmentLikeOperation(bbAssign.getANode(), result, _) and
         this.bbInLoop(bbAssign)
       )
     }
@@ -550,8 +566,14 @@ module FlowVar_internal {
         reachesWithoutAssignment(bb.getAPredecessor(), v) and
         this.bbInLoop(bb)
       ) and
-      not assignmentLikeOperation(bb.getANode(), v, _, _)
+      not assignsToVar(bb, v)
     }
+  }
+
+  pragma[noinline]
+  private predicate assignsToVar(BasicBlock bb, Variable v) {
+    assignmentLikeOperation(bb.getANode(), v, _) and
+    exists(AlwaysTrueUponEntryLoop loop | v = loop.getARelevantVariable())
   }
 
   /**
@@ -587,7 +609,7 @@ module FlowVar_internal {
       result = mid.getASuccessor() and
       variableLiveInSBB(result, v) and
       forall(AlwaysTrueUponEntryLoop loop | skipLoop(mid, result, v, loop) | loop.sbbInLoop(sbbDef)) and
-      not assignmentLikeOperation(result, v, _, _)
+      not assignmentLikeOperation(result, v, _)
     )
   }
 
@@ -598,7 +620,8 @@ module FlowVar_internal {
   private predicate largeVariable(Variable v, int liveBlocks, int defs) {
     liveBlocks = strictcount(SubBasicBlock sbb | variableLiveInSBB(sbb, v)) and
     defs = strictcount(SubBasicBlock sbb | exists(TBlockVar(sbb, v))) and
-    liveBlocks * defs > 1000000
+    // Convert to float to avoid int overflow (32-bit two's complement)
+    liveBlocks.(float) * defs.(float) > 100000.0
   }
 
   /**
@@ -623,13 +646,15 @@ module FlowVar_internal {
       refType = p.getUnderlyingType() and
       not refType.getBaseType().isConst()
     )
+    or
+    p instanceof IteratorParameter
   }
 
   /**
    * Holds if liveness of `v` should stop propagating backwards from `sbb`.
    */
   private predicate variableNotLiveBefore(SubBasicBlock sbb, Variable v) {
-    assignmentLikeOperation(sbb, v, _, _)
+    assignmentLikeOperation(sbb, v, _)
     or
     // Liveness of `v` is killed when going backwards from a block that declares it
     exists(DeclStmt ds | ds.getADeclaration().(LocalVariable) = v and sbb.contains(ds))
@@ -749,21 +774,17 @@ module FlowVar_internal {
    * `node instanceof Initializer` is covered by `initializer` instead of this
    * predicate.
    */
-  predicate assignmentLikeOperation(
-    ControlFlowNode node, Variable v, VariableAccess va, Expr assignedExpr
-  ) {
+  predicate assignmentLikeOperation(ControlFlowNode node, Variable v, Expr assignedExpr) {
     // Together, the two following cases cover `Assignment`
     node =
       any(AssignExpr ae |
-        va = ae.getLValue() and
-        v = va.getTarget() and
+        v.getAnAccess() = ae.getLValue() and
         assignedExpr = ae.getRValue()
       )
     or
     node =
       any(AssignOperation ao |
-        va = ao.getLValue() and
-        v = va.getTarget() and
+        v.getAnAccess() = ao.getLValue() and
         // Here and in the `PrefixCrementOperation` case, we say that the assigned
         // expression is the operation itself. For example, we say that `x += 1`
         // assigns `x += 1` to `x`. The justification is that after this operation,
@@ -775,10 +796,44 @@ module FlowVar_internal {
     // `PrefixCrementOperation` is itself a source
     node =
       any(CrementOperation op |
-        va = op.getOperand() and
-        v = va.getTarget() and
+        v.getAnAccess() = op.getOperand() and
         assignedExpr = op
       )
+  }
+
+  Expr getAnIteratorAccess(Variable collection) {
+    exists(
+      Call c, SsaDefinition def, Variable iterator, FunctionInput input, FunctionOutput output
+    |
+      c.getTarget().(GetIteratorFunction).getsIterator(input, output) and
+      (
+        (
+          input.isQualifierObject() or
+          input.isQualifierAddress()
+        ) and
+        c.getQualifier() = collection.getAnAccess()
+        or
+        exists(int index |
+          input.isParameter(index) or
+          input.isParameterDeref(index)
+        |
+          c.getArgument(index) = collection.getAnAccess()
+        )
+      ) and
+      output.isReturnValue() and
+      def.getAnUltimateDefiningValue(iterator) = c and
+      result = def.getAUse(iterator)
+    )
+    or
+    exists(Call crement |
+      crement = result and
+      [crement.getQualifier(), crement.getArgument(0)] = getAnIteratorAccess(collection) and
+      crement.getTarget().getName() = ["operator++", "operator--"]
+    )
+  }
+
+  class IteratorParameter extends Parameter {
+    IteratorParameter() { this.getUnspecifiedType() instanceof Iterator }
   }
 
   /**
@@ -812,9 +867,9 @@ module FlowVar_internal {
   class DataFlowSubBasicBlockCutNode extends SubBasicBlockCutNode {
     DataFlowSubBasicBlockCutNode() {
       exists(Variable v | not fullySupportedSsaVariable(v) |
-        assignmentLikeOperation(this, v, _, _)
+        assignmentLikeOperation(this, v, _)
         or
-        this = any(PartialDefinition p | p.partiallyDefines(v)).getSubBasicBlockStart()
+        exists(PartialDefinition p | p.partiallyDefinesVariableAt(v, this))
         // It is not necessary to cut the basic blocks at `Initializer` nodes
         // because the affected variable can have no _other_ value before its
         // initializer. It is not necessary to cut basic blocks at procedure

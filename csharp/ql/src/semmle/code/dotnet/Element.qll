@@ -36,6 +36,19 @@ class Element extends @dotnet_element {
 
   /** Gets the full textual representation of this element, including type information. */
   string toStringWithTypes() { result = this.toString() }
+
+  /**
+   * Gets the name of a primary CodeQL class to which this element belongs.
+   *
+   * For most elements, this is simply the most precise syntactic category to
+   * which they belong; for example, `AddExpr` is a primary class, but
+   * `BinaryOperation` is not.
+   *
+   * This predicate always has a result. If no primary class can be
+   * determined, the result is `"???"`. If multiple primary classes match,
+   * this predicate can have multiple results.
+   */
+  string getAPrimaryQlClass() { result = "???" }
 }
 
 /** An element that has a name. */
@@ -50,7 +63,7 @@ class NamedElement extends Element, @dotnet_named_element {
    * Gets the fully qualified name of this element, for example the
    * fully qualified name of `M` on line 3 is `N.C.M` in
    *
-   * ```
+   * ```csharp
    * namespace N {
    *   class C {
    *     void M(int i, string s) { }

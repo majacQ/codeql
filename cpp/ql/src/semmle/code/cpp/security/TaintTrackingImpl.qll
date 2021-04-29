@@ -1,4 +1,8 @@
 /**
+ * DEPRECATED: we now use `semmle.code.cpp.ir.dataflow.DefaultTaintTracking`,
+ * which is based on the IR but designed to behave similarly to this old
+ * libarary.
+ *
  * Provides the implementation of `semmle.code.cpp.security.TaintTracking`. Do
  * not import this file directly.
  */
@@ -248,11 +252,10 @@ private predicate insideFunctionValueMoveTo(Element src, Element dest) {
       copyValueBetweenArguments(c.getTarget(), sourceArg, destArg) and
       // Only consider copies from `printf`-like functions if the format is a string
       (
-        exists(FormattingFunctionCall ffc, FormatLiteral format, string argFormat |
+        exists(FormattingFunctionCall ffc, FormatLiteral format |
           ffc = c and
           format = ffc.getFormat() and
-          format.getConversionChar(sourceArg - ffc.getTarget().getNumberOfParameters()) = argFormat and
-          (argFormat = "s" or argFormat = "S")
+          format.getConversionChar(sourceArg - ffc.getTarget().getNumberOfParameters()) = ["s", "S"]
         )
         or
         not exists(FormatLiteral fl | fl = c.(FormattingFunctionCall).getFormat())
@@ -269,12 +272,12 @@ private predicate insideFunctionValueMoveTo(Element src, Element dest) {
       dest = c
     )
     or
-    exists(FormattingFunctionCall formattingSend, int arg, FormatLiteral format, string argFormat |
+    exists(FormattingFunctionCall formattingSend, int arg, FormatLiteral format |
       dest = formattingSend and
       formattingSend.getArgument(arg) = src and
       format = formattingSend.getFormat() and
-      format.getConversionChar(arg - formattingSend.getTarget().getNumberOfParameters()) = argFormat and
-      (argFormat = "s" or argFormat = "S" or argFormat = "@")
+      format.getConversionChar(arg - formattingSend.getTarget().getNumberOfParameters()) =
+        ["s", "S", "@"]
     )
     or
     // Expressions computed from tainted data are also tainted
@@ -328,14 +331,24 @@ GlobalOrNamespaceVariable globalVarFromId(string id) {
 }
 
 /**
- * A variable that has any kind of upper-bound check anywhere in the program
+ * A variable that has any kind of upper-bound check anywhere in the program.  This is
+ * biased towards being inclusive because there are a lot of valid ways of doing an
+ * upper bounds checks if we don't consider where it occurs, for example:
+ * ```
+ *   if (x < 10) { sink(x); }
+ *
+ *   if (10 > y) { sink(y); }
+ *
+ *   if (z > 10) { z = 10; }
+ *   sink(z);
+ * ```
  */
 private predicate hasUpperBoundsCheck(Variable var) {
   exists(RelationalOperation oper, VariableAccess access |
-    oper.getLeftOperand() = access and
+    oper.getAnOperand() = access and
     access.getTarget() = var and
     // Comparing to 0 is not an upper bound check
-    not oper.getRightOperand().getValue() = "0"
+    not oper.getAnOperand().getValue() = "0"
   )
 }
 
@@ -465,7 +478,7 @@ private predicate copyValueBetweenArguments(Function f, int sourceArg, int destA
   or
   exists(FormattingFunction ff | ff = f |
     sourceArg in [ff.getFormatParameterIndex() .. maxArgIndex(f)] and
-    destArg = ff.getOutputParameterIndex()
+    destArg = ff.getOutputParameterIndex(false)
   )
 }
 

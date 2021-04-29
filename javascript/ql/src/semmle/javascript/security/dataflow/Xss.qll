@@ -3,6 +3,7 @@
  */
 
 import javascript
+private import semmle.javascript.dataflow.InferredTypes
 
 /** Provides classes and predicates shared between the XSS queries. */
 module Shared {
@@ -23,20 +24,17 @@ module Shared {
   /** A sanitizer for XSS vulnerabilities. */
   abstract class Sanitizer extends DataFlow::Node { }
 
+  /** A sanitizer guard for XSS vulnerabilities. */
+  abstract class SanitizerGuard extends TaintTracking::SanitizerGuardNode { }
+
   /**
-   * A regexp replacement involving an HTML meta-character, viewed as a sanitizer for
+   * A global regexp replacement involving the `<`, `'`, or `"` meta-character, viewed as a sanitizer for
    * XSS vulnerabilities.
-   *
-   * The XSS queries do not attempt to reason about correctness or completeness of sanitizers,
-   * so any such replacement stops taint propagation.
    */
-  class MetacharEscapeSanitizer extends Sanitizer, DataFlow::MethodCallNode {
+  class MetacharEscapeSanitizer extends Sanitizer, StringReplaceCall {
     MetacharEscapeSanitizer() {
-      getMethodName() = "replace" and
-      exists(RegExpConstant c |
-        c.getLiteral() = getArgument(0).getALocalSource().asExpr() and
-        c.getValue().regexpMatch("['\"&<>]")
-      )
+      isGlobal() and
+      RegExp::alwaysMatchesMetaCharacter(getRegExp().getRoot(), ["<", "'", "\""])
     }
   }
 
@@ -51,6 +49,82 @@ module Shared {
       )
     }
   }
+
+  private import semmle.javascript.security.dataflow.IncompleteHtmlAttributeSanitizationCustomizations::IncompleteHtmlAttributeSanitization as IncompleteHTML
+
+  /**
+   * A guard that checks if a string can contain quotes, which is a guard for strings that are inside a HTML attribute.
+   */
+  class QuoteGuard extends SanitizerGuard, StringOps::Includes {
+    QuoteGuard() {
+      this.getSubstring().mayHaveStringValue("\"") and
+      this.getBaseString()
+          .getALocalSource()
+          .flowsTo(any(IncompleteHTML::HtmlAttributeConcatenation attributeConcat))
+    }
+
+    override predicate sanitizes(boolean outcome, Expr e) {
+      e = this.getBaseString().getEnclosingExpr() and outcome = this.getPolarity().booleanNot()
+    }
+  }
+
+  /**
+   * A sanitizer guard that checks for the existence of HTML chars in a string.
+   * E.g. `/["'&<>]/.exec(str)`.
+   */
+  class ContainsHTMLGuard extends SanitizerGuard, StringOps::RegExpTest {
+    ContainsHTMLGuard() {
+      exists(RegExpCharacterClass regExp |
+        regExp = getRegExp() and
+        forall(string s | s = ["\"", "&", "<", ">"] | regExp.getAMatchedString() = s)
+      )
+    }
+
+    override predicate sanitizes(boolean outcome, Expr e) {
+      outcome = getPolarity().booleanNot() and e = this.getStringOperand().asExpr()
+    }
+  }
+
+  /**
+   * Holds if `str` is used in a switch-case that has cases matching HTML escaping.
+   */
+  private predicate isUsedInHTMLEscapingSwitch(Expr str) {
+    exists(SwitchStmt switch |
+      // "\"".charCodeAt(0) == 34, "&".charCodeAt(0) == 38, "<".charCodeAt(0) == 60
+      forall(int c | c = [34, 38, 60] | c = switch.getACase().getExpr().getIntValue()) and
+      exists(DataFlow::MethodCallNode mcn | mcn.getMethodName() = "charCodeAt" |
+        mcn.flowsToExpr(switch.getExpr()) and
+        str = mcn.getReceiver().asExpr()
+      )
+      or
+      forall(string c | c = ["\"", "&", "<"] | c = switch.getACase().getExpr().getStringValue()) and
+      (
+        exists(DataFlow::MethodCallNode mcn | mcn.getMethodName() = "charAt" |
+          mcn.flowsToExpr(switch.getExpr()) and
+          str = mcn.getReceiver().asExpr()
+        )
+        or
+        exists(DataFlow::PropRead read | exists(read.getPropertyNameExpr()) |
+          read.flowsToExpr(switch.getExpr()) and
+          str = read.getBase().asExpr()
+        )
+      )
+    )
+  }
+
+  /**
+   * Gets an Ssa variable that is used in a sanitizing switch statement.
+   * The `pragma[noinline]` is to avoid materializing a cartesian product.
+   */
+  pragma[noinline]
+  private SsaVariable getAPathEscapedInSwitch() { isUsedInHTMLEscapingSwitch(result.getAUse()) }
+
+  /**
+   * An expression that is sanitized by a switch-case.
+   */
+  class IsEscapedInSwitchSanitizer extends Sanitizer {
+    IsEscapedInSwitchSanitizer() { this.asExpr() = getAPathEscapedInSwitch().getAUse() }
+  }
 }
 
 /** Provides classes and predicates for the DOM-based XSS query. */
@@ -64,25 +138,19 @@ module DomBasedXss {
   /** A sanitizer for DOM-based XSS vulnerabilities. */
   abstract class Sanitizer extends Shared::Sanitizer { }
 
+  /** A sanitizer guard for DOM-based XSS vulnerabilities. */
+  abstract class SanitizerGuard extends Shared::SanitizerGuard { }
+
   /**
    * An expression whose value is interpreted as HTML
    * and may be inserted into the DOM through a library.
    */
-  class LibrarySink extends Sink, DataFlow::ValueNode {
+  class LibrarySink extends Sink {
     LibrarySink() {
       // call to a jQuery method that interprets its argument as HTML
-      exists(JQuery::MethodCall call | call.interpretsArgumentAsHtml(this) |
-        // either the argument is always interpreted as HTML
-        not call.interpretsArgumentAsSelector(this)
-        or
-        // or it doesn't start with something other than `<`, and so at least
-        // _may_ be interpreted as HTML
-        not exists(DataFlow::Node prefix, string strval |
-          isPrefixOfJQueryHtmlString(this, prefix) and
-          strval = prefix.getStringValue() and
-          not strval.regexpMatch("\\s*<.*")
-        ) and
-        not DOM::locationRef().flowsTo(this)
+      exists(JQuery::MethodCall call |
+        call.interpretsArgumentAsHtml(this) and
+        not call.interpretsArgumentAsSelector(this) // Handled by `JQuerySelectorSink`
       )
       or
       // call to an Angular method that interprets its argument as HTML
@@ -99,6 +167,15 @@ module DomBasedXss {
       this = any(Typeahead::TypeaheadSuggestionFunction f).getAReturn()
       or
       this = any(Handlebars::SafeString s).getAnArgument()
+      or
+      this = any(JQuery::MethodCall call | call.getMethodName() = "jGrowl").getArgument(0)
+      or
+      // A construction of a JSDOM object (server side DOM), where scripts are allowed.
+      exists(DataFlow::NewNode instance |
+        instance = API::moduleImport("jsdom").getMember("JSDOM").getInstance().getAnImmediateUse() and
+        this = instance.getArgument(0) and
+        instance.getOptionArgument(1, "runScripts").mayHaveStringValue("dangerously")
+      )
     }
   }
 
@@ -107,14 +184,52 @@ module DomBasedXss {
    * HTML by a jQuery method.
    */
   predicate isPrefixOfJQueryHtmlString(DataFlow::Node htmlString, DataFlow::Node prefix) {
-    any(JQuery::MethodCall call).interpretsArgumentAsHtml(htmlString) and
-    prefix = htmlString
+    prefix = getAPrefixOfJQuerySelectorString(htmlString)
+  }
+
+  /**
+   * Holds if `prefix` is a prefix of `htmlString`, which may be intepreted as
+   * HTML by a jQuery method.
+   */
+  private DataFlow::Node getAPrefixOfJQuerySelectorString(DataFlow::Node htmlString) {
+    any(JQuery::MethodCall call).interpretsArgumentAsSelector(htmlString) and
+    result = htmlString
     or
-    exists(DataFlow::Node pred | isPrefixOfJQueryHtmlString(htmlString, pred) |
-      prefix = StringConcatenation::getFirstOperand(pred)
+    exists(DataFlow::Node pred | pred = getAPrefixOfJQuerySelectorString(htmlString) |
+      result = StringConcatenation::getFirstOperand(pred)
       or
-      prefix = pred.getAPredecessor()
+      result = pred.getAPredecessor()
     )
+  }
+
+  /**
+   * An argument to the jQuery `$` function or similar, which is interpreted as either a selector
+   * or as an HTML string depending on its first character.
+   */
+  class JQueryHtmlOrSelectorArgument extends DataFlow::Node {
+    JQueryHtmlOrSelectorArgument() {
+      exists(JQuery::MethodCall call |
+        call.interpretsArgumentAsHtml(this) and
+        call.interpretsArgumentAsSelector(this) and
+        analyze().getAType() = TTString()
+      )
+    }
+
+    /** Gets a string that flows to the prefix of this argument. */
+    string getAPrefix() { result = getAPrefixOfJQuerySelectorString(this).getStringValue() }
+  }
+
+  /**
+   * An argument to the jQuery `$` function or similar, which may be interpreted as HTML.
+   *
+   * This is the same as `JQueryHtmlOrSelectorArgument`, excluding cases where the value
+   * is prefixed by something other than `<`.
+   */
+  class JQueryHtmlOrSelectorSink extends Sink, JQueryHtmlOrSelectorArgument {
+    JQueryHtmlOrSelectorSink() {
+      // If a prefix of the string is known, it must start with '<' or be an empty string
+      forall(string strval | strval = getAPrefix() | strval.regexpMatch("(?s)\\s*<.*|"))
+    }
   }
 
   /**
@@ -217,61 +332,14 @@ module DomBasedXss {
   /**
    * A Vue `v-html` attribute, viewed as an XSS sink.
    */
-  class VHtmlSink extends DomBasedXss::Sink {
-    HTML::Attribute attr;
-
-    VHtmlSink() {
-      this.(DataFlow::HtmlAttributeNode).getAttribute() = attr and attr.getName() = "v-html"
-    }
-
-    /**
-     * Gets the HTML attribute of this sink.
-     */
-    HTML::Attribute getAttr() { result = attr }
-  }
-
-  /**
-   * A taint propagating data flow edge through a string interpolation of a
-   * Vue instance property to a `v-html` attribute.
-   *
-   * As an example, `<div v-html="prop"/>` reads the `prop` property
-   * of `inst = new Vue({ ..., data: { prop: source } })`, if the
-   * `div` element is part of the template for `inst`.
-   */
-  class VHtmlSourceWrite extends TaintTracking::AdditionalTaintStep {
-    VHtmlSink attr;
-
-    VHtmlSourceWrite() {
-      exists(Vue::Instance instance, string expr |
-        attr.getAttr().getRoot() =
-          instance.getTemplateElement().(Vue::Template::HtmlElement).getElement() and
-        expr = attr.getAttr().getValue() and
-        // only support for simple identifier expressions
-        expr.regexpMatch("(?i)[a-z0-9_]+") and
-        this = instance.getAPropertyValue(expr)
-      )
-    }
-
-    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
-      pred = this and succ = attr
-    }
-  }
+  class VHtmlSink extends Vue::VHtmlAttribute, DomBasedXss::Sink { }
 
   /**
    * A property read from a safe property is considered a sanitizer.
    */
   class SafePropertyReadSanitizer extends Sanitizer, DataFlow::Node {
     SafePropertyReadSanitizer() {
-      exists(PropAccess pacc | pacc = this.asExpr() |
-        isSafeLocationProperty(pacc)
-        or
-        // `$(location.hash)` is a fairly common and safe idiom
-        // (because `location.hash` always starts with `#`),
-        // so we mark `hash` as safe for the purposes of this query
-        pacc.getPropertyName() = "hash"
-        or
-        pacc.getPropertyName() = "length"
-      )
+      exists(PropAccess pacc | pacc = this.asExpr() | pacc.getPropertyName() = "length")
     }
   }
 
@@ -285,6 +353,42 @@ module DomBasedXss {
   private class MetacharEscapeSanitizer extends Sanitizer, Shared::MetacharEscapeSanitizer { }
 
   private class UriEncodingSanitizer extends Sanitizer, Shared::UriEncodingSanitizer { }
+
+  private class IsEscapedInSwitchSanitizer extends Sanitizer, Shared::IsEscapedInSwitchSanitizer { }
+
+  private class QuoteGuard extends SanitizerGuard, Shared::QuoteGuard { }
+
+  /**
+   * Holds if there exists two dataflow edges to `succ`, where one edges is sanitized, and the other edge starts with `pred`.
+   */
+  predicate isOptionallySanitizedEdge(DataFlow::Node pred, DataFlow::Node succ) {
+    exists(HtmlSanitizerCall sanitizer |
+      // sanitized = sanitize ? sanitizer(source) : source;
+      exists(ConditionalExpr branch, Variable var, VarAccess access |
+        branch = succ.asExpr() and access = var.getAnAccess()
+      |
+        branch.getABranch() = access and
+        pred.getEnclosingExpr() = access and
+        sanitizer = branch.getABranch().flow() and
+        sanitizer.getAnArgument().getEnclosingExpr() = var.getAnAccess()
+      )
+      or
+      // sanitized = source; if (sanitize) {sanitized = sanitizer(source)};
+      exists(SsaPhiNode phi, SsaExplicitDefinition a, SsaDefinition b |
+        a = phi.getAnInput().getDefinition() and
+        b = phi.getAnInput().getDefinition() and
+        count(phi.getAnInput()) = 2 and
+        not a = b and
+        sanitizer = DataFlow::valueNode(a.getDef().getSource()) and
+        sanitizer.getAnArgument().asExpr().(VarAccess).getVariable() = b.getSourceVariable()
+      |
+        pred = DataFlow::ssaDefinitionNode(b) and
+        succ = DataFlow::ssaDefinitionNode(phi)
+      )
+    )
+  }
+
+  private class ContainsHTMLGuard extends SanitizerGuard, Shared::ContainsHTMLGuard { }
 }
 
 /** Provides classes and predicates for the reflected XSS query. */
@@ -297,6 +401,9 @@ module ReflectedXss {
 
   /** A sanitizer for reflected XSS vulnerabilities. */
   abstract class Sanitizer extends Shared::Sanitizer { }
+
+  /** A sanitizer guard for reflected XSS vulnerabilities. */
+  abstract class SanitizerGuard extends Shared::SanitizerGuard { }
 
   /**
    * An expression that is sent as part of an HTTP response, considered as an XSS sink.
@@ -384,6 +491,12 @@ module ReflectedXss {
   private class MetacharEscapeSanitizer extends Sanitizer, Shared::MetacharEscapeSanitizer { }
 
   private class UriEncodingSanitizer extends Sanitizer, Shared::UriEncodingSanitizer { }
+
+  private class IsEscapedInSwitchSanitizer extends Sanitizer, Shared::IsEscapedInSwitchSanitizer { }
+
+  private class QuoteGuard extends SanitizerGuard, Shared::QuoteGuard { }
+
+  private class ContainsHTMLGuard extends SanitizerGuard, Shared::ContainsHTMLGuard { }
 }
 
 /** Provides classes and predicates for the stored XSS query. */
@@ -396,6 +509,9 @@ module StoredXss {
 
   /** A sanitizer for stored XSS vulnerabilities. */
   abstract class Sanitizer extends Shared::Sanitizer { }
+
+  /** A sanitizer guard for stored XSS vulnerabilities. */
+  abstract class SanitizerGuard extends Shared::SanitizerGuard { }
 
   /** An arbitrary XSS sink, considered as a flow sink for stored XSS. */
   private class AnySink extends Sink {
@@ -412,4 +528,72 @@ module StoredXss {
   private class MetacharEscapeSanitizer extends Sanitizer, Shared::MetacharEscapeSanitizer { }
 
   private class UriEncodingSanitizer extends Sanitizer, Shared::UriEncodingSanitizer { }
+
+  private class IsEscapedInSwitchSanitizer extends Sanitizer, Shared::IsEscapedInSwitchSanitizer { }
+
+  private class QuoteGuard extends SanitizerGuard, Shared::QuoteGuard { }
+
+  private class ContainsHTMLGuard extends SanitizerGuard, Shared::ContainsHTMLGuard { }
+}
+
+/** Provides classes and predicates for the XSS through DOM query. */
+module XssThroughDom {
+  /** A data flow source for XSS through DOM vulnerabilities. */
+  abstract class Source extends Shared::Source { }
+}
+
+/** Provides classes for customizing the `ExceptionXss` query. */
+module ExceptionXss {
+  /** A data flow source for XSS caused by interpreting exception or error text as HTML. */
+  abstract class Source extends DataFlow::Node {
+    /**
+     * Gets a flow label to associate with this source.
+     *
+     * For sources that should pass through a `throw/catch` before reaching the sink, use the
+     * `NotYetThrown` labe. Otherwise use `taint` (the default).
+     */
+    DataFlow::FlowLabel getAFlowLabel() { result.isTaint() }
+
+    /**
+     * Gets a human-readable description of what type of error this refers to.
+     *
+     * The result should be capitalized and usable in the context of a noun.
+     */
+    string getDescription() { result = "Error text" }
+  }
+
+  /**
+   * A FlowLabel representing tainted data that has not been thrown in an exception.
+   * In the js/xss-through-exception query data-flow can only reach a sink after
+   * the data has been thrown as an exception, and data that has not been thrown
+   * as an exception therefore has this flow label, and only this flow label, associated with it.
+   */
+  abstract class NotYetThrown extends DataFlow::FlowLabel {
+    NotYetThrown() { this = "NotYetThrown" }
+  }
+
+  private class XssSourceAsSource extends Source {
+    XssSourceAsSource() { this instanceof Shared::Source }
+
+    override DataFlow::FlowLabel getAFlowLabel() { result instanceof NotYetThrown }
+
+    override string getDescription() { result = "Exception text" }
+  }
+
+  /**
+   * An error produced by validating using `ajv`.
+   *
+   * Such an error can contain property names from the input if the
+   * underlying schema uses `additionalProperties` or `propertyPatterns`.
+   *
+   * For example, an input of form `{"<img src=x onerror=alert(1)>": 45}` might produce the error
+   * `data/<img src=x onerror=alert(1)> should be string`.
+   */
+  private class JsonSchemaValidationError extends Source {
+    JsonSchemaValidationError() {
+      this = any(JsonSchema::Ajv::Instance i).getAValidationError().getAnImmediateUse()
+    }
+
+    override string getDescription() { result = "JSON schema validation error" }
+  }
 }
