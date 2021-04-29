@@ -14,7 +14,7 @@ import javascript
  * ```
  */
 class ES2015Module extends Module {
-  ES2015Module() { isES2015Module(this) }
+  ES2015Module() { is_es2015_module(this) }
 
   override ModuleScope getScope() { result.getScopeElement() = this }
 
@@ -27,8 +27,8 @@ class ES2015Module extends Module {
   /** Gets an export declaration in this module. */
   ExportDeclaration getAnExport() { result.getTopLevel() = this }
 
-  override predicate exports(string name, ASTNode export) {
-    exists(ExportDeclaration ed | ed = getAnExport() and ed = export | ed.exportsAs(_, name))
+  override DataFlow::Node getAnExportedValue(string name) {
+    exists(ExportDeclaration ed | ed = getAnExport() and result = ed.getSourceNode(name))
   }
 
   /** Holds if this module exports variable `v` under the name `name`. */
@@ -41,6 +41,40 @@ class ES2015Module extends Module {
 }
 
 /**
+ * Holds if `mod` contains one or more named export declarations other than `default`.
+ */
+private predicate hasNamedExports(ES2015Module mod) {
+  mod.getAnExport().(ExportNamedDeclaration).getASpecifier().getExportedName() != "default"
+  or
+  exists(mod.getAnExport().(ExportNamedDeclaration).getAnExportedDecl())
+  or
+  // Bulk re-exports only export named bindings (not "default")
+  mod.getAnExport() instanceof BulkReExportDeclaration
+}
+
+/**
+ * Holds if this module contains a `default` export.
+ */
+private predicate hasDefaultExport(ES2015Module mod) {
+  // export default foo;
+  mod.getAnExport() instanceof ExportDefaultDeclaration
+  or
+  // export { foo as default };
+  mod.getAnExport().(ExportNamedDeclaration).getASpecifier().getExportedName() = "default"
+}
+
+/**
+ * Holds if `mod` contains both named and `default` exports.
+ *
+ * This is used to determine whether a default-import of the module should be reinterpreted
+ * as a namespace-import, to accomodate the non-standard behavior implemented by some compilers.
+ */
+private predicate hasBothNamedAndDefaultExports(ES2015Module mod) {
+  hasNamedExports(mod) and
+  hasDefaultExport(mod)
+}
+
+/**
  * An import declaration.
  *
  * Examples:
@@ -50,7 +84,7 @@ class ES2015Module extends Module {
  * import * as console from 'console';
  * ```
  */
-class ImportDeclaration extends Stmt, Import, @importdeclaration {
+class ImportDeclaration extends Stmt, Import, @import_declaration {
   override ES2015Module getEnclosingModule() { result = getTopLevel() }
 
   override PathExpr getImportedPath() { result = getChildExpr(-1) }
@@ -70,6 +104,10 @@ class ImportDeclaration extends Stmt, Import, @importdeclaration {
       is instanceof ImportNamespaceSpecifier and
       count(getASpecifier()) = 1
       or
+      // For compatibility with the non-standard implementation of default imports,
+      // treat default imports as namespace imports in cases where it can't cause ambiguity
+      // between named exports and the properties of a default-exported object.
+      not hasBothNamedAndDefaultExports(getImportedModule()) and
       is.getImportedName() = "default"
     )
     or
@@ -78,7 +116,9 @@ class ImportDeclaration extends Stmt, Import, @importdeclaration {
   }
 
   /** Holds if this is declared with the `type` keyword, so it only imports types. */
-  predicate isTypeOnly() { hasTypeKeyword(this) }
+  predicate isTypeOnly() { has_type_keyword(this) }
+
+  override string getAPrimaryQlClass() { result = "ImportDeclaration" }
 }
 
 /** A literal path expression appearing in an `import` declaration. */
@@ -106,7 +146,7 @@ private class LiteralImportPath extends PathExpr, ConstantString {
  *   from 'console';
  * ```
  */
-class ImportSpecifier extends Expr, @importspecifier {
+class ImportSpecifier extends Expr, @import_specifier {
   /** Gets the imported symbol; undefined for default and namespace import specifiers. */
   Identifier getImported() { result = getChildExpr(0) }
 
@@ -129,6 +169,8 @@ class ImportSpecifier extends Expr, @importspecifier {
 
   /** Gets the local variable into which this specifier imports. */
   VarDecl getLocal() { result = getChildExpr(1) }
+
+  override string getAPrimaryQlClass() { result = "ImportSpecifier" }
 }
 
 /**
@@ -144,7 +186,7 @@ class ImportSpecifier extends Expr, @importspecifier {
  *   } from 'console';
  * ```
  */
-class NamedImportSpecifier extends ImportSpecifier, @namedimportspecifier { }
+class NamedImportSpecifier extends ImportSpecifier, @named_import_specifier { }
 
 /**
  * A default import specifier.
@@ -157,7 +199,7 @@ class NamedImportSpecifier extends ImportSpecifier, @namedimportspecifier { }
  *   from 'console';
  * ```
  */
-class ImportDefaultSpecifier extends ImportSpecifier, @importdefaultspecifier {
+class ImportDefaultSpecifier extends ImportSpecifier, @import_default_specifier {
   override string getImportedName() { result = "default" }
 }
 
@@ -172,7 +214,7 @@ class ImportDefaultSpecifier extends ImportSpecifier, @importdefaultspecifier {
  *   from 'console';
  * ```
  */
-class ImportNamespaceSpecifier extends ImportSpecifier, @importnamespacespecifier { }
+class ImportNamespaceSpecifier extends ImportSpecifier, @import_namespace_specifier { }
 
 /**
  * A bulk import that imports an entire module as a namespace.
@@ -230,7 +272,7 @@ class SelectiveImportDeclaration extends ImportDeclaration {
  * export x from 'a';               // default re-export declaration
  * ```
  */
-abstract class ExportDeclaration extends Stmt, @exportdeclaration {
+abstract class ExportDeclaration extends Stmt, @export_declaration {
   /** Gets the module to which this export declaration belongs. */
   ES2015Module getEnclosingModule() { this = result.getAnExport() }
 
@@ -261,7 +303,9 @@ abstract class ExportDeclaration extends Stmt, @exportdeclaration {
   abstract DataFlow::Node getSourceNode(string name);
 
   /** Holds if is declared with the `type` keyword, so only types are exported. */
-  predicate isTypeOnly() { hasTypeKeyword(this) }
+  predicate isTypeOnly() { has_type_keyword(this) }
+
+  override string getAPrimaryQlClass() { result = "ExportDeclaration" }
 }
 
 /**
@@ -274,7 +318,7 @@ abstract class ExportDeclaration extends Stmt, @exportdeclaration {
  * export * from 'a';          // bulk re-export declaration
  * ```
  */
-class BulkReExportDeclaration extends ReExportDeclaration, @exportalldeclaration {
+class BulkReExportDeclaration extends ReExportDeclaration, @export_all_declaration {
   /** Gets the name of the module from which this declaration re-exports. */
   override ConstantString getImportedPath() { result = getChildExpr(0) }
 
@@ -319,7 +363,7 @@ private predicate isShadowedFromBulkExport(BulkReExportDeclaration reExport, str
  * export default 42;
  * ```
  */
-class ExportDefaultDeclaration extends ExportDeclaration, @exportdefaultdeclaration {
+class ExportDefaultDeclaration extends ExportDeclaration, @export_default_declaration {
   /** Gets the operand statement or expression that is exported by this declaration. */
   ExprOrStmt getOperand() { result = getChild(0) }
 
@@ -351,7 +395,7 @@ class ExportDefaultDeclaration extends ExportDeclaration, @exportdefaultdeclarat
  * export { x } from 'a';
  * ```
  */
-class ExportNamedDeclaration extends ExportDeclaration, @exportnameddeclaration {
+class ExportNamedDeclaration extends ExportDeclaration, @export_named_declaration {
   /** Gets the operand statement or expression that is exported by this declaration. */
   ExprOrStmt getOperand() { result = getChild(-1) }
 
@@ -393,6 +437,13 @@ class ExportNamedDeclaration extends ExportDeclaration, @exportnameddeclaration 
     exists(VarDef d | d.getTarget() = getADecl() |
       name = d.getTarget().(VarDecl).getName() and
       result = DataFlow::valueNode(d.getSource())
+    )
+    or
+    exists(ObjectPattern obj | obj = getOperand().(DeclStmt).getADecl().getBindingPattern() |
+      exists(DataFlow::PropRead read | read = result |
+        read.getBase() = obj.flow() and
+        name = read.getPropertyName()
+      )
     )
     or
     exists(ExportSpecifier spec | spec = getASpecifier() and name = spec.getExportedName() |
@@ -504,6 +555,8 @@ class ExportSpecifier extends Expr, @exportspecifier {
    * an exported name since it does not export a unique symbol.
    */
   string getExportedName() { result = getExported().getName() }
+
+  override string getAPrimaryQlClass() { result = "ExportSpecifier" }
 }
 
 /**
@@ -518,7 +571,7 @@ class ExportSpecifier extends Expr, @exportspecifier {
  * };
  * ```
  */
-class NamedExportSpecifier extends ExportSpecifier, @namedexportspecifier { }
+class NamedExportSpecifier extends ExportSpecifier, @named_export_specifier { }
 
 /**
  * A default export specifier.
@@ -534,7 +587,7 @@ class NamedExportSpecifier extends ExportSpecifier, @namedexportspecifier { }
  *   from 'a';
  * ```
  */
-class ExportDefaultSpecifier extends ExportSpecifier, @exportdefaultspecifier {
+class ExportDefaultSpecifier extends ExportSpecifier, @export_default_specifier {
   override string getExportedName() { result = "default" }
 }
 
@@ -572,7 +625,7 @@ class ReExportDefaultSpecifier extends ExportDefaultSpecifier {
  *   from 'a';
  * ```
  */
-class ExportNamespaceSpecifier extends ExportSpecifier, @exportnamespacespecifier { }
+class ExportNamespaceSpecifier extends ExportSpecifier, @export_namespace_specifier { }
 
 /**
  * An export declaration that re-exports declarations from another module.

@@ -31,6 +31,25 @@ class Guard extends Expr {
   predicate controlsNode(ControlFlow::Nodes::ElementNode cfn, AccessOrCallExpr sub, AbstractValue v) {
     isGuardedByNode(cfn, this, sub, v)
   }
+
+  /**
+   * Holds if basic block `bb` is guarded by this expression having value `v`.
+   */
+  predicate controlsBasicBlock(BasicBlock bb, AbstractValue v) {
+    Internal::guardControls(this, _, bb, v)
+  }
+
+  /**
+   * Holds if this guard is an equality test between `e1` and `e2`. If the test is
+   * negated, that is `!=`, then `polarity` is false, otherwise `polarity` is
+   * true.
+   */
+  predicate isEquality(Expr e1, Expr e2, boolean polarity) {
+    exists(BooleanValue v |
+      this = Internal::getAnEqualityCheck(e1, v, e2) and
+      polarity = v.getValue()
+    )
+  }
 }
 
 /** An abstract value. */
@@ -91,7 +110,7 @@ module AbstractValues {
 
     override predicate branch(ControlFlowElement cfe, ConditionalSuccessor s, Expr e) {
       s.(BooleanSuccessor).getValue() = this.getValue() and
-      exists(BooleanCompletion c | s.matchesCompletion(c) |
+      exists(BooleanCompletion c | s = c.getAMatchingSuccessorType() |
         c.isValidFor(cfe) and
         e = cfe
       )
@@ -142,7 +161,7 @@ module AbstractValues {
 
     override predicate branch(ControlFlowElement cfe, ConditionalSuccessor s, Expr e) {
       this = TNullValue(s.(NullnessSuccessor).getValue()) and
-      exists(NullnessCompletion c | s.matchesCompletion(c) |
+      exists(NullnessCompletion c | s = c.getAMatchingSuccessorType() |
         c.isValidFor(cfe) and
         e = cfe
       )
@@ -171,7 +190,7 @@ module AbstractValues {
 
     override predicate branch(ControlFlowElement cfe, ConditionalSuccessor s, Expr e) {
       this = TMatchValue(_, s.(MatchingSuccessor).getValue()) and
-      exists(MatchingCompletion c, Switch switch, Case case | s.matchesCompletion(c) |
+      exists(MatchingCompletion c, Switch switch, Case case | s = c.getAMatchingSuccessorType() |
         c.isValidFor(cfe) and
         switchMatching(switch, case, cfe) and
         e = switch.getExpr() and
@@ -208,11 +227,16 @@ module AbstractValues {
 
     override predicate branch(ControlFlowElement cfe, ConditionalSuccessor s, Expr e) {
       this = TEmptyCollectionValue(s.(EmptinessSuccessor).getValue()) and
-      exists(EmptinessCompletion c, ForeachStmt fs | s.matchesCompletion(c) |
+      exists(EmptinessCompletion c, ForeachStmt fs | s = c.getAMatchingSuccessorType() |
         c.isValidFor(cfe) and
         foreachEmptiness(fs, cfe) and
         e = fs.getIterableExpr()
-      )
+      ) and
+      // Only when taking the non-empty successor do we know that the original iterator
+      // expression was non-empty. When taking the empty successor, we may have already
+      // iterated through the `foreach` loop zero or more times, hence the iterator
+      // expression can be both empty and non-empty
+      this.isNonEmpty()
     }
 
     override EmptyCollectionValue getDualValue() {
@@ -236,6 +260,12 @@ module AbstractValues {
 }
 
 private import AbstractValues
+
+pragma[nomagic]
+private predicate typePattern(PatternMatch pm, TypePatternExpr tpe, Type t) {
+  tpe = pm.getPattern() and
+  t = pm.getExpr().getType()
+}
 
 /**
  * An expression that evaluates to a value that can be dereferenced. That is,
@@ -313,19 +343,23 @@ class DereferenceableExpr extends Expr {
       or
       result =
         any(PatternMatch pm |
-          pm.getExpr() = this and
-          if pm.getPattern() instanceof NullLiteral
-          then
+          this = pm.getExpr() and
+          (
             // E.g. `x is null`
+            pm.getPattern() instanceof NullLiteral and
             isNull = branch
-          else (
-            // E.g. `x is string` or `x is ""`
-            branch = true and isNull = false
             or
-            // E.g. `x is string` where `x` has type `string`
-            pm.getPattern().(TypePatternExpr).getCheckedType() = pm.getExpr().getType() and
-            branch = false and
-            isNull = true
+            // E.g. `x is string` or `x is ""`
+            not pm.getPattern() instanceof NullLiteral and
+            branch = true and
+            isNull = false
+            or
+            exists(TypePatternExpr tpe |
+              // E.g. `x is string` where `x` has type `string`
+              typePattern(result, tpe, tpe.getCheckedType()) and
+              branch = false and
+              isNull = true
+            )
           )
         )
       or
@@ -457,17 +491,16 @@ class CollectionExpr extends Expr {
     result =
       any(PropertyRead pr |
         this = pr.getQualifier() and
-        pr
-            .getTarget()
+        pr.getTarget()
             .overridesOrImplementsOrEquals(any(Property p |
-                p.getSourceDeclaration() =
+                p.getUnboundDeclaration() =
                   any(SystemCollectionsGenericICollectionInterface x).getCountProperty()
               ))
       )
     or
     result =
       any(MethodCall mc |
-        mc.getTarget().getSourceDeclaration() =
+        mc.getTarget().getUnboundDeclaration() =
           any(SystemLinq::SystemLinqEnumerableClass x).getACountMethod() and
         this = mc.getArgument(0) and
         if mc.getNumberOfArguments() = 1 then lowerBound = false else lowerBound = true
@@ -520,7 +553,7 @@ class CollectionExpr extends Expr {
       or
       result =
         any(MethodCall mc |
-          mc.getTarget().getSourceDeclaration() =
+          mc.getTarget().getUnboundDeclaration() =
             any(SystemLinq::SystemLinqEnumerableClass x).getAnAnyMethod() and
           this = mc.getArgument(0) and
           branch = isEmpty.booleanNot() and
@@ -588,14 +621,11 @@ private Ssa::Definition getAnSsaQualifier(Expr e, ControlFlow::Node cfn) {
 }
 
 private AssignableAccess getATrackedAccess(Ssa::Definition def, ControlFlow::Node cfn) {
-  (
-    result = def.getAReadAtNode(cfn)
-    or
-    result = def.(Ssa::ExplicitDefinition).getADefinition().getTargetAccess() and
-    result.getAControlFlowNode() = cfn and
-    cfn.getBasicBlock() = def.getBasicBlock()
-  ) and
+  result = def.getAReadAtNode(cfn) and
   not def instanceof Ssa::ImplicitUntrackedDefinition
+  or
+  result = def.(Ssa::ExplicitDefinition).getADefinition().getTargetAccess() and
+  cfn = def.getControlFlowNode()
 }
 
 /**
@@ -821,7 +851,7 @@ module Internal {
     or
     e instanceof DefaultValueExpr and e.getType().isRefType()
     or
-    e.(Call).getTarget().getSourceDeclaration() instanceof NullCallable
+    e.(Call).getTarget().getUnboundDeclaration() instanceof NullCallable
   }
 
   /** Holds if expression `e2` is a `null` value whenever `e1` is. */
@@ -872,7 +902,7 @@ module Internal {
     or
     e.(DefaultValueExpr).getType().isValueType()
     or
-    e.(Call).getTarget().getSourceDeclaration() instanceof NonNullCallable and
+    e.(Call).getTarget().getUnboundDeclaration() instanceof NonNullCallable and
     not e.(QualifiableExpr).isConditional()
     or
     e instanceof SuppressNullableWarningExpr
@@ -938,69 +968,11 @@ module Internal {
     e = any(BinaryArithmeticOperation bao | result = bao.getAnOperand())
   }
 
-  /** Holds if basic block `bb` only is reached when guard `g` has abstract value `v`. */
-  private predicate guardControls(Guard g, BasicBlock bb, AbstractValue v) {
-    exists(ControlFlowElement cfe, ConditionalSuccessor s, AbstractValue v0, Guard g0 |
-      cfe.controlsBlock(bb, s)
-    |
-      v0.branch(cfe, s, g0) and
-      impliesSteps(g0, v0, g, v)
-    )
-  }
-
-  /**
-   * Holds if control flow node `cfn` only is reached when guard `g` evaluates to `v`,
-   * because of an assertion.
-   */
-  private predicate guardAssertionControlsNode(Guard g, ControlFlow::Node cfn, AbstractValue v) {
-    exists(Assertion a, Guard g0, AbstractValue v0 |
-      asserts(a, g0, v0) and
-      impliesSteps(g0, v0, g, v)
-    |
-      a.strictlyDominates(cfn.getBasicBlock())
-      or
-      exists(BasicBlock bb, int i, int j | bb.getNode(i) = a.getAControlFlowNode() |
-        bb.getNode(j) = cfn and
-        j > i
-      )
-    )
-  }
-
-  /**
-   * Holds if control flow element `cfe` only is reached when guard `g` evaluates to `v`,
-   * because of an assertion.
-   */
-  private predicate guardAssertionControlsElement(Guard g, ControlFlowElement cfe, AbstractValue v) {
-    forex(ControlFlow::Node cfn | cfn = cfe.getAControlFlowNode() |
-      guardAssertionControlsNode(g, cfn, v)
-    )
-  }
-
   /** Same as `this.getAChildExpr*()`, but avoids `fastTC`. */
   private Expr getAChildExprStar(Guard g) {
     result = g
     or
     result = getAChildExprStar(g).getAChildExpr()
-  }
-
-  /**
-   * Holds if assertion `a` directly asserts that expression `e` evaluates to value `v`.
-   */
-  predicate asserts(Assertion a, Expr e, AbstractValue v) {
-    e = a.getExpr() and
-    (
-      a.getAssertMethod() instanceof AssertTrueMethod and
-      v.(BooleanValue).getValue() = true
-      or
-      a.getAssertMethod() instanceof AssertFalseMethod and
-      v.(BooleanValue).getValue() = false
-      or
-      a.getAssertMethod() instanceof AssertNullMethod and
-      v.(NullValue).isNull()
-      or
-      a.getAssertMethod() instanceof AssertNonNullMethod and
-      v.(NullValue).isNonNull()
-    )
   }
 
   private Expr stripConditionalExpr(Expr e) {
@@ -1286,24 +1258,7 @@ module Internal {
       )
     }
 
-    /**
-     * Gets an expression that tests whether expression `e1` is equal to
-     * expression `e2`.
-     *
-     * If the returned expression has abstract value `v`, then expression `e1` is
-     * guaranteed to be equal to `e2`, and if the returned expression has abstract
-     * value `v.getDualValue()`, then this expression is guaranteed to be
-     * non-equal to `e`.
-     *
-     * For example, if the expression `x != ""` evaluates to `false` then the
-     * expression `x` is guaranteed to be equal to `""`.
-     */
-    Expr getAnEqualityCheck(Expr e1, AbstractValue v, Expr e2) {
-      result = getABooleanEqualityCheck(e1, v, e2)
-      or
-      result = getAMatchingEqualityCheck(e1, v, e2)
-    }
-
+    pragma[nomagic]
     private Expr getAnEqualityCheckVal(Expr e, AbstractValue v, AbstractValue vExpr) {
       result = getAnEqualityCheck(e, v, vExpr.getAnExpr())
     }
@@ -1450,8 +1405,6 @@ module Internal {
           or
           val.branch(_, _, e)
           or
-          asserts(_, e, val)
-          or
           e instanceof CollectionExpr and
           val = TEmptyCollectionValue(_)
         ) and
@@ -1459,11 +1412,34 @@ module Internal {
         not e = any(LocalVariableDeclStmt s).getAVariableDeclExpr()
       }
 
+      /**
+       * Gets an expression that tests whether expression `e1` is equal to
+       * expression `e2`.
+       *
+       * If the returned expression has abstract value `v`, then expression `e1` is
+       * guaranteed to be equal to `e2`, and if the returned expression has abstract
+       * value `v.getDualValue()`, then this expression is guaranteed to be
+       * non-equal to `e`.
+       *
+       * For example, if the expression `x != ""` evaluates to `false` then the
+       * expression `x` is guaranteed to be equal to `""`.
+       */
+      cached
+      Expr getAnEqualityCheck(Expr e1, AbstractValue v, Expr e2) {
+        result = getABooleanEqualityCheck(e1, v, e2)
+        or
+        result = getABooleanEqualityCheck(e2, v, e1)
+        or
+        result = getAMatchingEqualityCheck(e1, v, e2)
+        or
+        result = getAMatchingEqualityCheck(e2, v, e1)
+      }
+
       cached
       predicate isCustomNullCheck(Call call, Expr arg, BooleanValue v, boolean isNull) {
         exists(Callable callable, Parameter p |
-          arg = call.getArgumentForParameter(any(Parameter p0 | p0.getSourceDeclaration() = p)) and
-          call.getTarget().getSourceDeclaration() = callable and
+          arg = call.getArgumentForParameter(any(Parameter p0 | p0.getUnboundDeclaration() = p)) and
+          call.getTarget().getUnboundDeclaration() = callable and
           callable = customNullCheck(p, v, isNull)
         )
       }
@@ -1679,7 +1655,7 @@ module Internal {
         exists(PreSsa::Definition def | emptyDef(def) | firstReadSameVarUniquePredecesssor(def, e))
         or
         exists(MethodCall mc |
-          mc.getTarget().getAnUltimateImplementee().getSourceDeclaration() =
+          mc.getTarget().getAnUltimateImplementee().getUnboundDeclaration() =
             any(SystemCollectionsGenericICollectionInterface c).getClearMethod() and
           adjacentReadPairSameVarUniquePredecessor(mc.getQualifier(), e)
         )
@@ -1704,7 +1680,7 @@ module Internal {
         )
         or
         exists(MethodCall mc |
-          mc.getTarget().getAnUltimateImplementee().getSourceDeclaration() =
+          mc.getTarget().getAnUltimateImplementee().getUnboundDeclaration() =
             any(SystemCollectionsGenericICollectionInterface c).getAddMethod() and
           adjacentReadPairSameVarUniquePredecessor(mc.getQualifier(), e)
         )
@@ -1741,11 +1717,7 @@ module Internal {
     pragma[noinline]
     private predicate candidateAux(AccessOrCallExpr e, Declaration target, BasicBlock bb) {
       target = e.getTarget() and
-      exists(Guard g | e = getAChildExprStar(g) |
-        guardControls(g, bb, _)
-        or
-        guardAssertionControlsNode(g, bb.getANode(), _)
-      )
+      exists(Guard g | e = getAChildExprStar(g) | guardControls(g, _, bb, _))
     }
   }
 
@@ -1753,27 +1725,52 @@ module Internal {
   private module Cached {
     private import semmle.code.csharp.Caching
 
+    /**
+     * Holds if basic block `bb` only is reached when guard `g` has abstract value `v`.
+     *
+     * `cb` records all of the possible condition blocks for `g` that a path from the
+     * callable entry point to `bb` may go through.
+     */
+    cached
+    predicate guardControls(Guard g, ConditionBlock cb, BasicBlock bb, AbstractValue v) {
+      exists(AbstractValue v0, Guard g0 |
+        impliesSteps(g0, v0, g, v) and
+        exists(ControlFlowElement cfe, ConditionalSuccessor cs |
+          v0.branch(cfe, cs, g0) and cfe.controlsBlock(bb, cs, cb)
+        )
+      )
+    }
+
     pragma[noinline]
-    private predicate isGuardedByNode0(
-      ControlFlow::Node cfn, AccessOrCallExpr guarded, Guard g, AccessOrCallExpr sub,
-      AbstractValue v
+    private predicate nodeIsGuardedBySameSubExpr0(
+      ControlFlow::Node guardedCfn, AccessOrCallExpr guarded, Guard g, ConditionBlock cb,
+      AccessOrCallExpr sub, AbstractValue v
     ) {
       Stages::GuardsStage::forceCachingInSameStage() and
-      cfn = guarded.getAControlFlowNode() and
-      guardControls(g, cfn.getBasicBlock(), v) and
+      guardedCfn = guarded.getAControlFlowNode() and
+      guardControls(g, cb, guardedCfn.getBasicBlock(), v) and
       exists(ConditionOnExprComparisonConfig c | c.same(sub, guarded))
     }
 
     pragma[noinline]
-    private predicate isGuardedByExpr1(
-      AccessOrCallExpr guarded, Guard g, AccessOrCallExpr sub, AbstractValue v
+    private predicate nodeIsGuardedBySameSubExpr(
+      ControlFlow::Node guardedCfn, AccessOrCallExpr guarded, Guard g, ConditionBlock cb,
+      AccessOrCallExpr sub, AbstractValue v
     ) {
-      forex(ControlFlow::Node cfn | cfn = guarded.getAControlFlowNode() |
-        isGuardedByNode0(cfn, guarded, g, sub, v)
+      nodeIsGuardedBySameSubExpr0(guardedCfn, guarded, g, cb, sub, v) and
+      sub = getAChildExprStar(g)
+    }
+
+    pragma[noinline]
+    private predicate nodeIsGuardedBySameSubExprSsaDef(
+      ControlFlow::Node cfn, AccessOrCallExpr guarded, Guard g, ControlFlow::Node subCfn,
+      AccessOrCallExpr sub, AbstractValue v, Ssa::Definition def
+    ) {
+      exists(ConditionBlock cb |
+        nodeIsGuardedBySameSubExpr(cfn, guarded, g, cb, sub, v) and
+        subCfn.getBasicBlock().dominates(cb) and
+        def = sub.getAnSsaQualifier(subCfn)
       )
-      or
-      guardAssertionControlsElement(g, guarded, v) and
-      exists(ConditionOnExprComparisonConfig c | c.same(sub, guarded))
     }
 
     private predicate adjacentReadPairSameVarUniquePredecessor(
@@ -1787,36 +1784,29 @@ module Internal {
       )
     }
 
+    pragma[noinline]
+    private predicate isGuardedByExpr0(
+      AccessOrCallExpr guarded, Guard g, AccessOrCallExpr sub, AbstractValue v
+    ) {
+      forex(ControlFlow::Node cfn | cfn = guarded.getAControlFlowNode() |
+        nodeIsGuardedBySameSubExpr(cfn, guarded, g, _, sub, v)
+      )
+    }
+
     cached
     predicate isGuardedByExpr(
       AccessOrCallExpr guarded, Guard g, AccessOrCallExpr sub, AbstractValue v
     ) {
-      isGuardedByExpr1(guarded, g, sub, v) and
-      sub = getAChildExprStar(g) and
-      forall(Ssa::Definition def, ControlFlow::Node subCfn | def = sub.getAnSsaQualifier(subCfn) |
-        exists(ControlFlow::Node defCfn | def = guarded.getAnSsaQualifier(defCfn) |
+      isGuardedByExpr0(guarded, g, sub, v) and
+      forall(ControlFlow::Node subCfn, Ssa::Definition def |
+        nodeIsGuardedBySameSubExprSsaDef(_, guarded, g, subCfn, sub, v, def)
+      |
+        exists(ControlFlow::Node guardedCfn |
+          def = guarded.getAnSsaQualifier(guardedCfn) and
           if v.isReferentialProperty()
-          then adjacentReadPairSameVarUniquePredecessor(def, subCfn, defCfn)
+          then adjacentReadPairSameVarUniquePredecessor(def, subCfn, guardedCfn)
           else any()
         )
-      )
-    }
-
-    pragma[noinline]
-    private predicate isGuardedByNode1(
-      ControlFlow::Nodes::ElementNode guarded, Guard g, AccessOrCallExpr sub, AbstractValue v
-    ) {
-      isGuardedByNode0(guarded, _, g, sub, v)
-      or
-      guardAssertionControlsNode(g, guarded, v) and
-      exists(ConditionOnExprComparisonConfig c | c.same(sub, guarded.getElement()))
-    }
-
-    pragma[noinline]
-    private predicate isGuardedByNode2(ControlFlow::Nodes::ElementNode guarded, Ssa::Definition def) {
-      isGuardedByNode1(guarded, _, _, _) and
-      exists(BasicBlock bb | bb = guarded.getBasicBlock() |
-        def = guarded.getElement().(AccessOrCallExpr).getAnSsaQualifier(bb.getANode())
       )
     }
 
@@ -1824,10 +1814,15 @@ module Internal {
     predicate isGuardedByNode(
       ControlFlow::Nodes::ElementNode guarded, Guard g, AccessOrCallExpr sub, AbstractValue v
     ) {
-      isGuardedByNode1(guarded, g, sub, v) and
-      sub = getAChildExprStar(g) and
-      forall(Ssa::Definition def, ControlFlow::Node subCfn | def = sub.getAnSsaQualifier(subCfn) |
-        isGuardedByNode2(guarded, def) and
+      nodeIsGuardedBySameSubExpr(guarded, _, g, _, sub, v) and
+      forall(ControlFlow::Node subCfn, Ssa::Definition def |
+        nodeIsGuardedBySameSubExprSsaDef(guarded, _, g, subCfn, sub, v, def)
+      |
+        def =
+          guarded
+              .getElement()
+              .(AccessOrCallExpr)
+              .getAnSsaQualifier(guarded.getBasicBlock().getANode()) and
         if v.isReferentialProperty()
         then adjacentReadPairSameVarUniquePredecessor(def, subCfn, guarded)
         else any()

@@ -72,8 +72,7 @@ private predicate neverReturnsJQuery(string name) {
     decl.getBaseName() = "jQuery" and
     decl.getName() = name
   |
-    not decl
-        .getDocumentation()
+    not decl.getDocumentation()
         .getATagByTitle("return")
         .getType()
         .getAnUnderlyingType()
@@ -133,7 +132,7 @@ private class JQueryParseXmlCall extends XML::ParserInvocation {
 /**
  * A call to `$(...)` that constructs a wrapped DOM element, such as `$("<div/>")`.
  */
-private class JQueryDomElementDefinition extends DOM::ElementDefinition, @callexpr {
+private class JQueryDomElementDefinition extends DOM::ElementDefinition, @call_expr {
   string tagName;
   CallExpr call;
 
@@ -194,7 +193,7 @@ private string attrOrProp() { result = "attr" or result = "prop" }
  * An attribute definition using `elt.attr(name, value)` or `elt.prop(name, value)`
  * where `elt` is a wrapped set.
  */
-private class JQueryAttr2Call extends JQueryAttributeDefinition, @callexpr {
+private class JQueryAttr2Call extends JQueryAttributeDefinition, @call_expr {
   JQueryAttr2Call() {
     exists(DataFlow::MethodCallNode call | this = call.asExpr() |
       call = JQuery::objectRef().getAMethodCall(attrOrProp()) and
@@ -258,7 +257,7 @@ private class JQueryBulkAttributeProp extends JQueryAttributeDefinition {
  * An attribute definition using `jQuery.attr(elt, name, value)` or `jQuery.prop(elt, name, value)`
  * where `elt` is a wrapped set or a plain DOM element.
  */
-private class JQueryAttr3Call extends JQueryAttributeDefinition, @callexpr {
+private class JQueryAttr3Call extends JQueryAttributeDefinition, @call_expr {
   MethodCallExpr mce;
 
   JQueryAttr3Call() {
@@ -364,11 +363,10 @@ private module JQueryClientRequest {
    */
   private DataFlow::SourceNode getAResponseNodeFromAnXHRObject(DataFlow::SourceNode obj) {
     result =
-      obj
-          .getAPropertyRead(any(string s |
-              s = "responseText" or
-              s = "responseXML"
-            ))
+      obj.getAPropertyRead(any(string s |
+          s = "responseText" or
+          s = "responseXML"
+        ))
   }
 
   /**

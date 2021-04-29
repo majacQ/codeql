@@ -6,18 +6,11 @@ namespace Semmle.Extraction.CIL.Entities
     /// <summary>
     /// A parameter entity.
     /// </summary>
-    interface IParameter : IExtractedEntity
+    internal sealed class Parameter : LabelledEntity
     {
-    }
-
-    /// <summary>
-    /// A parameter entity.
-    /// </summary>
-    sealed class Parameter : LabelledEntity, IParameter
-    {
-        readonly Method method;
-        readonly int index;
-        readonly Type type;
+        private readonly Method method;
+        private readonly int index;
+        private readonly Type type;
 
         public Parameter(Context cx, Method m, int i, Type t) : base(cx)
         {
@@ -33,7 +26,7 @@ namespace Semmle.Extraction.CIL.Entities
             trapFile.Write(index);
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is Parameter param && method.Equals(param.method) && index == param.index;
         }

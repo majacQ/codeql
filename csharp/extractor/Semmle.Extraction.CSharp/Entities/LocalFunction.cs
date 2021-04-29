@@ -6,9 +6,9 @@ using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class LocalFunction : Method
+    internal class LocalFunction : Method
     {
-        LocalFunction(Context cx, IMethodSymbol init) : base(cx, init)
+        private LocalFunction(Context cx, IMethodSymbol init) : base(cx, init)
         {
         }
 
@@ -22,11 +22,11 @@ namespace Semmle.Extraction.CSharp.Entities
             trapFile.Write('*');
         }
 
-        public static new LocalFunction Create(Context cx, IMethodSymbol field) => LocalFunctionFactory.Instance.CreateEntity(cx, field);
+        public static new LocalFunction Create(Context cx, IMethodSymbol field) => LocalFunctionFactory.Instance.CreateEntityFromSymbol(cx, field);
 
-        class LocalFunctionFactory : ICachedEntityFactory<IMethodSymbol, LocalFunction>
+        private class LocalFunctionFactory : ICachedEntityFactory<IMethodSymbol, LocalFunction>
         {
-            public static readonly LocalFunctionFactory Instance = new LocalFunctionFactory();
+            public static LocalFunctionFactory Instance { get; } = new LocalFunctionFactory();
 
             public LocalFunction Create(Context cx, IMethodSymbol init) => new LocalFunction(cx, init);
         }
@@ -34,22 +34,14 @@ namespace Semmle.Extraction.CSharp.Entities
         public override void Populate(TextWriter trapFile)
         {
             PopulateMethod(trapFile);
-
-            // There is a "bug" in Roslyn whereby the IMethodSymbol associated with the local function symbol
-            // is always static, so we need to go to the syntax reference of the local function to see whether
-            // the "static" modifier is present.
-            if (symbol.DeclaringSyntaxReferences.SingleOrDefault().GetSyntax() is LocalFunctionStatementSyntax fn)
-            {
-                foreach (var modifier in fn.Modifiers)
-                {
-                    Modifier.HasModifier(Context, trapFile, this, modifier.Text);
-                }
-            }
+            PopulateModifiers(trapFile);
 
             var originalDefinition = IsSourceDeclaration ? this : Create(Context, symbol.OriginalDefinition);
             var returnType = Type.Create(Context, symbol.ReturnType);
             trapFile.local_functions(this, symbol.Name, returnType, originalDefinition);
             ExtractRefReturn(trapFile);
         }
+
+        public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.NeedsLabel;
     }
 }
