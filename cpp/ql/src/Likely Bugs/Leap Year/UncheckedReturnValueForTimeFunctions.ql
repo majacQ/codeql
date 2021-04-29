@@ -1,11 +1,14 @@
 /**
- * @name Year field changed using an arithmetic operation is used on an unchecked time conversion function
- * @description A year field changed using an arithmetic operation is used on a time conversion function, but the return value of the function is not checked for success or failure
+ * @name Unchecked return value for time conversion function
+ * @description When the return value of a fallible time conversion function is
+ *              not checked for failure, its output parameters may contain
+ *              invalid dates.
  * @kind problem
  * @problem.severity warning
  * @id cpp/leap-year/unchecked-return-value-for-time-conversion-function
  * @precision medium
  * @tags leap-year
+ *       correctness
  */
 
 import cpp
@@ -37,9 +40,7 @@ class DateStructModifiedFieldAccess extends LeapYearFieldAccess {
  */
 class SafeTimeGatheringFunction extends Function {
   SafeTimeGatheringFunction() {
-    this.getQualifiedName() = "GetFileTime" or
-    this.getQualifiedName() = "GetSystemTime" or
-    this.getQualifiedName() = "NtQuerySystemTime"
+    this.getQualifiedName() = ["GetFileTime", "GetSystemTime", "NtQuerySystemTime"]
   }
 }
 
@@ -48,15 +49,13 @@ class SafeTimeGatheringFunction extends Function {
  */
 class TimeConversionFunction extends Function {
   TimeConversionFunction() {
-    this.getQualifiedName() = "FileTimeToSystemTime" or
-    this.getQualifiedName() = "SystemTimeToFileTime" or
-    this.getQualifiedName() = "SystemTimeToTzSpecificLocalTime" or
-    this.getQualifiedName() = "SystemTimeToTzSpecificLocalTimeEx" or
-    this.getQualifiedName() = "TzSpecificLocalTimeToSystemTime" or
-    this.getQualifiedName() = "TzSpecificLocalTimeToSystemTimeEx" or
-    this.getQualifiedName() = "RtlLocalTimeToSystemTime" or
-    this.getQualifiedName() = "RtlTimeToSecondsSince1970" or
-    this.getQualifiedName() = "_mkgmtime"
+    this.getQualifiedName() =
+      [
+        "FileTimeToSystemTime", "SystemTimeToFileTime", "SystemTimeToTzSpecificLocalTime",
+        "SystemTimeToTzSpecificLocalTimeEx", "TzSpecificLocalTimeToSystemTime",
+        "TzSpecificLocalTimeToSystemTimeEx", "RtlLocalTimeToSystemTime",
+        "RtlTimeToSecondsSince1970", "_mkgmtime"
+      ]
   }
 }
 

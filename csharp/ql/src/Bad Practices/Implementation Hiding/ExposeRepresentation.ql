@@ -15,7 +15,7 @@ import semmle.code.csharp.commons.Collections
 import DataFlow
 
 predicate storesCollection(Callable c, Parameter p, Field f) {
-  f.getDeclaringType() = c.getDeclaringType().getABaseType*().getSourceDeclaration() and
+  f.getDeclaringType() = c.getDeclaringType().getABaseType*().getUnboundDeclaration() and
   f.getType() instanceof CollectionType and
   p = c.getAParameter() and
   f.getAnAssignedValue() = p.getAnAccess() and
@@ -23,7 +23,7 @@ predicate storesCollection(Callable c, Parameter p, Field f) {
 }
 
 predicate returnsCollection(Callable c, Field f) {
-  f.getDeclaringType() = c.getDeclaringType().getABaseType*().getSourceDeclaration() and
+  f.getDeclaringType() = c.getDeclaringType().getABaseType*().getUnboundDeclaration() and
   f.getType() instanceof CollectionType and
   c.canReturn(f.getAnAccess()) and
   not c.(Modifiable).isStatic()
@@ -32,7 +32,7 @@ predicate returnsCollection(Callable c, Field f) {
 predicate mayWriteToCollection(Expr modified) {
   modified instanceof CollectionModificationAccess
   or
-  exists(Expr mid | mayWriteToCollection(mid) | localFlow(exprNode(modified), exprNode(mid)))
+  exists(Expr mid | mayWriteToCollection(mid) | localExprFlow(modified, mid))
   or
   exists(MethodCall mid, Callable c | mayWriteToCollection(mid) |
     mid.getTarget() = c and

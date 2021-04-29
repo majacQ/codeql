@@ -60,7 +60,7 @@ class Stmt extends StmtParent, ExprParent, @stmt {
 class StmtParent extends @stmtparent, Top { }
 
 /** A block of statements. */
-class Block extends Stmt, @block {
+class BlockStmt extends Stmt, @block {
   /** Gets a statement that is an immediate child of this block. */
   Stmt getAStmt() { result.getParent() = this }
 
@@ -77,11 +77,19 @@ class Block extends Stmt, @block {
   override string pp() { result = "{ ... }" }
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
-  override string getHalsteadID() { result = "Block" }
+  override string getHalsteadID() { result = "BlockStmt" }
+
+  override string getAPrimaryQlClass() { result = "BlockStmt" }
 }
 
+/**
+ * DEPRECATED: This is now called `BlockStmt` to avoid confusion with
+ * `BasicBlock`.
+ */
+deprecated class Block = BlockStmt;
+
 /** A block with only a single statement. */
-class SingletonBlock extends Block {
+class SingletonBlock extends BlockStmt {
   SingletonBlock() { this.getNumStmt() = 1 }
 
   /** Gets the single statement in this block. */
@@ -117,7 +125,7 @@ class IfStmt extends ConditionalStmt, @ifstmt {
    * Gets the statement that is executed whenever the condition
    * of this branch statement evaluates to `true`.
    */
-  override Stmt getTrueSuccessor() { result = getThen() }
+  deprecated override Stmt getTrueSuccessor() { result = getThen() }
 
   /** Gets the `else` branch of this `if` statement. */
   Stmt getElse() { result.isNthChildOf(this, 2) }
@@ -131,6 +139,8 @@ class IfStmt extends ConditionalStmt, @ifstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "IfStmt" }
+
+  override string getAPrimaryQlClass() { result = "IfStmt" }
 }
 
 /** A `for` loop. */
@@ -168,7 +178,7 @@ class ForStmt extends ConditionalStmt, @forstmt {
    * Gets the statement that is executed whenever the condition
    * of this branch statement evaluates to true.
    */
-  override Stmt getTrueSuccessor() { result = getStmt() }
+  deprecated override Stmt getTrueSuccessor() { result = getStmt() }
 
   /**
    * Gets a variable that is used as an iteration variable: it is defined,
@@ -196,6 +206,8 @@ class ForStmt extends ConditionalStmt, @forstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "ForStmt" }
+
+  override string getAPrimaryQlClass() { result = "ForStmt" }
 }
 
 /** An enhanced `for` loop. (Introduced in Java 5.) */
@@ -214,6 +226,8 @@ class EnhancedForStmt extends Stmt, @enhancedforstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "EnhancedForStmt" }
+
+  override string getAPrimaryQlClass() { result = "EnhancedForStmt" }
 }
 
 /** A `while` loop. */
@@ -228,13 +242,15 @@ class WhileStmt extends ConditionalStmt, @whilestmt {
    * Gets the statement that is executed whenever the condition
    * of this branch statement evaluates to true.
    */
-  override Stmt getTrueSuccessor() { result = getStmt() }
+  deprecated override Stmt getTrueSuccessor() { result = getStmt() }
 
   /** Gets a printable representation of this statement. May include more detail than `toString()`. */
   override string pp() { result = "while (...) " + this.getStmt().pp() }
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "WhileStmt" }
+
+  override string getAPrimaryQlClass() { result = "WhileStmt" }
 }
 
 /** A `do` loop. */
@@ -249,13 +265,15 @@ class DoStmt extends ConditionalStmt, @dostmt {
    * Gets the statement that is executed whenever the condition
    * of this branch statement evaluates to `true`.
    */
-  override Stmt getTrueSuccessor() { result = getStmt() }
+  deprecated override Stmt getTrueSuccessor() { result = getStmt() }
 
   /** Gets a printable representation of this statement. May include more detail than `toString()`. */
   override string pp() { result = "do " + this.getStmt().pp() + " while (...)" }
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "DoStmt" }
+
+  override string getAPrimaryQlClass() { result = "DoStmt" }
 }
 
 /**
@@ -304,7 +322,7 @@ class TryStmt extends Stmt, @trystmt {
   }
 
   /** Gets the `finally` block, if any. */
-  Block getFinally() { result.isNthChildOf(this, -2) }
+  BlockStmt getFinally() { result.isNthChildOf(this, -2) }
 
   /** Gets a resource variable declaration, if any. */
   LocalVariableDeclStmt getAResourceDecl() { result.getParent() = this and result.getIndex() <= -3 }
@@ -343,12 +361,14 @@ class TryStmt extends Stmt, @trystmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "TryStmt" }
+
+  override string getAPrimaryQlClass() { result = "TryStmt" }
 }
 
 /** A `catch` clause in a `try` statement. */
 class CatchClause extends Stmt, @catchclause {
   /** Gets the block of this `catch` clause. */
-  Block getBlock() { result.getParent() = this }
+  BlockStmt getBlock() { result.getParent() = this }
 
   /** Gets the `try` statement in which this `catch` clause occurs. */
   TryStmt getTry() { this = result.getACatchClause() }
@@ -372,6 +392,8 @@ class CatchClause extends Stmt, @catchclause {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "CatchClause" }
+
+  override string getAPrimaryQlClass() { result = "CatchClause" }
 }
 
 /** A `switch` statement. */
@@ -405,6 +427,8 @@ class SwitchStmt extends Stmt, @switchstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "SwitchStmt" }
+
+  override string getAPrimaryQlClass() { result = "SwitchStmt" }
 }
 
 /**
@@ -417,8 +441,6 @@ class SwitchCase extends Stmt, @case {
   SwitchStmt getSwitch() { result.getACase() = this }
 
   /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
    * Gets the switch expression to which this case belongs, if any.
    */
   SwitchExpr getSwitchExpr() { result.getACase() = this }
@@ -432,8 +454,6 @@ class SwitchCase extends Stmt, @case {
   }
 
   /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
    * Holds if this `case` is a switch labeled rule of the form `... -> ...`.
    */
   predicate isRule() {
@@ -443,15 +463,11 @@ class SwitchCase extends Stmt, @case {
   }
 
   /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
    * Gets the expression on the right-hand side of the arrow, if any.
    */
   Expr getRuleExpression() { result.getParent() = this and result.getIndex() = -1 }
 
   /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
    * Gets the statement on the right-hand side of the arrow, if any.
    */
   Stmt getRuleStatement() { result.getParent() = this and result.getIndex() = -1 }
@@ -465,8 +481,6 @@ class ConstCase extends SwitchCase {
   Expr getValue() { result.getParent() = this and result.getIndex() = 0 }
 
   /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
    * Gets the `case` constant at the specified index.
    */
   Expr getValue(int i) { result.getParent() = this and result.getIndex() = i and i >= 0 }
@@ -476,6 +490,8 @@ class ConstCase extends SwitchCase {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "ConstCase" }
+
+  override string getAPrimaryQlClass() { result = "ConstCase" }
 }
 
 /** A `default` case of a `switch` statement */
@@ -487,6 +503,8 @@ class DefaultCase extends SwitchCase {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "DefaultCase" }
+
+  override string getAPrimaryQlClass() { result = "DefaultCase" }
 }
 
 /** A `synchronized` statement. */
@@ -502,6 +520,8 @@ class SynchronizedStmt extends Stmt, @synchronizedstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "SynchronizedStmt" }
+
+  override string getAPrimaryQlClass() { result = "SynchronizedStmt" }
 }
 
 /** A `return` statement. */
@@ -514,6 +534,8 @@ class ReturnStmt extends Stmt, @returnstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "ReturnStmt" }
+
+  override string getAPrimaryQlClass() { result = "ReturnStmt" }
 }
 
 /** A `throw` statement. */
@@ -532,8 +554,8 @@ class ThrowStmt extends Stmt, @throwstmt {
 
   /**
    * Gets the `catch` clause that catches the exception
-   * thrown by this `throws` statement and occurs
-   * in the same method as this `throws` statement,
+   * thrown by this `throw` statement and occurs
+   * in the same method as this `throw` statement,
    * provided such a `catch` exists.
    */
   CatchClause getLexicalCatchIfAny() {
@@ -556,12 +578,15 @@ class ThrowStmt extends Stmt, @throwstmt {
     getExpr().getType().(RefType).hasSupertype*(result.getVariable().getType().(RefType)) and
     not this.getEnclosingStmt+() = result
   }
+
+  override string getAPrimaryQlClass() { result = "ThrowStmt" }
 }
 
-/** A `break` or `continue` statement. */
+/** A `break`, `yield` or `continue` statement. */
 class JumpStmt extends Stmt {
   JumpStmt() {
     this instanceof BreakStmt or
+    this instanceof YieldStmt or
     this instanceof ContinueStmt
   }
 
@@ -585,9 +610,7 @@ class JumpStmt extends Stmt {
     )
   }
 
-  private SwitchExpr getSwitchExprTarget() {
-    this.(BreakStmt).hasValue() and result = this.getParent+()
-  }
+  private SwitchExpr getSwitchExprTarget() { result = this.(YieldStmt).getParent+() }
 
   private StmtParent getEnclosingTarget() {
     result = getSwitchExprTarget()
@@ -598,7 +621,7 @@ class JumpStmt extends Stmt {
   }
 
   /**
-   * Gets the statement or `switch` expression that this `break` or `continue` jumps to.
+   * Gets the statement or `switch` expression that this `break`, `yield` or `continue` jumps to.
    */
   StmtParent getTarget() {
     result = getLabelTarget()
@@ -615,32 +638,31 @@ class BreakStmt extends Stmt, @breakstmt {
   /** Holds if this `break` statement has an explicit label. */
   predicate hasLabel() { exists(string s | s = this.getLabel()) }
 
-  /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
-   * Gets the value of this `break` statement, if any.
-   */
-  Expr getValue() { result.getParent() = this }
-
-  /**
-   * PREVIEW FEATURE in Java 12. Subject to removal in a future release.
-   *
-   * Holds if this `break` statement has a value.
-   */
-  predicate hasValue() { exists(Expr e | e.getParent() = this) }
-
   /** Gets a printable representation of this statement. May include more detail than `toString()`. */
   override string pp() {
-    if this.hasLabel()
-    then result = "break " + this.getLabel()
-    else
-      if this.hasValue()
-      then result = "break ..."
-      else result = "break"
+    if this.hasLabel() then result = "break " + this.getLabel() else result = "break"
   }
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "BreakStmt" }
+
+  override string getAPrimaryQlClass() { result = "BreakStmt" }
+}
+
+/**
+ * A `yield` statement.
+ */
+class YieldStmt extends Stmt, @yieldstmt {
+  /**
+   * Gets the value of this `yield` statement.
+   */
+  Expr getValue() { result.getParent() = this }
+
+  override string pp() { result = "yield ..." }
+
+  override string getHalsteadID() { result = "YieldStmt" }
+
+  override string getAPrimaryQlClass() { result = "YieldStmt" }
 }
 
 /** A `continue` statement. */
@@ -658,6 +680,8 @@ class ContinueStmt extends Stmt, @continuestmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "ContinueStmt" }
+
+  override string getAPrimaryQlClass() { result = "ContinueStmt" }
 }
 
 /** The empty statement. */
@@ -667,6 +691,8 @@ class EmptyStmt extends Stmt, @emptystmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "EmptyStmt" }
+
+  override string getAPrimaryQlClass() { result = "EmptyStmt" }
 }
 
 /**
@@ -695,6 +721,8 @@ class ExprStmt extends Stmt, @exprstmt {
       fdl.getStartColumn() = sl.getStartColumn()
     )
   }
+
+  override string getAPrimaryQlClass() { result = "ExprStmt" }
 }
 
 /** A labeled statement. */
@@ -710,6 +738,8 @@ class LabeledStmt extends Stmt, @labeledstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = this.getLabel() + ":" }
+
+  override string getAPrimaryQlClass() { result = "LabelStmt" }
 }
 
 /** An `assert` statement. */
@@ -727,6 +757,8 @@ class AssertStmt extends Stmt, @assertstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "AssertStmt" }
+
+  override string getAPrimaryQlClass() { result = "AssertStmt" }
 }
 
 /** A statement that declares one or more local variables. */
@@ -748,6 +780,8 @@ class LocalVariableDeclStmt extends Stmt, @localvariabledeclstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "LocalVariableDeclStmt" }
+
+  override string getAPrimaryQlClass() { result = "LocalVariableDeclStmt" }
 }
 
 /** A statement that declares a local class. */
@@ -760,6 +794,8 @@ class LocalClassDeclStmt extends Stmt, @localclassdeclstmt {
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "LocalClassDeclStmt" }
+
+  override string getAPrimaryQlClass() { result = "LocalClassDeclStmt" }
 }
 
 /** An explicit `this(...)` constructor invocation. */
@@ -801,6 +837,8 @@ class ThisConstructorInvocationStmt extends Stmt, ConstructorCall, @constructori
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "ConstructorInvocationStmt" }
+
+  override string getAPrimaryQlClass() { result = "ThisConstructorInvocationStmt" }
 }
 
 /** An explicit `super(...)` constructor invocation. */
@@ -843,4 +881,6 @@ class SuperConstructorInvocationStmt extends Stmt, ConstructorCall, @superconstr
 
   /** This statement's Halstead ID (used to compute Halstead metrics). */
   override string getHalsteadID() { result = "SuperConstructorInvocationStmt" }
+
+  override string getAPrimaryQlClass() { result = "SuperConstructorInvocationStmt" }
 }

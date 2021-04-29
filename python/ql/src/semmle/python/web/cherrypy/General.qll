@@ -2,55 +2,43 @@ import python
 import semmle.python.web.Http
 
 module CherryPy {
-
-    FunctionObject expose() {
-        result = ModuleObject::named("cherrypy").attr("expose")
-    }
-
+  FunctionValue expose() { result = Value::named("cherrypy.expose") }
 }
 
 class CherryPyExposedFunction extends Function {
-
-    CherryPyExposedFunction() {
-        this.getADecorator().refersTo(CherryPy::expose())
-        or
-        this.getADecorator().(Call).getFunc().refersTo(CherryPy::expose())
-    }
-
+  CherryPyExposedFunction() {
+    this.getADecorator().pointsTo(CherryPy::expose())
+    or
+    this.getADecorator().(Call).getFunc().pointsTo(CherryPy::expose())
+  }
 }
 
 class CherryPyRoute extends CallNode {
+  CherryPyRoute() {
+    /* cherrypy.quickstart(root, script_name, config) */
+    Value::named("cherrypy.quickstart").(FunctionValue).getACall() = this
+    or
+    /* cherrypy.tree.mount(root, script_name, config) */
+    this.getFunction().(AttrNode).getObject("mount").pointsTo(Value::named("cherrypy.tree"))
+  }
 
-    CherryPyRoute() {
-        /* cherrypy.quickstart(root, script_name, config) */
-        ModuleObject::named("cherrypy").attr("quickstart").(FunctionObject).getACall() = this
-        or
-        /* cherrypy.tree.mount(root, script_name, config) */
-        this.getFunction().(AttrNode).getObject("mount").refersTo(ModuleObject::named("cherrypy").attr("tree"))
-    }
+  ClassValue getAppClass() {
+    this.getArg(0).pointsTo().getClass() = result
+    or
+    this.getArgByName("root").pointsTo().getClass() = result
+  }
 
-    ClassObject getAppClass() {
-        this.getArg(0).refersTo(_, result, _)
-        or
-        this.getArgByName("root").refersTo(_, result, _)
-    }
+  string getPath() {
+    exists(Value path | path = Value::forString(result) |
+      this.getArg(1).pointsTo(path)
+      or
+      this.getArgByName("script_name").pointsTo(path)
+    )
+  }
 
-    string getPath() {
-        exists(StringObject path |
-            result = path.getText() 
-            |
-            this.getArg(1).refersTo(path)
-            or
-            this.getArgByName("script_name").refersTo(path)
-        )
-    }
-
-    Object getConfig() {
-        this.getArg(2).refersTo(_, result, _)
-        or
-        this.getArgByName("config").refersTo(_, result, _)
-    }
-
+  ClassValue getConfig() {
+    this.getArg(2).pointsTo().getClass() = result
+    or
+    this.getArgByName("config").pointsTo().getClass() = result
+  }
 }
-
-

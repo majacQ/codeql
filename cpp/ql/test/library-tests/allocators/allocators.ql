@@ -1,6 +1,9 @@
-import default
+import cpp
+import semmle.code.cpp.models.implementations.Allocation
 
-query predicate newExprs(NewExpr expr, string type, string sig, int size, int alignment, string form) {
+query predicate newExprs(
+  NewExpr expr, string type, string sig, int size, int alignment, string form, string placement
+) {
   exists(Function allocator, Type allocatedType |
     expr.getAllocator() = allocator and
     sig = allocator.getFullSignature() and
@@ -8,23 +11,37 @@ query predicate newExprs(NewExpr expr, string type, string sig, int size, int al
     type = allocatedType.toString() and
     size = allocatedType.getSize() and
     alignment = allocatedType.getAlignment() and
-    if expr.hasAlignedAllocation() then form = "aligned" else form = ""
+    (if expr.hasAlignedAllocation() then form = "aligned" else form = "") and
+    if exists(expr.getPlacementPointer())
+    then placement = expr.getPlacementPointer().toString()
+    else placement = ""
   )
 }
 
-query predicate newArrayExprs(NewArrayExpr expr, string type, string sig, int size, int alignment, string form) {
-  exists(Function allocator, Type elementType |
+query predicate newArrayExprs(
+  NewArrayExpr expr, string t1, string t2, string sig, int size, int alignment, string form,
+  string extents, string placement
+) {
+  exists(Function allocator, Type arrayType, Type elementType |
     expr.getAllocator() = allocator and
     sig = allocator.getFullSignature() and
+    arrayType = expr.getAllocatedType() and
+    t1 = arrayType.toString() and
     elementType = expr.getAllocatedElementType() and
-    type = elementType.toString() and
+    t2 = elementType.toString() and
     size = elementType.getSize() and
     alignment = elementType.getAlignment() and
-    if expr.hasAlignedAllocation() then form = "aligned" else form = ""
+    (if expr.hasAlignedAllocation() then form = "aligned" else form = "") and
+    extents = concat(Expr e | e = expr.getExtent() | e.toString(), ", ") and
+    if exists(expr.getPlacementPointer())
+    then placement = expr.getPlacementPointer().toString()
+    else placement = ""
   )
 }
 
-query predicate newExprDeallocators(NewExpr expr, string type, string sig, int size, int alignment, string form) {
+query predicate newExprDeallocators(
+  NewExpr expr, string type, string sig, int size, int alignment, string form
+) {
   exists(Function deallocator, Type allocatedType |
     expr.getDeallocator() = deallocator and
     sig = deallocator.getFullSignature() and
@@ -40,7 +57,9 @@ query predicate newExprDeallocators(NewExpr expr, string type, string sig, int s
   )
 }
 
-query predicate newArrayExprDeallocators(NewArrayExpr expr, string type, string sig, int size, int alignment, string form) {
+query predicate newArrayExprDeallocators(
+  NewArrayExpr expr, string type, string sig, int size, int alignment, string form
+) {
   exists(Function deallocator, Type elementType |
     expr.getDeallocator() = deallocator and
     sig = deallocator.getFullSignature() and
@@ -56,7 +75,9 @@ query predicate newArrayExprDeallocators(NewArrayExpr expr, string type, string 
   )
 }
 
-query predicate deleteExprs(DeleteExpr expr, string type, string sig, int size, int alignment, string form) {
+query predicate deleteExprs(
+  DeleteExpr expr, string type, string sig, int size, int alignment, string form
+) {
   exists(Function deallocator, Type deletedType |
     expr.getDeallocator() = deallocator and
     sig = deallocator.getFullSignature() and
@@ -72,7 +93,9 @@ query predicate deleteExprs(DeleteExpr expr, string type, string sig, int size, 
   )
 }
 
-query predicate deleteArrayExprs(DeleteArrayExpr expr, string type, string sig, int size, int alignment, string form) {
+query predicate deleteArrayExprs(
+  DeleteArrayExpr expr, string type, string sig, int size, int alignment, string form
+) {
   exists(Function deallocator, Type elementType |
     expr.getDeallocator() = deallocator and
     sig = deallocator.getFullSignature() and
@@ -86,4 +109,57 @@ query predicate deleteArrayExprs(DeleteArrayExpr expr, string type, string sig, 
       form = sized + " " + aligned
     )
   )
+}
+
+string describeAllocationFunction(AllocationFunction f) {
+  result = "getSizeArg = " + f.getSizeArg().toString()
+  or
+  result = "getSizeMult = " + f.getSizeMult().toString()
+  or
+  result = "getReallocPtrArg = " + f.getReallocPtrArg().toString()
+  or
+  f.requiresDealloc() and
+  result = "requiresDealloc"
+  or
+  result =
+    "getPlacementArgument = " + f.(OperatorNewAllocationFunction).getPlacementArgument().toString()
+}
+
+query predicate allocationFunctions(AllocationFunction f, string descr) {
+  descr = concat(describeAllocationFunction(f), ", ")
+}
+
+string describeAllocationExpr(AllocationExpr e) {
+  result = "getSizeExpr = " + e.getSizeExpr().toString()
+  or
+  result = "getSizeMult = " + e.getSizeMult().toString()
+  or
+  result = "getSizeBytes = " + e.getSizeBytes().toString()
+  or
+  result = "getReallocPtr = " + e.getReallocPtr().toString()
+  or
+  result = "getAllocatedElementType = " + e.getAllocatedElementType().toString()
+  or
+  e.requiresDealloc() and
+  result = "requiresDealloc"
+}
+
+query predicate allocationExprs(AllocationExpr e, string descr) {
+  descr = concat(describeAllocationExpr(e), ", ")
+}
+
+string describeDeallocationFunction(DeallocationFunction f) {
+  result = "getFreedArg = " + f.getFreedArg().toString()
+}
+
+query predicate deallocationFunctions(DeallocationFunction f, string descr) {
+  descr = concat(describeDeallocationFunction(f), ", ")
+}
+
+string describeDeallocationExpr(DeallocationExpr e) {
+  result = "getFreedExpr = " + e.getFreedExpr().toString()
+}
+
+query predicate deallocationExprs(DeallocationExpr e, string descr) {
+  descr = concat(describeDeallocationExpr(e), ", ")
 }

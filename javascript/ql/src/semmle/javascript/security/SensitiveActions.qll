@@ -63,12 +63,14 @@ module HeuristicNames {
 
   /**
    * Gets a regular expression that identifies strings that may indicate the presence of data
-   * that is hashed or encrypted, and hence rendered non-sensitive.
+   * that is hashed or encrypted, and hence rendered non-sensitive, or contains special characters
+   * suggesting nouns within the string do not represent the meaning of the whole string (e.g. a URL or a SQL query).
    */
   string notSensitive() {
-    result = "(?is).*(redact|censor|obfuscate|hash|md5|sha|((?<!un)(en))?(crypt|code)).*"
+    result = "(?is).*([^\\w$.-]|redact|censor|obfuscate|hash|md5|sha|((?<!un)(en))?(crypt|code)).*"
   }
 }
+
 private import HeuristicNames
 
 /** An expression that might contain sensitive data. */
@@ -243,4 +245,22 @@ class CleartextPasswordExpr extends SensitiveExpr {
   override string describe() { none() }
 
   override SensitiveExpr::Classification getClassification() { none() }
+}
+
+/**
+ * Provides heuristics for classifying passwords.
+ */
+module PasswordHeuristics {
+  /**
+   * Holds if `password` looks like a deliberately weak password that the user should change.
+   */
+  bindingset[password]
+  predicate isDummyPassword(string password) {
+    password.length() < 4
+    or
+    exists(string normalized | normalized = password.toLowerCase() |
+      count(normalized.charAt(_)) = 1 or
+      normalized.regexpMatch(".*(pass|test|sample|example|secret|root|admin|user|change|auth).*")
+    )
+  }
 }

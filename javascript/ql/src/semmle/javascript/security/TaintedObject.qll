@@ -36,7 +36,7 @@ module TaintedObject {
    */
   predicate step(Node src, Node trg, FlowLabel inlbl, FlowLabel outlbl) {
     // JSON parsers map tainted inputs to tainted JSON
-    (inlbl = FlowLabel::data() or inlbl = FlowLabel::taint()) and
+    inlbl.isDataOrTaint() and
     outlbl = label() and
     exists(JsonParserCall parse |
       src = parse.getInput() and
@@ -63,6 +63,14 @@ module TaintedObject {
       src = call.getASourceOperand() and
       trg = call.getDestinationOperand().getALocalSource()
     )
+    or
+    // Spreading into an object preserves deep object taint: `p -> { ...p }`
+    inlbl = label() and
+    outlbl = label() and
+    exists(ObjectLiteralNode obj |
+      src = obj.getASpreadProperty() and
+      trg = obj
+    )
   }
 
   /**
@@ -83,17 +91,14 @@ module TaintedObject {
   /**
    * Sanitizer guard that blocks deep object taint.
    */
-  abstract class SanitizerGuard extends TaintTracking::LabeledSanitizerGuardNode {
-  }
+  abstract class SanitizerGuard extends TaintTracking::LabeledSanitizerGuardNode { }
 
   /**
    * A test of form `typeof x === "something"`, preventing `x` from being an object in some cases.
    */
   private class TypeTestGuard extends SanitizerGuard, ValueNode {
     override EqualityTest astNode;
-
     TypeofExpr typeof;
-
     boolean polarity;
 
     TypeTestGuard() {

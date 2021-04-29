@@ -1,39 +1,39 @@
 import cpp
 private import PrimitiveBasicBlocks
+private import semmle.code.cpp.controlflow.internal.CFG
+
 private class Node = ControlFlowNodeBase;
+
 import Cached
 
 cached
 private module Cached {
   /** A call to a function known not to return. */
   cached
-  predicate aborting(FunctionCall c) {
-    not potentiallyReturningFunctionCall(c)
-  }
+  predicate aborting(FunctionCall c) { not potentiallyReturningFunctionCall(c) }
 
   /**
    * Functions that are known not to return. This is normally because the function
    * exits the program or longjmps to another location.
    */
   cached
-  predicate abortingFunction(Function f) {
-    not potentiallyReturningFunction(f)
-  }
+  predicate abortingFunction(Function f) { not potentiallyReturningFunction(f) }
 
   /**
    * An adapted version of the `successors_extended` relation that excludes
    * impossible control-flow edges - flow will never occur along these
    * edges, so it is safe (and indeed sensible) to remove them.
    */
-  cached predicate successors_adapted(Node pred, Node succ) {
-    successors_extended(pred, succ)
-    and possiblePredecessor(pred)
-    and not impossibleFalseEdge(pred, succ)
-    and not impossibleTrueEdge(pred, succ)
-    and not impossibleSwitchEdge(pred, succ)
-    and not impossibleDefaultSwitchEdge(pred, succ)
-    and not impossibleFunctionReturn(pred, succ)
-    and not getOptions().exprExits(pred)
+  cached
+  predicate successors_adapted(Node pred, Node succ) {
+    successors_extended(pred, succ) and
+    possiblePredecessor(pred) and
+    not impossibleFalseEdge(pred, succ) and
+    not impossibleTrueEdge(pred, succ) and
+    not impossibleSwitchEdge(pred, succ) and
+    not impossibleDefaultSwitchEdge(pred, succ) and
+    not impossibleFunctionReturn(pred, succ) and
+    not getOptions().exprExits(pred)
   }
 
   /**
@@ -53,19 +53,16 @@ private module Cached {
      * `if` statement as a whole is reachable.
      */
     cached
-    predicate reachable(ControlFlowNode n)
-    {
+    predicate reachable(ControlFlowNode n) {
       // Okay to use successors_extended directly here
       reachableRecursive(n)
       or
-      (not successors_extended(_,n) and not successors_extended(n,_))
+      not successors_extended(_, n) and not successors_extended(n, _)
     }
 
     /** Holds if `condition` always evaluates to a nonzero value. */
     cached
-    predicate conditionAlwaysTrue(Expr condition) {
-      conditionAlways(condition, true)
-    }
+    predicate conditionAlwaysTrue(Expr condition) { conditionAlways(condition, true) }
 
     /** Holds if `condition` always evaluates to zero. */
     cached
@@ -89,8 +86,7 @@ private module Cached {
 }
 
 private predicate conditionAlways(Expr condition, boolean b) {
-  exists(ConditionEvaluator x, int val |
-    val = x.getValue(condition) |
+  exists(ConditionEvaluator x, int val | val = x.getValue(condition) |
     val != 0 and b = true
     or
     val = 0 and b = false
@@ -100,55 +96,22 @@ private predicate conditionAlways(Expr condition, boolean b) {
 private predicate loopConditionAlwaysUponEntry(ControlFlowNode loop, Expr condition, boolean b) {
   exists(LoopEntryConditionEvaluator x, int val |
     x.isLoopEntry(condition, loop) and
-    val = x.getValue(condition) |
+    val = x.getValue(condition)
+  |
     val != 0 and b = true
     or
     val = 0 and b = false
   )
 }
 
-/**
- * This relation is the same as the `el instanceof Function`, only obfuscated
- * so the optimizer will not understand that any `FunctionCall.getTarget()`
- * should be in this relation.
- */
-pragma[noinline]
-private predicate isFunction(Element el) {
-  el instanceof Function
-  or
-  el.(Expr).getParent() = el
-}
-
-/**
- * Holds if `fc` is a `FunctionCall` with no return value for `getTarget`. This
- * can happen due to extractor issue CPP-383.
- */
-pragma[noopt]
-private predicate callHasNoTarget(@funbindexpr fc) {
-  exists(Function f |
-    funbind(fc, f) and
-    not isFunction(f)
-  )
-}
-
-// This base case is pulled out to work around QL-796
-private predicate potentiallyReturningFunctionCall_base(FunctionCall fc) {
-  fc.isVirtual()
-  or
-  callHasNoTarget(fc)
-}
-
 /** A function call that *may* return; if in doubt, we assume it may. */
 private predicate potentiallyReturningFunctionCall(FunctionCall fc) {
-  potentiallyReturningFunctionCall_base(fc)
-  or
-  potentiallyReturningFunction(fc.getTarget())
+  potentiallyReturningFunction(fc.getTarget()) or fc.isVirtual()
 }
 
 /** A function that *may* return; if in doubt, we assume it may. */
 private predicate potentiallyReturningFunction(Function f) {
-  not getOptions().exits(f)
-  and
+  not getOptions().exits(f) and
   (
     nonAnalyzableFunction(f)
     or
@@ -175,10 +138,12 @@ private predicate nonAnalyzableFunction(Function f) {
    * faster than transitive closure of the much larger `successors_extended`
    * relation).
    */
+
   not exists(PrimitiveBasicBlock bb1, int pos1, PrimitiveBasicBlock bb2, int pos2 |
     f.getEntryPoint() = bb1.getNode(pos1) and
-    f = bb2.getNode(pos2) |
-    (bb1 = bb2 and pos2 > pos1)
+    f = bb2.getNode(pos2)
+  |
+    bb1 = bb2 and pos2 > pos1
     or
     bb1.getASuccessor+() = bb2
   )
@@ -188,18 +153,18 @@ private predicate nonAnalyzableFunction(Function f) {
  * If a condition is provably true, then control-flow edges to its false successors are impossible.
  */
 private predicate impossibleFalseEdge(Expr condition, Node succ) {
-  conditionAlwaysTrue(condition)
-  and falsecond_base(condition,succ)
-  and not truecond_base(condition,succ)
+  conditionAlwaysTrue(condition) and
+  qlCFGFalseSuccessor(condition, succ) and
+  not qlCFGTrueSuccessor(condition, succ)
 }
 
 /**
  * If a condition is provably false, then control-flow edges to its true successors are impossible.
  */
 private predicate impossibleTrueEdge(Expr condition, Node succ) {
-  conditionAlwaysFalse(condition)
-  and truecond_base(condition,succ)
-  and not falsecond_base(condition,succ)
+  conditionAlwaysFalse(condition) and
+  qlCFGTrueSuccessor(condition, succ) and
+  not qlCFGFalseSuccessor(condition, succ)
 }
 
 /**
@@ -217,7 +182,7 @@ private int switchCaseRangeEnd(SwitchCase sc) {
  * body `switchBlock`. There may be several such expressions: for example, if
  * the condition is `(x ? y : z)` then the result is {`y`, `z`}.
  */
-private Node getASwitchExpr(SwitchStmt switch, Block switchBlock) {
+private Node getASwitchExpr(SwitchStmt switch, BlockStmt switchBlock) {
   switch.getStmt() = switchBlock and
   successors_extended(result, switchBlock)
 }
@@ -227,38 +192,44 @@ private Node getASwitchExpr(SwitchStmt switch, Block switchBlock) {
  * from `switchBlock` to `sc` is impossible. This considers only non-`default`
  * switch cases.
  */
-private predicate impossibleSwitchEdge(Block switchBlock, SwitchCase sc) {
+private predicate impossibleSwitchEdge(BlockStmt switchBlock, SwitchCase sc) {
   not sc instanceof DefaultCase and
   exists(SwitchStmt switch |
-         switch = sc.getSwitchStmt()
-     and switch.getStmt() = switchBlock
-         // If all of the successors have known values, and none of those
-         // values are in our range, then this edge is impossible.
-     and forall(Node n |
-                n = getASwitchExpr(switch, switchBlock) |
-                exists(int switchValue |
-                       switchValue = getSwitchValue(n)
-                       and (switchValue < sc.getExpr().(CompileTimeConstantInt).getIntValue() or
-                            switchValue > switchCaseRangeEnd(sc)))))
+    switch = sc.getSwitchStmt() and
+    switch.getStmt() = switchBlock and
+    // If all of the successors have known values, and none of those
+    // values are in our range, then this edge is impossible.
+    forall(Node n | n = getASwitchExpr(switch, switchBlock) |
+      exists(int switchValue |
+        switchValue = getSwitchValue(n) and
+        (
+          switchValue < sc.getExpr().(CompileTimeConstantInt).getIntValue() or
+          switchValue > switchCaseRangeEnd(sc)
+        )
+      )
+    )
+  )
 }
 
 /**
  * If a switch provably always chooses a non-default case, then the edge to
  * the default case is impossible.
  */
-private predicate impossibleDefaultSwitchEdge(Block switchBlock, DefaultCase dc) {
+private predicate impossibleDefaultSwitchEdge(BlockStmt switchBlock, DefaultCase dc) {
   exists(SwitchStmt switch |
-         switch = dc.getSwitchStmt()
-     and switch.getStmt() = switchBlock
-         // If all of the successors lead to other switch cases
-         // then this edge is impossible.
-     and forall(Node n |
-                n = getASwitchExpr(switch, switchBlock) |
-                exists(SwitchCase sc, int val |
-                       sc.getSwitchStmt() = switch and
-                       val = getSwitchValue(n) and
-                       val >= sc.getExpr().(CompileTimeConstantInt).getIntValue() and
-                       val <= switchCaseRangeEnd(sc))))
+    switch = dc.getSwitchStmt() and
+    switch.getStmt() = switchBlock and
+    // If all of the successors lead to other switch cases
+    // then this edge is impossible.
+    forall(Node n | n = getASwitchExpr(switch, switchBlock) |
+      exists(SwitchCase sc, int val |
+        sc.getSwitchStmt() = switch and
+        val = getSwitchValue(n) and
+        val >= sc.getExpr().(CompileTimeConstantInt).getIntValue() and
+        val <= switchCaseRangeEnd(sc)
+      )
+    )
+  )
 }
 
 /**
@@ -267,8 +238,7 @@ private predicate impossibleDefaultSwitchEdge(Block switchBlock, DefaultCase dc)
  * a lightweight `potentiallyReturningFunction`- reachability of return
  * statements is not checked.
  */
-private predicate nonReturningFunction(Function f)
-{
+private predicate nonReturningFunction(Function f) {
   exists(f.getBlock()) and
   not exists(ReturnStmt ret | ret.getEnclosingFunction() = f) and
   not getOptions().exits(f)
@@ -301,8 +271,7 @@ private predicate possiblePredecessor(Node pred) {
  * the call to `f` is not reachable in `if (0) f();` even if the
  * `if` statement as a whole is reachable.
  */
-private predicate reachableRecursive(ControlFlowNode n)
-{
+private predicate reachableRecursive(ControlFlowNode n) {
   exists(Function f | f.getEntryPoint() = n)
   or
   n instanceof Handler
@@ -310,26 +279,62 @@ private predicate reachableRecursive(ControlFlowNode n)
   reachableRecursive(n.getAPredecessor())
 }
 
+/** Holds if `e` is a compile time constant with integer value `val`. */
 private predicate compileTimeConstantInt(Expr e, int val) {
-  val = e.getFullyConverted().getValue().toInt() and
-  not e instanceof StringLiteral and
-  not exists(Expr e1 | e1.getConversion() = e) // only values for fully converted expressions
+  (
+    // If we have an integer value then we are done.
+    if exists(e.getValue().toInt())
+    then val = e.getValue().toInt()
+    else
+      // Otherwise, if we are a conversion of another expression with an
+      // integer value, and that value can be converted into our type,
+      // then we have that value.
+      exists(Expr x, int valx |
+        x.getConversion() = e and
+        compileTimeConstantInt(x, valx) and
+        val = convertIntToType(valx, e.getType().getUnspecifiedType())
+      )
+  ) and
+  // If our unconverted expression is a string literal `"123"`, then we
+  // do not have integer value `123`.
+  not e.getUnconverted() instanceof StringLiteral
 }
 
-library class CompileTimeConstantInt extends Expr {
-  CompileTimeConstantInt() {
-    compileTimeConstantInt(this, _)
-  }
+/**
+ * Get `val` represented as type `t`, if that is possible without
+ * overflow or underflows.
+ */
+bindingset[val, t]
+private int convertIntToType(int val, IntegralType t) {
+  if t instanceof BoolType
+  then if val = 0 then result = 0 else result = 1
+  else
+    if t.isUnsigned()
+    then if val >= 0 and val.bitShiftRight(t.getSize() * 8) = 0 then result = val else none()
+    else
+      if val >= 0 and val.bitShiftRight(t.getSize() * 8 - 1) = 0
+      then result = val
+      else
+        if (-(val + 1)).bitShiftRight(t.getSize() * 8 - 1) = 0
+        then result = val
+        else none()
+}
 
-  int getIntValue() {
-    compileTimeConstantInt(this, result)
-  }
+/**
+ * INTERNAL: Do not use.
+ * An expression that has been found to have an integer value at compile
+ * time.
+ */
+class CompileTimeConstantInt extends Expr {
+  int val;
+
+  CompileTimeConstantInt() { compileTimeConstantInt(this.getFullyConverted(), val) }
+
+  int getIntValue() { result = val }
 }
 
 library class CompileTimeVariableExpr extends Expr {
-  CompileTimeVariableExpr() {
-    not compileTimeConstantInt(this, _)
-  }
+  CompileTimeVariableExpr() { not this instanceof CompileTimeConstantInt }
 }
 
 /** A helper class for evaluation of expressions. */
@@ -340,6 +345,7 @@ library class ExprEvaluator extends int {
    * 2 = WhileLoopEntryConditionEvaluator,
    * 3 = ForLoopEntryConditionEvaluator
    */
+
   ExprEvaluator() { this in [0 .. 3] }
 
   /** `e` is an expression for which we want to calculate a value. */
@@ -377,7 +383,6 @@ library class ExprEvaluator extends int {
   predicate allowVariableWithoutInitializer(Expr e, Variable v) { none() }
 
   /* Internal implementation predicates below */
-
   /**
    * `req` is an expression for which a value is required to be evaluated in
    * order to calculate a value for interesting expression `e`. `sub`
@@ -389,8 +394,7 @@ library class ExprEvaluator extends int {
   predicate interestingInternal(Expr e, Expr req, boolean sub) {
     interesting(e) and req = e and sub = true
     or
-    exists(Expr mid |
-      interestingInternal(e, mid, sub) |
+    exists(Expr mid | interestingInternal(e, mid, sub) |
       req = mid.(NotExpr).getOperand() or
       req = mid.(BinaryLogicalOperation).getAnOperand() or
       req = mid.(RelationalOperation).getAnOperand() or
@@ -421,34 +425,34 @@ library class ExprEvaluator extends int {
   private predicate interestingVariableAccess(Expr e, VariableAccess va, Variable v, boolean sub) {
     interestingInternal(e, va, sub) and
     v = getVariableTarget(va) and
-    (v.hasInitializer() or sub = true and allowVariableWithoutInitializer(e, v)) and
+    (
+      v.hasInitializer()
+      or
+      sub = true and allowVariableWithoutInitializer(e, v)
+    ) and
     tractableVariable(v) and
-    forall(StmtParent def |
-      nonAnalyzableVariableDefinition(v, def) |
+    forall(StmtParent def | nonAnalyzableVariableDefinition(v, def) |
       sub = true and
       ignoreNonAnalyzableVariableDefinition(e, v, def)
     )
   }
 
   private predicate interestingFunction(Expr e, Function f) {
-    exists(FunctionCall fc |
-      interestingInternal(e, fc, _) |
-      f = fc.getTarget()
-      and not obviouslyNonConstant(f)
-      and not f.getUnspecifiedType() instanceof VoidType
+    exists(FunctionCall fc | interestingInternal(e, fc, _) |
+      f = fc.getTarget() and
+      not obviouslyNonConstant(f) and
+      not f.getUnspecifiedType() instanceof VoidType
     )
   }
 
   /** Gets the value of subexpressions `req` for expression `e`, if any. */
   private int getValueInternal(Expr e, Expr req) {
     (
-      interestingInternal(e, req, true)
-      and
+      interestingInternal(e, req, true) and
       (
         result = req.(CompileTimeConstantInt).getIntValue() or
-        result = getCompoundValue(e, (CompileTimeVariableExpr)req)
-      )
-      and
+        result = getCompoundValue(e, req.(CompileTimeVariableExpr))
+      ) and
       (
         req.getUnderlyingType().(IntegralType).isSigned() or
         result >= 0
@@ -458,113 +462,124 @@ library class ExprEvaluator extends int {
 
   /** Gets the value of compound subexpressions `val` for expression `e`, if any. */
   private int getCompoundValue(Expr e, CompileTimeVariableExpr val) {
-    interestingInternal(e, val, true)
-    and
+    interestingInternal(e, val, true) and
     (
-      exists(NotExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getOperand()) = 0 or
+      exists(NotExpr req | req = val |
+        result = 1 and getValueInternal(e, req.getOperand()) = 0
+        or
         result = 0 and getValueInternal(e, req.getOperand()) != 0
       )
       or
-      exists(LogicalAndExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getLeftOperand()) != 0 and getValueInternal(e, req.getRightOperand()) != 0 or
+      exists(LogicalAndExpr req | req = val |
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) != 0 and
+        getValueInternal(e, req.getRightOperand()) != 0
+        or
         result = 0 and getValueInternal(e, req.getAnOperand()) = 0
       )
       or
-      exists(LogicalOrExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getAnOperand()) != 0  or
-        result = 0 and getValueInternal(e, req.getLeftOperand()) = 0 and getValueInternal(e, req.getRightOperand()) = 0
+      exists(LogicalOrExpr req | req = val |
+        result = 1 and getValueInternal(e, req.getAnOperand()) != 0
+        or
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) = 0 and
+        getValueInternal(e, req.getRightOperand()) = 0
       )
       or
-      exists(LTExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getLeftOperand()) < getValueInternal(e, req.getRightOperand()) or
-        result = 0 and getValueInternal(e, req.getLeftOperand()) >= getValueInternal(e, req.getRightOperand())
+      exists(LTExpr req | req = val |
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) < getValueInternal(e, req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) >= getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(GTExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getLeftOperand()) > getValueInternal(e, req.getRightOperand()) or
-        result = 0 and getValueInternal(e, req.getLeftOperand()) <= getValueInternal(e, req.getRightOperand())
+      exists(GTExpr req | req = val |
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) > getValueInternal(e, req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) <= getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(LEExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getLeftOperand()) <= getValueInternal(e, req.getRightOperand()) or
-        result = 0 and getValueInternal(e, req.getLeftOperand()) > getValueInternal(e, req.getRightOperand())
+      exists(LEExpr req | req = val |
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) <= getValueInternal(e, req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) > getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(GEExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getLeftOperand()) >= getValueInternal(e, req.getRightOperand()) or
-        result = 0 and getValueInternal(e, req.getLeftOperand()) < getValueInternal(e, req.getRightOperand())
+      exists(GEExpr req | req = val |
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) >= getValueInternal(e, req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) < getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(EQExpr req |
-        req = val |
-        result = 1 and getValueInternal(e, req.getLeftOperand()) = getValueInternal(e, req.getRightOperand()) or
-        result = 0 and getValueInternal(e, req.getLeftOperand()) != getValueInternal(e, req.getRightOperand())
+      exists(EQExpr req | req = val |
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) = getValueInternal(e, req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) != getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(NEExpr req |
-        req = val |
-        result = 0 and getValueInternal(e, req.getLeftOperand()) = getValueInternal(e, req.getRightOperand()) or
-        result = 1 and getValueInternal(e, req.getLeftOperand()) != getValueInternal(e, req.getRightOperand())
+      exists(NEExpr req | req = val |
+        result = 0 and
+        getValueInternal(e, req.getLeftOperand()) = getValueInternal(e, req.getRightOperand())
+        or
+        result = 1 and
+        getValueInternal(e, req.getLeftOperand()) != getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(AddExpr req |
-        req = val |
-        result = getValueInternal(e, req.getLeftOperand()) + getValueInternal(e, req.getRightOperand())
+      exists(AddExpr req | req = val |
+        result =
+          getValueInternal(e, req.getLeftOperand()) + getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(SubExpr req |
-        req = val |
-        result = getValueInternal(e, req.getLeftOperand()) - getValueInternal(e, req.getRightOperand())
+      exists(SubExpr req | req = val |
+        result =
+          getValueInternal(e, req.getLeftOperand()) - getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(MulExpr req |
-        req = val |
-        result = getValueInternal(e, req.getLeftOperand()) * getValueInternal(e, req.getRightOperand())
+      exists(MulExpr req | req = val |
+        result =
+          getValueInternal(e, req.getLeftOperand()) * getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(RemExpr req |
-        req = val |
-        result = getValueInternal(e, req.getLeftOperand()) % getValueInternal(e, req.getRightOperand())
+      exists(RemExpr req | req = val |
+        result =
+          getValueInternal(e, req.getLeftOperand()) % getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(DivExpr req |
-        req = val |
-        result = getValueInternal(e, req.getLeftOperand()) / getValueInternal(e, req.getRightOperand())
+      exists(DivExpr req | req = val |
+        result =
+          getValueInternal(e, req.getLeftOperand()) / getValueInternal(e, req.getRightOperand())
       )
       or
-      exists(AssignExpr req |
-        req = val |
-        result = getValueInternal(e, req.getRValue())
+      exists(AssignExpr req | req = val | result = getValueInternal(e, req.getRValue()))
+      or
+      result = getVariableValue(e, val.(VariableAccess))
+      or
+      exists(FunctionCall call | call = val and not callWithMultipleTargets(call) |
+        result = getFunctionValue(call.getTarget())
       )
-      or
-      result = getVariableValue(e, (VariableAccess)val)
-      or
-      exists(FunctionCall call |
-        call = val and not callWithMultipleTargets(call) |
-        result = getFunctionValue(call.getTarget()))
     )
   }
 
   language[monotonicAggregates]
   private int getVariableValue(Expr e, VariableAccess va) {
     exists(Variable v |
-      interestingVariableAccess(e, va, v, true)
-      and
+      interestingVariableAccess(e, va, v, true) and
       // All assignments must have the same int value
-      result = min(Expr value | value = v.getAnAssignedValue() and not ignoreVariableAssignment(e, v, value) |
-        getValueInternalNonSubExpr(value)
-      ) and
-      result = max(Expr value | value = v.getAnAssignedValue() and not ignoreVariableAssignment(e, v, value) |
-        getValueInternalNonSubExpr(value)
-      )
+      result =
+        unique(Expr value |
+          value = v.getAnAssignedValue() and not ignoreVariableAssignment(e, v, value)
+        |
+          getValueInternalNonSubExpr(value)
+        )
     )
   }
 
@@ -593,13 +608,11 @@ library class ExprEvaluator extends int {
    * omitted).
    */
   private int getValueInternalNonSubExpr(Expr req) {
-    interestingInternal(_, req, false)
-    and
+    interestingInternal(_, req, false) and
     (
       result = req.(CompileTimeConstantInt).getIntValue() or
-      result = getCompoundValueNonSubExpr((CompileTimeVariableExpr)req)
-    )
-    and
+      result = getCompoundValueNonSubExpr(req.(CompileTimeVariableExpr))
+    ) and
     (
       req.getUnderlyingType().(IntegralType).isSigned() or
       result >= 0
@@ -608,95 +621,125 @@ library class ExprEvaluator extends int {
 
   private int getCompoundValueNonSubExpr(CompileTimeVariableExpr val) {
     (
-      exists(NotExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getOperand()) = 0 or
+      exists(NotExpr req | req = val |
+        result = 1 and getValueInternalNonSubExpr(req.getOperand()) = 0
+        or
         result = 0 and getValueInternalNonSubExpr(req.getOperand()) != 0
       )
       or
-      exists(LogicalAndExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) != 0 and getValueInternalNonSubExpr(req.getRightOperand()) != 0 or
+      exists(LogicalAndExpr req | req = val |
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) != 0 and
+        getValueInternalNonSubExpr(req.getRightOperand()) != 0
+        or
         result = 0 and getValueInternalNonSubExpr(req.getAnOperand()) = 0
       )
       or
-      exists(LogicalOrExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getAnOperand()) != 0  or
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) = 0 and getValueInternalNonSubExpr(req.getRightOperand()) = 0
+      exists(LogicalOrExpr req | req = val |
+        result = 1 and getValueInternalNonSubExpr(req.getAnOperand()) != 0
+        or
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) = 0 and
+        getValueInternalNonSubExpr(req.getRightOperand()) = 0
       )
       or
-      exists(LTExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) < getValueInternalNonSubExpr(req.getRightOperand()) or
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) >= getValueInternalNonSubExpr(req.getRightOperand())
+      exists(LTExpr req | req = val |
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) <
+          getValueInternalNonSubExpr(req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) >=
+          getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(GTExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) > getValueInternalNonSubExpr(req.getRightOperand()) or
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) <= getValueInternalNonSubExpr(req.getRightOperand())
+      exists(GTExpr req | req = val |
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) >
+          getValueInternalNonSubExpr(req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) <=
+          getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(LEExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) <= getValueInternalNonSubExpr(req.getRightOperand()) or
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) > getValueInternalNonSubExpr(req.getRightOperand())
+      exists(LEExpr req | req = val |
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) <=
+          getValueInternalNonSubExpr(req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) >
+          getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(GEExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) >= getValueInternalNonSubExpr(req.getRightOperand()) or
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) < getValueInternalNonSubExpr(req.getRightOperand())
+      exists(GEExpr req | req = val |
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) >=
+          getValueInternalNonSubExpr(req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) <
+          getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(EQExpr req |
-        req = val |
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) = getValueInternalNonSubExpr(req.getRightOperand()) or
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) != getValueInternalNonSubExpr(req.getRightOperand())
+      exists(EQExpr req | req = val |
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) =
+          getValueInternalNonSubExpr(req.getRightOperand())
+        or
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) !=
+          getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(NEExpr req |
-        req = val |
-        result = 0 and getValueInternalNonSubExpr(req.getLeftOperand()) = getValueInternalNonSubExpr(req.getRightOperand()) or
-        result = 1 and getValueInternalNonSubExpr(req.getLeftOperand()) != getValueInternalNonSubExpr(req.getRightOperand())
+      exists(NEExpr req | req = val |
+        result = 0 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) =
+          getValueInternalNonSubExpr(req.getRightOperand())
+        or
+        result = 1 and
+        getValueInternalNonSubExpr(req.getLeftOperand()) !=
+          getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(AddExpr req |
-        req = val |
-        result = getValueInternalNonSubExpr(req.getLeftOperand()) + getValueInternalNonSubExpr(req.getRightOperand())
+      exists(AddExpr req | req = val |
+        result =
+          getValueInternalNonSubExpr(req.getLeftOperand()) +
+            getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(SubExpr req |
-        req = val |
-        result = getValueInternalNonSubExpr(req.getLeftOperand()) - getValueInternalNonSubExpr(req.getRightOperand())
+      exists(SubExpr req | req = val |
+        result =
+          getValueInternalNonSubExpr(req.getLeftOperand()) -
+            getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(MulExpr req |
-        req = val |
-        result = getValueInternalNonSubExpr(req.getLeftOperand()) * getValueInternalNonSubExpr(req.getRightOperand())
+      exists(MulExpr req | req = val |
+        result =
+          getValueInternalNonSubExpr(req.getLeftOperand()) *
+            getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(RemExpr req |
-        req = val |
-        result = getValueInternalNonSubExpr(req.getLeftOperand()) % getValueInternalNonSubExpr(req.getRightOperand())
+      exists(RemExpr req | req = val |
+        result =
+          getValueInternalNonSubExpr(req.getLeftOperand()) %
+            getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(DivExpr req |
-        req = val |
-        result = getValueInternalNonSubExpr(req.getLeftOperand()) / getValueInternalNonSubExpr(req.getRightOperand())
+      exists(DivExpr req | req = val |
+        result =
+          getValueInternalNonSubExpr(req.getLeftOperand()) /
+            getValueInternalNonSubExpr(req.getRightOperand())
       )
       or
-      exists(AssignExpr req |
-        req = val |
-        result = getValueInternalNonSubExpr(req.getRValue())
-      )
+      exists(AssignExpr req | req = val | result = getValueInternalNonSubExpr(req.getRValue()))
       or
       result = getVariableValueNonSubExpr(val.(VariableAccess))
       or
-      exists(FunctionCall call |
-        call = val and not callWithMultipleTargets(call) |
-        result = getFunctionValue(call.getTarget()))
+      exists(FunctionCall call | call = val and not callWithMultipleTargets(call) |
+        result = getFunctionValue(call.getTarget())
+      )
     )
   }
 
@@ -714,8 +757,7 @@ library class ExprEvaluator extends int {
   pragma[noopt]
   private int getMinVariableValueNonSubExpr(VariableAccess va) {
     exists(Variable v |
-      interestingVariableAccess(_, va, v, false)
-      and
+      interestingVariableAccess(_, va, v, false) and
       result = min(Expr value | value = v.getAnAssignedValue() | getValueInternalNonSubExpr(value))
     )
   }
@@ -751,8 +793,7 @@ private predicate callWithMultipleTargets(FunctionCall call) {
 
 // Folded predicate for proper join-order
 private Variable getVariableTarget(VariableAccess va) {
-  result = va.getTarget()
-  and
+  result = va.getTarget() and
   (result instanceof LocalVariable or result instanceof GlobalOrNamespaceVariable)
 }
 
@@ -764,8 +805,7 @@ private Variable getVariableTarget(VariableAccess va) {
 private predicate nonAnalyzableVariableDefinition(Variable v, StmtParent def) {
   def.(AddressOfExpr).getAddressable() = v
   or
-  exists(VariableAccess va |
-    va.getTarget() = v |
+  exists(VariableAccess va | va.getTarget() = v |
     definitionByReference(va, def)
     or
     def.(CrementOperation).getAnOperand() = va
@@ -811,14 +851,17 @@ private Expr parameterAccess(Parameter p) {
  */
 private predicate obviouslyNonConstant(Function f) {
   // May return multiple distinct constant values
-  1 < strictcount(Expr e, string value | returnStmt(f, e) and value = e.getValue()) or
+  1 < strictcount(Expr e, string value | returnStmt(f, e) and value = e.getValue())
+  or
   // May return a parameter without reassignment
   exists(Parameter p, Expr ret |
     returnStmt(f, ret) and
     p = f.getAParameter() and
-    not exists(p.getAnAssignedValue()) |
+    not exists(p.getAnAssignedValue())
+  |
     ret = parameterAccess(p)
-  ) or
+  )
+  or
   // May return a value for which this analysis cannot infer a constant value
   exists(Expr ret | returnStmt(f, ret) | nonComputableConstant(ret))
   or
@@ -853,8 +896,8 @@ private predicate asmStmtMayDefineVariable(AsmStmt asm, Variable v) {
 
 private predicate returnStmt(Function f, Expr value) {
   exists(ReturnStmt ret |
-    ret.getEnclosingFunction() = f
-    and value = ret.getExpr()
+    ret.getEnclosingFunction() = f and
+    value = ret.getExpr()
   )
 }
 
@@ -863,9 +906,9 @@ library class ConditionEvaluator extends ExprEvaluator {
   ConditionEvaluator() { this = 0 }
 
   override predicate interesting(Expr e) {
-    falsecond_base(e, _)
+    qlCFGFalseSuccessor(e, _)
     or
-    truecond_base(e, _)
+    qlCFGTrueSuccessor(e, _)
   }
 }
 
@@ -873,14 +916,10 @@ library class ConditionEvaluator extends ExprEvaluator {
 library class SwitchEvaluator extends ExprEvaluator {
   SwitchEvaluator() { this = 1 }
 
-  override predicate interesting(Expr e) {
-    e = getASwitchExpr(_, _)
-  }
+  override predicate interesting(Expr e) { e = getASwitchExpr(_, _) }
 }
 
-private int getSwitchValue(Expr e) {
-  exists(SwitchEvaluator x | result = x.getValue(e))
-}
+private int getSwitchValue(Expr e) { exists(SwitchEvaluator x | result = x.getValue(e)) }
 
 /** A helper class for evaluation of loop entry conditions. */
 library class LoopEntryConditionEvaluator extends ExprEvaluator {
@@ -897,8 +936,7 @@ library class LoopEntryConditionEvaluator extends ExprEvaluator {
   private predicate isLoopBodyDescendant(Expr e, StmtParent s) {
     isLoopBody(e, s)
     or
-    exists(StmtParent mid |
-      isLoopBodyDescendant(e, mid) |
+    exists(StmtParent mid | isLoopBodyDescendant(e, mid) |
       s = mid.(Stmt).getAChild() or
       s = mid.(Expr).getAChild()
     )
@@ -912,10 +950,7 @@ library class LoopEntryConditionEvaluator extends ExprEvaluator {
   }
 
   private predicate maybeInterestingVariable(Expr e, Variable v) {
-    exists(VariableAccess va |
-      interestingSubExpr(e, va) |
-      va.getTarget() = v
-    )
+    exists(VariableAccess va | interestingSubExpr(e, va) | va.getTarget() = v)
   }
 
   /**
@@ -930,12 +965,13 @@ library class LoopEntryConditionEvaluator extends ExprEvaluator {
     maybeInterestingVariable(e, v) and
     (valueOrDef = v.getAnAssignedValue() or nonAnalyzableVariableDefinition(v, valueOrDef)) and
     isLoopBodyDescendant(e, valueOrDef) and
-    /* Use primitive basic blocks in reachability analysis for better performance.
+    /*
+     * Use primitive basic blocks in reachability analysis for better performance.
      * This is similar to the pattern used in e.g. `DefinitionsAndUses` and
-     * `LocalScopeVariableReachability`.
+     * `StackVariableReachability`.
      */
-    exists(PrimitiveBasicBlock bb1, int pos1 |
-      bb1.getNode(pos1) = valueOrDef |
+
+    exists(PrimitiveBasicBlock bb1, int pos1 | bb1.getNode(pos1) = valueOrDef |
       // Reaches in same basic block
       exists(int pos2 |
         loopEntryAt(bb1, pos2, e) and
@@ -971,8 +1007,7 @@ library class LoopEntryConditionEvaluator extends ExprEvaluator {
   private predicate bbReachesLoopEntry(PrimitiveBasicBlock bb, Expr e, Variable v) {
     bbReachesLoopEntryLocally(bb, e, v)
     or
-    exists(PrimitiveBasicBlock succ |
-      succ = bb.getASuccessor() |
+    exists(PrimitiveBasicBlock succ | succ = bb.getASuccessor() |
       bbReachesLoopEntry(succ, e, v) and
       not assignmentAt(bb, _, v)
     )
@@ -1063,19 +1098,12 @@ library class LoopEntryConditionEvaluator extends ExprEvaluator {
 library class WhileLoopEntryConditionEvaluator extends LoopEntryConditionEvaluator {
   WhileLoopEntryConditionEvaluator() { this = 2 }
 
-  override predicate interesting(Expr e) {
-    exists(WhileStmt while | e = while.getCondition())
-  }
+  override predicate interesting(Expr e) { exists(WhileStmt while | e = while.getCondition()) }
 
-  override predicate isLoopEntry(Expr e, Node cfn) {
-    cfn.(WhileStmt).getCondition() = e
-  }
+  override predicate isLoopEntry(Expr e, Node cfn) { cfn.(WhileStmt).getCondition() = e }
 
   override predicate isLoopBody(Expr e, StmtParent s) {
-    exists(WhileStmt while |
-      e = while.getCondition() |
-      s = while.getStmt()
-    )
+    exists(WhileStmt while | e = while.getCondition() | s = while.getStmt())
   }
 }
 
@@ -1083,17 +1111,12 @@ library class WhileLoopEntryConditionEvaluator extends LoopEntryConditionEvaluat
 library class ForLoopEntryConditionEvaluator extends LoopEntryConditionEvaluator {
   ForLoopEntryConditionEvaluator() { this = 3 }
 
-  override predicate interesting(Expr e) {
-    exists(ForStmt for | e = for.getCondition())
-  }
+  override predicate interesting(Expr e) { exists(ForStmt for | e = for.getCondition()) }
 
-  override predicate isLoopEntry(Expr e, Node cfn) {
-    cfn.(ForStmt).getCondition() = e
-  }
+  override predicate isLoopEntry(Expr e, Node cfn) { cfn.(ForStmt).getCondition() = e }
 
   override predicate isLoopBody(Expr e, StmtParent s) {
-    exists(ForStmt for |
-      e = for.getCondition() |
+    exists(ForStmt for | e = for.getCondition() |
       s = for.getUpdate() or
       s = for.getStmt()
     )
@@ -1145,7 +1168,8 @@ private predicate forLoopInitializesVariable(ForStmt for, Variable v, Expr e) {
   exists(DeclStmt decl, Expr init, Variable v1 |
     decl = for.getInitialization() and
     v1 = decl.getADeclaration() and
-    init = v1.getInitializer().getExpr() |
+    init = v1.getInitializer().getExpr()
+  |
     e = init and v = v1
     or
     assignsValue(init, v, e)

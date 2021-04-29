@@ -5,6 +5,7 @@
 private import csharp as csharp
 private import semmle.code.csharp.frameworks.system.Linq
 
+/** Definitions relating to the `System.Linq.Expressions` namespace. */
 module SystemLinqExpressions {
   /** The `System.Linq.Expressions` namespace. */
   class Namespace extends csharp::Namespace {
@@ -35,7 +36,8 @@ module SystemLinqExpressions {
     DelegateExtType() {
       this = dt
       or
-      this = any(csharp::ConstructedClass cc |
+      this =
+        any(csharp::ConstructedClass cc |
           cc.getUnboundGeneric() instanceof ExpressionDelegate and
           dt = cc.getTypeArgument(0)
         )

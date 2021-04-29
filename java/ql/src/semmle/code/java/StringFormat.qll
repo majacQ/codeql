@@ -22,6 +22,7 @@ class StringFormatMethod extends FormatMethod {
   StringFormatMethod() {
     (
       this.hasName("format") or
+      this.hasName("formatted") or
       this.hasName("printf") or
       this.hasName("readLine") or
       this.hasName("readPassword")
@@ -37,6 +38,8 @@ class StringFormatMethod extends FormatMethod {
 
   override int getFormatStringIndex() {
     result = 0 and this.getSignature() = "format(java.lang.String,java.lang.Object[])"
+    or
+    result = -1 and this.getSignature() = "formatted(java.lang.Object[])"
     or
     result = 0 and this.getSignature() = "printf(java.lang.String,java.lang.Object[])"
     or
@@ -80,6 +83,7 @@ private newtype TFmtSyntax =
 
 /** A syntax for format strings. */
 class FmtSyntax extends TFmtSyntax {
+  /** Gets a textual representation of this format string syntax. */
   string toString() {
     result = "printf (%) syntax" and this = TFmtPrintf()
     or
@@ -88,6 +92,12 @@ class FmtSyntax extends TFmtSyntax {
 
   /** Holds if this syntax is logger ({}) syntax. */
   predicate isLogger() { this = TFmtLogger() }
+}
+
+private Expr getArgumentOrQualifier(Call c, int i) {
+  result = c.getArgument(i)
+  or
+  result = c.getQualifier() and i = -1
 }
 
 /**
@@ -110,7 +120,7 @@ private predicate formatWrapper(Callable c, int fmtix, FmtSyntax syntax) {
       or
       fmtcall.getCallee().(LoggerFormatMethod).getFormatStringIndex() = i and syntax = TFmtLogger()
     ) and
-    fmtcall.getArgument(i) = fmt.getAnAccess() and
+    getArgumentOrQualifier(fmtcall, i) = fmt.getAnAccess() and
     fmtcall.getArgument(i + 1) = args.getAnAccess()
   )
 }
@@ -130,6 +140,7 @@ class FormattingCall extends Call {
     formatWrapper(this.getCallee(), result, _)
   }
 
+  /** Gets the format string syntax used by this call. */
   FmtSyntax getSyntax() {
     this.getCallee() instanceof StringFormatMethod and result = TFmtPrintf()
     or
@@ -146,13 +157,14 @@ class FormattingCall extends Call {
     )
   }
 
+  /** Holds if this uses the "logger ({})" format syntax and the last argument is a `Throwable`. */
   predicate hasTrailingThrowableArgument() {
     getSyntax() = TFmtLogger() and
     getLastArg().getType().(RefType).getASourceSupertype*() instanceof TypeThrowable
   }
 
   /** Gets the argument to this call in the position of the format string */
-  Expr getFormatArgument() { result = this.getArgument(this.getFormatStringIndex()) }
+  Expr getFormatArgument() { result = getArgumentOrQualifier(this, this.getFormatStringIndex()) }
 
   /** Gets an argument to be formatted. */
   Expr getAnArgumentToBeFormatted() {
@@ -175,8 +187,8 @@ class FormattingCall extends Call {
     then
       exists(Expr arg | arg = this.getArgument(1 + this.getFormatStringIndex()) |
         result = arg.(ArrayCreationExpr).getFirstDimensionSize() or
-        result = arg
-              .(VarAccess)
+        result =
+          arg.(VarAccess)
               .getVariable()
               .getAnAssignedValue()
               .(ArrayCreationExpr)
@@ -244,9 +256,7 @@ private predicate formatStringFragment(Expr fmt) {
     e.(VarAccess).getVariable().getAnAssignedValue() = fmt or
     e.(AddExpr).getLeftOperand() = fmt or
     e.(AddExpr).getRightOperand() = fmt or
-    e.(ConditionalExpr).getTrueExpr() = fmt or
-    e.(ConditionalExpr).getFalseExpr() = fmt or
-    e.(ParExpr).getExpr() = fmt
+    e.(ChooseExpr).getAResultExpr() = fmt
   )
 }
 
@@ -266,8 +276,6 @@ private predicate formatStringValue(Expr e, string fmtvalue) {
     e.getType() instanceof BooleanType and fmtvalue = "x" // dummy value
     or
     e.getType() instanceof EnumType and fmtvalue = "x" // dummy value
-    or
-    formatStringValue(e.(ParExpr).getExpr(), fmtvalue)
     or
     exists(Variable v |
       e = v.getAnAccess() and
@@ -292,9 +300,7 @@ private predicate formatStringValue(Expr e, string fmtvalue) {
       fmtvalue = left + right
     )
     or
-    formatStringValue(e.(ConditionalExpr).getTrueExpr(), fmtvalue)
-    or
-    formatStringValue(e.(ConditionalExpr).getFalseExpr(), fmtvalue)
+    formatStringValue(e.(ChooseExpr).getAResultExpr(), fmtvalue)
     or
     exists(Method getprop, MethodAccess ma, string prop |
       e = ma and
@@ -410,7 +416,8 @@ private class PrintfFormatString extends FormatString {
   }
 
   override int getMaxFmtSpecIndex() {
-    result = max(int ix |
+    result =
+      max(int ix |
         ix = fmtSpecRefersToSpecificIndex(_) or
         ix = count(int i | fmtSpecRefersToSequentialIndex(i))
       )

@@ -885,15 +885,24 @@ void FuncPtrConversions(int(*pfn)(int), void* p) {
   pfn = (int(*)(int))p;
 }
 
+void VAListUsage(int x, __builtin_va_list args) {
+  __builtin_va_list args2;
+  __builtin_va_copy(args2, args);
+  double d = __builtin_va_arg(args, double);
+  float f = __builtin_va_arg(args, int);
+  __builtin_va_end(args2);
+}
+
 void VarArgUsage(int x, ...) {
   __builtin_va_list args;
 
   __builtin_va_start(args, x);
   __builtin_va_list args2;
-  __builtin_va_start(args2, args);
+  __builtin_va_copy(args2, args);
   double d = __builtin_va_arg(args, double);
-  float f = __builtin_va_arg(args, float);
+  float f = __builtin_va_arg(args, int);
   __builtin_va_end(args);
+  VAListUsage(x, args2);
   __builtin_va_end(args2);
 }
 
@@ -988,7 +997,7 @@ int PointerDecay(int a[], int fn(float)) {
   return a[0] + fn(1.0);
 }
 
-int ExprStmt(int b, int y, int z) {
+int StmtExpr(int b, int y, int z) {
   int x = ({
     int w;
     if (b) {
@@ -1002,7 +1011,7 @@ int ExprStmt(int b, int y, int z) {
   return ({x;});
 }
 
-#if 0
+// TODO: `delete` gets translated to NoOp
 void OperatorDelete() {
   delete static_cast<int*>(nullptr);  // No destructor
   delete static_cast<String*>(nullptr);  // Non-virtual destructor, with size.
@@ -1011,6 +1020,7 @@ void OperatorDelete() {
   delete static_cast<PolymorphicBase*>(nullptr);  // Virtual destructor
 }
 
+// TODO: `delete[]` gets translated to NoOp
 void OperatorDeleteArray() {
   delete[] static_cast<int*>(nullptr);  // No destructor
   delete[] static_cast<String*>(nullptr);  // Non-virtual destructor, with size.
@@ -1018,7 +1028,6 @@ void OperatorDeleteArray() {
   delete[] static_cast<Overaligned*>(nullptr);  // No destructor, with size and alignment.
   delete[] static_cast<PolymorphicBase*>(nullptr);  // Virtual destructor
 }
-#endif
 
 struct EmptyStruct {};
 
@@ -1101,13 +1110,341 @@ int AsmStmt(int x) {
   return x;
 }
 
-static void AsmStmtWithOutputs(unsigned int& a, unsigned int& b, unsigned int& c, unsigned int& d)
+static void AsmStmtWithOutputs(unsigned int& a, unsigned int b, unsigned int& c, unsigned int d)
 {
   __asm__ __volatile__
     (
   "cpuid\n\t"
-    : "+a" (a), "+b" (b), "+c" (c), "+d" (d)
+    : "+a" (a), "+b" (b) : "c" (c), "d" (d)
     );
 }
 
-// semmle-extractor-options: -std=c++17
+void ExternDeclarations()
+{
+    extern int g;
+    int x;
+    int y, f(float);
+    int z(float), w(float), h;
+    typedef double d;
+}
+
+#define EXTERNS_IN_MACRO \
+    extern int g; \
+    for (int i = 0; i < 10; ++i) { \
+        extern int g; \
+    }
+
+void ExternDeclarationsInMacro()
+{
+    EXTERNS_IN_MACRO;
+}
+
+void TryCatchNoCatchAny(bool b) {
+  try {
+    int x = 5;
+    if (b) {
+      throw "string literal";
+    }
+    else if (x < 2) {
+      x = b ? 7 : throw String("String object");
+    }
+    x = 7;
+  }
+  catch (const char* s) {
+    throw String(s);
+  }
+  catch (const String& e) {
+  }
+}
+
+#define vector(elcount, type)  __attribute__((vector_size((elcount)*sizeof(type)))) type
+
+void VectorTypes(int i) {
+  vector(4, int) vi4 = { 0, 1, 2, 3 };
+  int x = vi4[i];
+  vi4[i] = x;
+  vector(4, int) vi4_shuffle = __builtin_shufflevector(vi4, vi4, 3+0, 2, 1, 0);
+  vi4 = vi4 + vi4_shuffle;
+}
+
+void *memcpy(void *dst, void *src, int size);
+
+int ModeledCallTarget(int x) {
+  int y;
+  memcpy(&y, &x, sizeof(int));
+  return y;
+}
+
+String ReturnObjectImpl() {
+  return String("foo");
+}
+
+void switch1Case(int x) {
+    int y = 0;
+    switch(x) {
+        case 1:
+        y = 2;
+    }
+    int z = y;
+}
+
+void switch2Case_fallthrough(int x) {
+    int y = 0;
+    switch(x) {
+        case 1:
+        y = 2;
+        case 2:
+        y = 3;
+    }
+    int z = y;
+}
+
+void switch2Case(int x) {
+    int y = 0;
+    switch(x) {
+        case 1:
+        y = 2;
+        break;
+        case 2:
+        y = 3;
+    }
+    int z = y;
+}
+
+void switch2Case_default(int x) {
+    int y = 0;
+    switch(x) {
+        case 1:
+            y = 2;
+            break;
+
+        case 2:
+            y = 3;
+            break;
+
+        default:
+            y = 4;
+    }
+    int z = y;
+}
+
+int staticLocalInit(int x) {
+    static int a = 0;  // Constant initialization
+    static int b = sizeof(x);  // Constant initialization
+    static int c = x;  // Dynamic initialization
+    static int d;  // Zero initialization
+
+    return a + b + c + d;
+}
+
+void staticLocalWithConstructor(const char* dynamic) {
+    static String a;
+    static String b("static");
+    static String c(dynamic);
+}
+
+// --- strings ---
+
+char *strcpy(char *destination, const char *source);
+char *strcat(char *destination, const char *source);
+
+void test_strings(char *s1, char *s2) {
+    char buffer[1024] = {0};
+
+    strcpy(buffer, s1);
+    strcat(buffer, s2);
+}
+
+struct A {
+    int member;
+
+    static void static_member(A* a, int x) {
+        a->member = x;
+    }
+
+    static void static_member_without_def();
+};
+
+A* getAnInstanceOfA();
+
+void test_static_member_functions(int int_arg, A* a_arg) {
+    C c;
+    c.StaticMemberFunction(10);
+    C::StaticMemberFunction(10);
+
+    A a;
+    a.static_member(&a, int_arg);
+    A::static_member(&a, int_arg);
+
+    (&a)->static_member(a_arg, int_arg + 2);
+    (*a_arg).static_member(&a, 99);
+    a_arg->static_member(a_arg, -1);
+
+    a.static_member_without_def();
+    A::static_member_without_def();
+
+    getAnInstanceOfA()->static_member_without_def();
+}
+
+int missingReturnValue(bool b, int x) {
+    if (b) {
+        return x;
+    }
+}
+
+void returnVoid(int x, int y) {
+    return IntegerOps(x, y);
+}
+
+void gccBinaryConditional(bool b, int x, long y) {
+    int z = x;
+    z = b ?: x;
+    z = b ?: y;
+    z = x ?: x;
+    z = x ?: y;
+    z = y ?: x;
+    z = y ?: y;
+
+    z = (x && b || y) ?: x;
+}
+
+bool predicateA();
+bool predicateB();
+
+int shortCircuitConditional(int x, int y) {
+    return predicateA() && predicateB() ? x : y;
+}
+
+void *operator new(size_t, void *) noexcept;
+
+void f(int* p)
+{
+  new (p) int;
+}
+
+template<typename T>
+T defaultConstruct() {
+    return T();
+}
+
+class constructor_only {
+public:
+    int x;
+
+public:
+    constructor_only(int x);
+};
+
+class copy_constructor {
+public:
+    int y;
+
+public:
+    copy_constructor();
+    copy_constructor(const copy_constructor&);
+
+    void method();
+};
+
+class destructor_only {
+public:
+    ~destructor_only();
+
+    void method();
+};
+
+template<typename T>
+void acceptRef(const T& v);
+
+template<typename T>
+void acceptValue(T v);
+
+template<typename T>
+T returnValue();
+
+void temporary_string() {
+    String s = returnValue<String>();  // No temporary
+    const String& rs = returnValue<String>();  // Binding a reference variable to a temporary
+
+    acceptRef(s);  // No temporary
+    acceptRef<String>("foo");  // Binding a const reference to a temporary
+    acceptValue(s);
+    acceptValue<String>("foo");
+    String().c_str();
+    returnValue<String>().c_str();  // Member access on a temporary
+
+    defaultConstruct<String>();
+}
+
+void temporary_destructor_only() {
+    destructor_only d = returnValue<destructor_only>();
+    const destructor_only& rd = returnValue<destructor_only>();
+    destructor_only d2;
+    acceptRef(d);
+    acceptValue(d);
+    destructor_only().method();
+    returnValue<destructor_only>().method();
+
+    defaultConstruct<destructor_only>();
+}
+
+void temporary_copy_constructor() {
+    copy_constructor d = returnValue<copy_constructor>();
+    const copy_constructor& rd = returnValue<copy_constructor>();
+    copy_constructor d2;
+    acceptRef(d);
+    acceptValue(d);
+    copy_constructor().method();
+    returnValue<copy_constructor>().method();
+    defaultConstruct<copy_constructor>();
+
+    int y = returnValue<copy_constructor>().y;
+}
+
+void temporary_point() {
+    Point p = returnValue<Point>();  // No temporary
+    const Point& rp = returnValue<Point>();  // Binding a reference variable to a temporary
+
+    acceptRef(p);  // No temporary
+    acceptValue(p);
+    Point().x;
+    int y = returnValue<Point>().y;
+
+    defaultConstruct<Point>();
+}
+
+struct UnusualFields {
+    int& r;
+    float a[10];
+};
+
+void temporary_unusual_fields() {
+    const int& rx = returnValue<UnusualFields>().r;
+    int x = returnValue<UnusualFields>().r;
+
+    const float& rf = returnValue<UnusualFields>().a[3];
+    float f = returnValue<UnusualFields>().a[5];
+}
+
+struct POD_Base {
+    int x;
+
+    float f() const;
+};
+
+struct POD_Middle : POD_Base {
+    int y;
+};
+
+struct POD_Derived : POD_Middle {
+    int z;
+};
+
+void temporary_hierarchy() {
+    POD_Base b = returnValue<POD_Middle>();
+    b = (returnValue<POD_Derived>());  // Multiple conversions plus parens
+    int x = returnValue<POD_Derived>().x;
+    float f = (returnValue<POD_Derived>()).f();
+}
+
+// semmle-extractor-options: -std=c++17 --clang

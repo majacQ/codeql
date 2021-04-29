@@ -1,9 +1,12 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Semmle.Extraction.CSharp.Entities.Expressions;
 using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Entities;
 using Semmle.Extraction.Kinds;
+using System;
+using System.IO;
 using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
@@ -16,36 +19,54 @@ namespace Semmle.Extraction.CSharp.Entities
         bool IsTopLevelParent { get; }
     }
 
-    class Expression : FreshEntity, IExpressionParentEntity
+    internal class Expression : FreshEntity, IExpressionParentEntity
     {
-        public readonly AnnotatedType Type;
-        public readonly Extraction.Entities.Location Location;
-        public readonly ExprKind Kind;
+        private readonly IExpressionInfo info;
+        public AnnotatedType Type { get; }
+        public Extraction.Entities.Location Location { get; }
+        public ExprKind Kind { get; }
 
         internal Expression(IExpressionInfo info)
             : base(info.Context)
         {
+            this.info = info;
             Location = info.Location;
             Kind = info.Kind;
             Type = info.Type;
-
             if (Type.Type is null)
                 Type = NullType.Create(cx);
 
-            cx.Emit(Tuples.expressions(this, Kind, Type.Type.TypeRef));
+            TryPopulate();
+        }
+
+        protected sealed override void Populate(TextWriter trapFile)
+        {
+            trapFile.expressions(this, Kind, Type.Type.TypeRef);
             if (info.Parent.IsTopLevelParent)
-                cx.Emit(Tuples.expr_parent_top_level(this, info.Child, info.Parent));
+                trapFile.expr_parent_top_level(this, info.Child, info.Parent);
             else
-                cx.Emit(Tuples.expr_parent(this, info.Child, info.Parent));
-            cx.Emit(Tuples.expr_location(this, Location));
+                trapFile.expr_parent(this, info.Child, info.Parent);
+            trapFile.expr_location(this, Location);
+
+            var annotatedType = Type.Symbol;
+            if (!annotatedType.HasObliviousNullability())
+            {
+                var n = NullabilityEntity.Create(cx, Nullability.Create(annotatedType));
+                trapFile.type_nullability(this, n);
+            }
+
+            if (info.FlowState != NullableFlowState.None)
+            {
+                trapFile.expr_flowstate(this, (int)info.FlowState);
+            }
 
             if (info.IsCompilerGenerated)
-                cx.Emit(Tuples.expr_compiler_generated(this));
+                trapFile.expr_compiler_generated(this);
 
             if (info.ExprValue is string value)
-                cx.Emit(Tuples.expr_value(this, value));
+                trapFile.expr_value(this, value);
 
-            Type.Type.ExtractGenerics();
+            Type.Type.PopulateGenerics();
         }
 
         public override Microsoft.CodeAnalysis.Location ReportingLocation => Location.symbol;
@@ -59,7 +80,13 @@ namespace Semmle.Extraction.CSharp.Entities
         /// <returns>The string representation.</returns>
         public static string ValueAsString(object value)
         {
-            return value == null ? "null" : value is bool ? ((bool)value ? "true" : "false") : value.ToString();
+            return value == null
+                ? "null"
+                : value is bool b
+                    ? b
+                        ? "true"
+                        : "false"
+                    : value.ToString();
         }
 
         /// <summary>
@@ -97,8 +124,44 @@ namespace Semmle.Extraction.CSharp.Entities
                 cx.PopulateLater(() => Create(cx, node, parent, child));
         }
 
-        static bool ContainsPattern(SyntaxNode node) =>
+        private static bool ContainsPattern(SyntaxNode node) =>
             node is PatternSyntax || node is VariableDesignationSyntax || node.ChildNodes().Any(ContainsPattern);
+
+        /// <summary>
+        /// Creates a generated expression from a typed constant.
+        /// </summary>
+        public static Expression CreateGenerated(Context cx, TypedConstant constant, IExpressionParentEntity parent,
+            int childIndex, Semmle.Extraction.Entities.Location location)
+        {
+            if (constant.IsNull)
+            {
+                return Literal.CreateGeneratedNullLiteral(cx, parent, childIndex, location);
+            }
+
+            switch (constant.Kind)
+            {
+                case TypedConstantKind.Primitive:
+                    return Literal.CreateGenerated(cx, parent, childIndex, constant.Type, constant.Value, location);
+                case TypedConstantKind.Enum:
+                    // Enum value is generated in the following format: (Enum)value
+                    Action<Expression, int> createChild = (parent, index) => Literal.CreateGenerated(cx, parent, index, ((INamedTypeSymbol)constant.Type).EnumUnderlyingType, constant.Value, location);
+                    var cast = Cast.CreateGenerated(cx, parent, childIndex, constant.Type, constant.Value, createChild, location);
+                    return cast;
+                case TypedConstantKind.Type:
+                    var type = ((ITypeSymbol)constant.Value).OriginalDefinition;
+                    return TypeOf.CreateGenerated(cx, parent, childIndex, type, location);
+                case TypedConstantKind.Array:
+                    // Single dimensional arrays are in the following format:
+                    // * new Type[N] { item1, item2, ..., itemN }
+                    // * new Type[0]
+                    //
+                    // itemI is generated recursively.
+                    return NormalArrayCreation.CreateGenerated(cx, parent, childIndex, constant.Type, constant.Values, location);
+                default:
+                    cx.ExtractionError("Couldn't extract constant in attribute", constant.ToString(), location);
+                    return null;
+            }
+        }
 
         /// <summary>
         /// Adapt the operator kind depending on whether it's a dynamic call or a user-operator call.
@@ -117,21 +180,20 @@ namespace Semmle.Extraction.CSharp.Entities
         /// </summary>
         /// <param name="cx">Context</param>
         /// <param name="node">The expression.</param>
-        public void OperatorCall(ExpressionSyntax node)
+        public void OperatorCall(TextWriter trapFile, ExpressionSyntax node)
         {
             var @operator = cx.GetSymbolInfo(node);
             if (@operator.Symbol is IMethodSymbol method)
             {
-
                 var callType = GetCallType(cx, node);
                 if (callType == CallType.Dynamic)
                 {
-                    UserOperator.OperatorSymbol(method.Name, out string operatorName);
-                    cx.Emit(Tuples.dynamic_member_name(this, operatorName));
+                    UserOperator.OperatorSymbol(method.Name, out var operatorName);
+                    trapFile.dynamic_member_name(this, operatorName);
                     return;
                 }
 
-                cx.Emit(Tuples.expr_call(this, Method.Create(cx, method)));
+                trapFile.expr_call(this, Method.Create(cx, method));
             }
         }
 
@@ -194,27 +256,28 @@ namespace Semmle.Extraction.CSharp.Entities
         {
             for (SyntaxNode n = node; n != null; n = n.Parent)
             {
-                var conditionalAccess = n.Parent as ConditionalAccessExpressionSyntax;
-
-                if (conditionalAccess != null && conditionalAccess.WhenNotNull == n)
+                if (n.Parent is ConditionalAccessExpressionSyntax conditionalAccess &&
+                    conditionalAccess.WhenNotNull == n)
+                {
                     return conditionalAccess.Expression;
+                }
             }
 
             throw new InternalError(node, "Unable to locate a ConditionalAccessExpression");
         }
 
-        public void MakeConditional()
+        public void MakeConditional(TextWriter trapFile)
         {
-            cx.Emit(Tuples.conditional_access(this));
+            trapFile.conditional_access(this);
         }
 
-        public void PopulateArguments(BaseArgumentListSyntax args, int child)
+        public void PopulateArguments(TextWriter trapFile, BaseArgumentListSyntax args, int child)
         {
             foreach (var arg in args.Arguments)
-                PopulateArgument(arg, child++);
+                PopulateArgument(trapFile, arg, child++);
         }
 
-        private void PopulateArgument(ArgumentSyntax arg, int child)
+        private void PopulateArgument(TextWriter trapFile, ArgumentSyntax arg, int child)
         {
             var expr = Create(cx, arg.Expression, this, child);
             int mode;
@@ -235,11 +298,11 @@ namespace Semmle.Extraction.CSharp.Entities
                 default:
                     throw new InternalError(arg, "Unknown argument type");
             }
-            cx.Emit(Tuples.expr_argument(expr, mode));
+            trapFile.expr_argument(expr, mode);
 
             if (arg.NameColon != null)
             {
-                cx.Emit(Tuples.expr_argument_name(expr, arg.NameColon.Name.Identifier.Text));
+                trapFile.expr_argument_name(expr, arg.NameColon.Name.Identifier.Text);
             }
         }
 
@@ -248,7 +311,7 @@ namespace Semmle.Extraction.CSharp.Entities
         public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.OptionalLabel;
     }
 
-    static class CallTypeExtensions
+    internal static class CallTypeExtensions
     {
         /// <summary>
         /// Adjust the expression kind <paramref name="k"/> to match this call type.
@@ -266,15 +329,15 @@ namespace Semmle.Extraction.CSharp.Entities
         }
     }
 
-    abstract class Expression<SyntaxNode> : Expression
-        where SyntaxNode : ExpressionSyntax
+    internal abstract class Expression<TExpressionSyntax> : Expression
+        where TExpressionSyntax : ExpressionSyntax
     {
-        public readonly SyntaxNode Syntax;
+        public TExpressionSyntax Syntax { get; }
 
         protected Expression(ExpressionNodeInfo info)
             : base(info)
         {
-            Syntax = (SyntaxNode)info.Node;
+            Syntax = (TExpressionSyntax)info.Node;
         }
 
         /// <summary>
@@ -285,11 +348,11 @@ namespace Semmle.Extraction.CSharp.Entities
         /// <see cref="Expression.Create(Context, ExpressionSyntax, IEntity, int, ITypeSymbol)"/> will
         /// still be valid.
         /// </summary>
-        protected abstract void Populate();
+        protected abstract void PopulateExpression(TextWriter trapFile);
 
-        protected Expression TryPopulate()
+        protected new Expression TryPopulate()
         {
-            cx.Try(Syntax, null, Populate);
+            cx.Try(Syntax, null, () => PopulateExpression(cx.TrapWriter.Writer));
             return this;
         }
     }
@@ -297,7 +360,7 @@ namespace Semmle.Extraction.CSharp.Entities
     /// <summary>
     /// Holds all information required to create an Expression entity.
     /// </summary>
-    interface IExpressionInfo
+    internal interface IExpressionInfo
     {
         Context Context { get; }
 
@@ -338,12 +401,14 @@ namespace Semmle.Extraction.CSharp.Entities
         /// is null.
         /// </summary>
         string ExprValue { get; }
+
+        NullableFlowState FlowState { get; }
     }
 
     /// <summary>
     /// Explicitly constructed expression information.
     /// </summary>
-    class ExpressionInfo : IExpressionInfo
+    internal class ExpressionInfo : IExpressionInfo
     {
         public Context Context { get; }
         public AnnotatedType Type { get; }
@@ -354,7 +419,8 @@ namespace Semmle.Extraction.CSharp.Entities
         public bool IsCompilerGenerated { get; }
         public string ExprValue { get; }
 
-        public ExpressionInfo(Context cx, AnnotatedType type, Extraction.Entities.Location location, ExprKind kind, IExpressionParentEntity parent, int child, bool isCompilerGenerated, string value)
+        public ExpressionInfo(Context cx, AnnotatedType type, Extraction.Entities.Location location, ExprKind kind,
+            IExpressionParentEntity parent, int child, bool isCompilerGenerated, string value)
         {
             Context = cx;
             Type = type;
@@ -365,12 +431,15 @@ namespace Semmle.Extraction.CSharp.Entities
             ExprValue = value;
             IsCompilerGenerated = isCompilerGenerated;
         }
+
+        // Synthetic expressions don't have a flow state.
+        public NullableFlowState FlowState => NullableFlowState.None;
     }
 
     /// <summary>
     /// Expression information constructed from a syntax node.
     /// </summary>
-    class ExpressionNodeInfo : IExpressionInfo
+    internal class ExpressionNodeInfo : IExpressionInfo
     {
         public ExpressionNodeInfo(Context cx, ExpressionSyntax node, IExpressionParentEntity parent, int child) :
             this(cx, node, parent, child, cx.GetTypeInfo(node))
@@ -384,7 +453,7 @@ namespace Semmle.Extraction.CSharp.Entities
             Parent = parent;
             Child = child;
             TypeInfo = typeInfo;
-            Conversion = cx.Model(node).GetConversion(node);
+            Conversion = cx.GetModel(node).GetConversion(node);
         }
 
         public Context Context { get; }
@@ -410,8 +479,7 @@ namespace Semmle.Extraction.CSharp.Entities
                 // Clearly a bug.
                 if (type.Symbol?.TypeKind == Microsoft.CodeAnalysis.TypeKind.Error)
                 {
-                    var arrayCreation = Node as ArrayCreationExpressionSyntax;
-                    if (arrayCreation != null)
+                    if (Node is ArrayCreationExpressionSyntax arrayCreation)
                     {
                         var elementType = Context.GetType(arrayCreation.Type.ElementType);
 
@@ -427,7 +495,7 @@ namespace Semmle.Extraction.CSharp.Entities
             }
         }
 
-        Microsoft.CodeAnalysis.Location location;
+        private Microsoft.CodeAnalysis.Location location;
 
         public Microsoft.CodeAnalysis.Location CodeAnalysisLocation
         {
@@ -443,7 +511,7 @@ namespace Semmle.Extraction.CSharp.Entities
             }
         }
 
-        public SemanticModel Model => Context.Model(Node);
+        public SemanticModel Model => Context.GetModel(Node);
 
         public string ExprValue
         {
@@ -454,7 +522,7 @@ namespace Semmle.Extraction.CSharp.Entities
             }
         }
 
-        AnnotatedType cachedType;
+        private AnnotatedType cachedType;
 
         public AnnotatedType Type
         {
@@ -470,7 +538,7 @@ namespace Semmle.Extraction.CSharp.Entities
             }
         }
 
-        Extraction.Entities.Location cachedLocation;
+        private Extraction.Entities.Location cachedLocation;
 
         public Extraction.Entities.Location Location
         {
@@ -516,7 +584,7 @@ namespace Semmle.Extraction.CSharp.Entities
             return this;
         }
 
-        SymbolInfo cachedSymbolInfo;
+        private SymbolInfo cachedSymbolInfo;
 
         public SymbolInfo SymbolInfo
         {
@@ -527,5 +595,7 @@ namespace Semmle.Extraction.CSharp.Entities
                 return cachedSymbolInfo;
             }
         }
+
+        public NullableFlowState FlowState => TypeInfo.Nullability.FlowState;
     }
 }

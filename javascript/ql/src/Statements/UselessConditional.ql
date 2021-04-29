@@ -16,6 +16,7 @@ import javascript
 import semmle.javascript.RestrictedLocations
 import semmle.javascript.dataflow.Refinements
 import semmle.javascript.DefensiveProgramming
+import UselessConditional
 
 /**
  * Gets the unique definition of `v`.
@@ -58,6 +59,14 @@ predicate isInitialParameterUse(Expr e) {
   exists(SimpleParameter p, SsaExplicitDefinition ssa |
     ssa.getDef() = p and
     ssa.getVariable().getAUse() = e and
+    not p.isRestParameter()
+  )
+  or
+  // same as above, but for captured variables
+  exists(SimpleParameter p, LocalVariable var |
+    var = p.getVariable() and
+    var.isCaptured() and
+    e = var.getAnAccess() and
     not p.isRestParameter()
   )
   or
@@ -121,22 +130,6 @@ predicate whitelist(Expr e) {
   isConstantDefensive(e) or // flagged by js/useless-defensive-code
   isInitialParameterUse(e) or
   isConstantBooleanReturnValue(e)
-}
-
-/**
- * Holds if `e` is part of a conditional node `cond` that evaluates
- * `e` and checks its value for truthiness, and the return value of `e`
- * is not used for anything other than this truthiness check.
- */
-predicate isExplicitConditional(ASTNode cond, Expr e) {
-  e = cond.(IfStmt).getCondition()
-  or
-  e = cond.(LoopStmt).getTest()
-  or
-  e = cond.(ConditionalExpr).getCondition()
-  or
-  isExplicitConditional(_, cond) and
-  e = cond.(Expr).getUnderlyingValue().(LogicalBinaryExpr).getAnOperand()
 }
 
 /**

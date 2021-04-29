@@ -10,6 +10,7 @@ import com.semmle.js.ast.jsx.JSXMemberExpression;
 import com.semmle.js.ast.jsx.JSXNamespacedName;
 import com.semmle.js.ast.jsx.JSXOpeningElement;
 import com.semmle.js.ast.jsx.JSXSpreadAttribute;
+import com.semmle.js.ast.jsx.JSXThisExpr;
 import com.semmle.ts.ast.ArrayTypeExpr;
 import com.semmle.ts.ast.ConditionalTypeExpr;
 import com.semmle.ts.ast.DecoratorList;
@@ -30,21 +31,23 @@ import com.semmle.ts.ast.InferTypeExpr;
 import com.semmle.ts.ast.InterfaceDeclaration;
 import com.semmle.ts.ast.InterfaceTypeExpr;
 import com.semmle.ts.ast.IntersectionTypeExpr;
-import com.semmle.ts.ast.IsTypeExpr;
-import com.semmle.ts.ast.UnaryTypeExpr;
 import com.semmle.ts.ast.KeywordTypeExpr;
 import com.semmle.ts.ast.MappedTypeExpr;
 import com.semmle.ts.ast.NamespaceDeclaration;
 import com.semmle.ts.ast.NonNullAssertion;
 import com.semmle.ts.ast.OptionalTypeExpr;
 import com.semmle.ts.ast.ParenthesizedTypeExpr;
+import com.semmle.ts.ast.PredicateTypeExpr;
 import com.semmle.ts.ast.RestTypeExpr;
+import com.semmle.ts.ast.TemplateLiteralTypeExpr;
 import com.semmle.ts.ast.TupleTypeExpr;
 import com.semmle.ts.ast.TypeAliasDeclaration;
 import com.semmle.ts.ast.TypeAssertion;
 import com.semmle.ts.ast.TypeParameter;
 import com.semmle.ts.ast.TypeofTypeExpr;
+import com.semmle.ts.ast.UnaryTypeExpr;
 import com.semmle.ts.ast.UnionTypeExpr;
+import com.semmle.util.data.IntList;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -68,6 +71,10 @@ public class NodeCopier implements Visitor<Void, INode> {
     List<T> result = new ArrayList<T>();
     for (T t : ts) result.add(copy(t));
     return result;
+  }
+
+  private IntList copy(IntList list) {
+    return new IntList(list);
   }
 
   @Override
@@ -138,7 +145,8 @@ public class NodeCopier implements Visitor<Void, INode> {
         copy(nd.getTypeParameters()),
         copy(nd.getParameterTypes()),
         copy(nd.getReturnType()),
-        copy(nd.getThisParameterType()));
+        copy(nd.getThisParameterType()),
+        copy(nd.getOptionalParameterIndices()));
   }
 
   @Override
@@ -367,7 +375,8 @@ public class NodeCopier implements Visitor<Void, INode> {
         copy(nd.getParameterTypes()),
         copy(nd.getParameterDecorators()),
         copy(nd.getReturnType()),
-        copy(nd.getThisParameterType()));
+        copy(nd.getThisParameterType()),
+        copy(nd.getOptionalParameterIndices()));
   }
 
   @Override
@@ -412,8 +421,14 @@ public class NodeCopier implements Visitor<Void, INode> {
   }
 
   @Override
+  public TemplateLiteralTypeExpr visit(TemplateLiteralTypeExpr nd, Void q) {
+    return new TemplateLiteralTypeExpr(visit(nd.getLoc()), copy(nd.getExpressions()), copy(nd.getQuasis()));
+  }
+
+  @Override
   public TaggedTemplateExpression visit(TaggedTemplateExpression nd, Void q) {
-    return new TaggedTemplateExpression(visit(nd.getLoc()), copy(nd.getTag()), copy(nd.getQuasi()));
+    return new TaggedTemplateExpression(
+        visit(nd.getLoc()), copy(nd.getTag()), copy(nd.getQuasi()), copy(nd.getTypeArguments()));
   }
 
   @Override
@@ -426,7 +441,8 @@ public class NodeCopier implements Visitor<Void, INode> {
         nd.isAsync(),
         copy(nd.getTypeParameters()),
         copy(nd.getParameterTypes()),
-        copy(nd.getReturnType()));
+        copy(nd.getReturnType()),
+        copy(nd.getOptionalParameterIndices()));
   }
 
   @Override
@@ -556,6 +572,11 @@ public class NodeCopier implements Visitor<Void, INode> {
   @Override
   public INode visit(JSXIdentifier nd, Void c) {
     return new JSXIdentifier(visit(nd.getLoc()), nd.getName());
+  }
+
+  @Override
+  public INode visit(JSXThisExpr nd, Void c) {
+    return new JSXThisExpr(visit(nd.getLoc()));
   }
 
   @Override
@@ -696,7 +717,7 @@ public class NodeCopier implements Visitor<Void, INode> {
 
   @Override
   public INode visit(TupleTypeExpr nd, Void c) {
-    return new TupleTypeExpr(visit(nd.getLoc()), copy(nd.getElementTypes()));
+    return new TupleTypeExpr(visit(nd.getLoc()), copy(nd.getElementTypes()), copy(nd.getElementNames()));
   }
 
   @Override
@@ -716,8 +737,12 @@ public class NodeCopier implements Visitor<Void, INode> {
   }
 
   @Override
-  public INode visit(IsTypeExpr nd, Void c) {
-    return new IsTypeExpr(visit(nd.getLoc()), copy(nd.getLeft()), copy(nd.getRight()));
+  public INode visit(PredicateTypeExpr nd, Void c) {
+    return new PredicateTypeExpr(
+        visit(nd.getLoc()),
+        copy(nd.getExpression()),
+        copy(nd.getTypeExpr()),
+        nd.hasAssertsKeyword());
   }
 
   @Override

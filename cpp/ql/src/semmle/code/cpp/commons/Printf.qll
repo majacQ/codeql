@@ -6,57 +6,115 @@ import semmle.code.cpp.Type
 import semmle.code.cpp.commons.CommonType
 import semmle.code.cpp.commons.StringAnalysis
 import semmle.code.cpp.models.interfaces.FormattingFunction
-import semmle.code.cpp.models.implementations.Printf
+
+class PrintfFormatAttribute extends FormatAttribute {
+  PrintfFormatAttribute() { getArchetype() = ["printf", "__printf__"] }
+}
 
 /**
  * A function that can be identified as a `printf` style formatting
- * function by it's use of the GNU `format` attribute.
+ * function by its use of the GNU `format` attribute.
  */
 class AttributeFormattingFunction extends FormattingFunction {
-  FormatAttribute printf_attrib;
+  override string getAPrimaryQlClass() { result = "AttributeFormattingFunction" }
 
   AttributeFormattingFunction() {
-    printf_attrib = getAnAttribute() and
-    (
-      printf_attrib.getArchetype() = "printf" or
-      printf_attrib.getArchetype() = "__printf__"
-    ) and
-    exists(printf_attrib.getFirstFormatArgIndex()) // exclude `vprintf` style format functions
+    exists(PrintfFormatAttribute printf_attrib |
+      printf_attrib = getAnAttribute() and
+      exists(printf_attrib.getFirstFormatArgIndex()) // exclude `vprintf` style format functions
+    )
   }
 
-  override int getFormatParameterIndex() { result = printf_attrib.getFormatIndex() }
+  override int getFormatParameterIndex() {
+    forex(PrintfFormatAttribute printf_attrib | printf_attrib = getAnAttribute() |
+      result = printf_attrib.getFormatIndex()
+    )
+  }
 }
 
 /**
  * A standard function such as `vprintf` that has a format parameter
- * and a variable argument list of type `va_arg`.
+ * and a variable argument list of type `va_arg`. `formatParamIndex` indicates
+ * the format parameter and `type` indicates the type of `vprintf`:
+ *  - `""` is a `vprintf` variant, `outputParamIndex` is `-1`.
+ *  - `"f"` is a `vfprintf` variant, `outputParamIndex` indicates the output stream parameter.
+ *  - `"s"` is a `vsprintf` variant, `outputParamIndex` indicates the output buffer parameter.
+ *  - `"?"` if the type cannot be deteremined.  `outputParamIndex` is `-1`.
  */
-predicate primitiveVariadicFormatter(TopLevelFunction f, int formatParamIndex) {
-  f.getName().regexpMatch("_?_?va?[fs]?n?w?printf(_s)?(_p)?(_l)?") and
+predicate primitiveVariadicFormatter(
+  TopLevelFunction f, string type, int formatParamIndex, int outputParamIndex
+) {
+  type = f.getName().regexpCapture("_?_?va?([fs]?)n?w?printf(_s)?(_p)?(_l)?", 1) and
   (
     if f.getName().matches("%\\_l")
     then formatParamIndex = f.getNumberOfParameters() - 3
     else formatParamIndex = f.getNumberOfParameters() - 2
-  )
+  ) and
+  if type = "" then outputParamIndex = -1 else outputParamIndex = 0 // Conveniently, these buffer parameters are all at index 0.
 }
 
-private predicate callsVariadicFormatter(Function f, int formatParamIndex) {
-  exists(FunctionCall fc, int i |
-    variadicFormatter(fc.getTarget(), i) and
+private predicate callsVariadicFormatter(
+  Function f, string type, int formatParamIndex, int outputParamIndex
+) {
+  // calls a variadic formatter with `formatParamIndex`, `outputParamIndex` linked
+  exists(FunctionCall fc, int format, int output |
+    variadicFormatter(fc.getTarget(), type, format, output) and
     fc.getEnclosingFunction() = f and
-    fc.getArgument(i) = f.getParameter(formatParamIndex).getAnAccess()
+    fc.getArgument(format) = f.getParameter(formatParamIndex).getAnAccess() and
+    fc.getArgument(output) = f.getParameter(outputParamIndex).getAnAccess()
+  )
+  or
+  // calls a variadic formatter with only `formatParamIndex` linked
+  exists(FunctionCall fc, string calledType, int format, int output |
+    variadicFormatter(fc.getTarget(), calledType, format, output) and
+    fc.getEnclosingFunction() = f and
+    fc.getArgument(format) = f.getParameter(formatParamIndex).getAnAccess() and
+    not fc.getArgument(output) = f.getParameter(_).getAnAccess() and
+    (
+      calledType = "" and
+      type = ""
+      or
+      calledType != "" and
+      type = "?" // we probably should have an `outputParamIndex` link but have lost it.
+    ) and
+    outputParamIndex = -1
   )
 }
 
 /**
  * Holds if `f` is a function such as `vprintf` that has a format parameter
- * (at `formatParamIndex`) and a variable argument list of type `va_arg`.
+ * and a variable argument list of type `va_arg`. `formatParamIndex` indicates
+ * the format parameter and `type` indicates the type of `vprintf`:
+ *  - `""` is a `vprintf` variant, `outputParamIndex` is `-1`.
+ *  - `"f"` is a `vfprintf` variant, `outputParamIndex` indicates the output stream parameter.
+ *  - `"s"` is a `vsprintf` variant, `outputParamIndex` indicates the output buffer parameter.
+ *  - `"?"` if the type cannot be deteremined.  `outputParamIndex` is `-1`.
  */
-predicate variadicFormatter(Function f, int formatParamIndex) {
-  primitiveVariadicFormatter(f, formatParamIndex)
+predicate variadicFormatter(Function f, string type, int formatParamIndex, int outputParamIndex) {
+  primitiveVariadicFormatter(f, type, formatParamIndex, outputParamIndex)
   or
   not f.isVarargs() and
-  callsVariadicFormatter(f, formatParamIndex)
+  callsVariadicFormatter(f, type, formatParamIndex, outputParamIndex)
+}
+
+/**
+ * A standard function such as `vprintf` that has a format parameter
+ * and a variable argument list of type `va_arg`.
+ *
+ * DEPRECATED: Use the four argument version instead.
+ */
+deprecated predicate primitiveVariadicFormatter(TopLevelFunction f, int formatParamIndex) {
+  primitiveVariadicFormatter(f, _, formatParamIndex, _)
+}
+
+/**
+ * Holds if `f` is a function such as `vprintf` that has a format parameter
+ * (at `formatParamIndex`) and a variable argument list of type `va_arg`.
+ *
+ * DEPRECATED: Use the four argument version instead.
+ */
+deprecated predicate variadicFormatter(Function f, int formatParamIndex) {
+  variadicFormatter(f, _, formatParamIndex, _)
 }
 
 /**
@@ -64,9 +122,19 @@ predicate variadicFormatter(Function f, int formatParamIndex) {
  * string and a variable number of arguments.
  */
 class UserDefinedFormattingFunction extends FormattingFunction {
-  UserDefinedFormattingFunction() { isVarargs() and callsVariadicFormatter(this, _) }
+  override string getAPrimaryQlClass() { result = "UserDefinedFormattingFunction" }
 
-  override int getFormatParameterIndex() { callsVariadicFormatter(this, result) }
+  UserDefinedFormattingFunction() { isVarargs() and callsVariadicFormatter(this, _, _, _) }
+
+  override int getFormatParameterIndex() { callsVariadicFormatter(this, _, result, _) }
+
+  override int getOutputParameterIndex(boolean isStream) {
+    callsVariadicFormatter(this, "f", _, result) and isStream = true
+    or
+    callsVariadicFormatter(this, "s", _, result) and isStream = false
+  }
+
+  override predicate isOutputGlobal() { callsVariadicFormatter(this, "", _, _) }
 }
 
 /**
@@ -74,6 +142,8 @@ class UserDefinedFormattingFunction extends FormattingFunction {
  */
 class FormattingFunctionCall extends Expr {
   FormattingFunctionCall() { this.(Call).getTarget() instanceof FormattingFunction }
+
+  override string getAPrimaryQlClass() { result = "FormattingFunctionCall" }
 
   /**
    * Gets the formatting function being called.
@@ -118,15 +188,17 @@ class FormattingFunctionCall extends Expr {
   }
 
   /**
-   * Gets the argument corresponding to the nth conversion specifier
+   * Gets the argument corresponding to the nth conversion specifier.
    */
   Expr getConversionArgument(int n) {
-    exists(FormatLiteral fl, int b, int o |
+    exists(FormatLiteral fl |
       fl = this.getFormat() and
-      b = sum(int i, int toSum | i < n and toSum = fl.getNumArgNeeded(i) | toSum) and
-      o = fl.getNumArgNeeded(n) and
-      o > 0 and
-      result = this.getFormatArgument(b + o - 1)
+      (
+        result = this.getFormatArgument(fl.getParameterFieldValue(n))
+        or
+        result = this.getFormatArgument(fl.getFormatArgumentIndexFor(n, 2)) and
+        not exists(fl.getParameterFieldValue(n))
+      )
     )
   }
 
@@ -136,11 +208,14 @@ class FormattingFunctionCall extends Expr {
    * an explicit minimum field width).
    */
   Expr getMinFieldWidthArgument(int n) {
-    exists(FormatLiteral fl, int b |
+    exists(FormatLiteral fl |
       fl = this.getFormat() and
-      b = sum(int i, int toSum | i < n and toSum = fl.getNumArgNeeded(i) | toSum) and
-      fl.hasImplicitMinFieldWidth(n) and
-      result = this.getFormatArgument(b)
+      (
+        result = this.getFormatArgument(fl.getMinFieldWidthParameterFieldValue(n))
+        or
+        result = this.getFormatArgument(fl.getFormatArgumentIndexFor(n, 0)) and
+        not exists(fl.getMinFieldWidthParameterFieldValue(n))
+      )
     )
   }
 
@@ -150,12 +225,14 @@ class FormattingFunctionCall extends Expr {
    * precision).
    */
   Expr getPrecisionArgument(int n) {
-    exists(FormatLiteral fl, int b, int o |
+    exists(FormatLiteral fl |
       fl = this.getFormat() and
-      b = sum(int i, int toSum | i < n and toSum = fl.getNumArgNeeded(i) | toSum) and
-      (if fl.hasImplicitMinFieldWidth(n) then o = 1 else o = 0) and
-      fl.hasImplicitPrecision(n) and
-      result = this.getFormatArgument(b + o)
+      (
+        result = this.getFormatArgument(fl.getPrecisionParameterFieldValue(n))
+        or
+        result = this.getFormatArgument(fl.getFormatArgumentIndexFor(n, 1)) and
+        not exists(fl.getPrecisionParameterFieldValue(n))
+      )
     )
   }
 
@@ -163,7 +240,11 @@ class FormattingFunctionCall extends Expr {
    * Gets the number of arguments to this call that are parameters to the
    * format string.
    */
-  int getNumFormatArgument() { result = count(this.getFormatArgument(_)) }
+  int getNumFormatArgument() {
+    result = count(this.getFormatArgument(_)) and
+    // format arguments must be known
+    exists(getTarget().(FormattingFunction).getFirstFormatArgumentIndex())
+  }
 }
 
 /**
@@ -234,17 +315,13 @@ class FormatLiteral extends Literal {
    * Gets the position in the string at which the nth conversion specifier
    * starts.
    */
-  int getConvSpecOffset(int n) {
-    n = 0 and result = this.getFormat().indexOf("%", 0, 0)
-    or
-    n > 0 and
-    exists(int p |
-      n = p + 1 and result = this.getFormat().indexOf("%", 0, this.getConvSpecOffset(p) + 2)
-    )
-  }
+  int getConvSpecOffset(int n) { result = this.getFormat().indexOf("%", n, 0) }
 
-  // these predicates gets a regular expressions to match each individual
-  // parts of a conversion specifier.
+  /*
+   * Each of these predicates gets a regular expressions to match each individual
+   * parts of a conversion specifier.
+   */
+
   private string getParameterFieldRegexp() {
     // the parameter field is a posix extension, for example `%5$i` uses the fifth
     // parameter as an integer, regardless of the position of this substring in the
@@ -284,15 +361,22 @@ class FormatLiteral extends Literal {
     //                 6 - length
     //                 7 - conversion character
     // NB: this matches "%%" with conversion character "%"
-    result = "(?s)(\\%(" + this.getParameterFieldRegexp() + ")(" + this.getFlagRegexp() + ")(" +
+    result =
+      "(?s)(\\%(" + this.getParameterFieldRegexp() + ")(" + this.getFlagRegexp() + ")(" +
         this.getFieldWidthRegexp() + ")(" + this.getPrecRegexp() + ")(" + this.getLengthRegexp() +
         ")(" + this.getConvCharRegexp() + ")" + "|\\%\\%).*"
   }
 
   /**
-   * Holds if the arguments are a parsing of a conversion specifier to this format string.
+   * Holds if the arguments are a parsing of a conversion specifier to this
+   * format string, where `n` is which conversion specifier to parse, `spec` is
+   * the whole conversion specifier, `params` is the argument to be converted
+   * in case it's not positional, `flags` contains additional format flags,
+   * `width` is the maximum width option of this input, `len` is the length
+   * flag of this input, and `conv` is the conversion character of this input.
    *
-   * @param n which conversion specifier to parse
+   * Each parameter is the empty string if no value is given by the conversion
+   * specifier.
    */
   predicate parseConvSpec(
     int n, string spec, string params, string flags, string width, string prec, string len,
@@ -341,6 +425,14 @@ class FormatLiteral extends Literal {
    * Gets the parameter field of the nth conversion specifier (for example, `1$`).
    */
   string getParameterField(int n) { this.parseConvSpec(n, _, result, _, _, _, _, _) }
+
+  /**
+   * Gets the parameter field of the nth conversion specifier (if it has one) as a
+   * zero-based number.
+   */
+  int getParameterFieldValue(int n) {
+    result = this.getParameterField(n).regexpCapture("([0-9]*)\\$", 1).toInt() - 1
+  }
 
   /**
    * Gets the flags of the nth conversion specifier.
@@ -412,6 +504,14 @@ class FormatLiteral extends Literal {
   int getMinFieldWidth(int n) { result = this.getMinFieldWidthOpt(n).toInt() }
 
   /**
+   * Gets the zero-based parameter number of the minimum field width of the nth
+   * conversion specifier, if it is implicit and uses a parameter field (such as `*1$`).
+   */
+  int getMinFieldWidthParameterFieldValue(int n) {
+    result = this.getMinFieldWidthOpt(n).regexpCapture("\\*([0-9]*)\\$", 1).toInt() - 1
+  }
+
+  /**
    * Gets the precision of the nth conversion specifier (empty string if none is given).
    */
   string getPrecisionOpt(int n) { this.parseConvSpec(n, _, _, _, _, result, _, _) }
@@ -439,6 +539,14 @@ class FormatLiteral extends Literal {
     if this.getPrecisionOpt(n) = "."
     then result = 0
     else result = this.getPrecisionOpt(n).regexpCapture("\\.([0-9]*)", 1).toInt()
+  }
+
+  /**
+   * Gets the zero-based parameter number of the precision of the nth conversion
+   * specifier, if it is implicit and uses a parameter field (such as `*1$`).
+   */
+  int getPrecisionParameterFieldValue(int n) {
+    result = this.getPrecisionOpt(n).regexpCapture("\\.\\*([0-9]*)\\$", 1).toInt() - 1
   }
 
   /**
@@ -516,12 +624,12 @@ class FormatLiteral extends Literal {
         or
         len = "l" and result = this.getLongType()
         or
-        (len = "ll" or len = "L" or len = "q") and
+        len = ["ll", "L", "q"] and
         result instanceof LongLongType
         or
         len = "j" and result = this.getIntmax_t()
         or
-        (len = "z" or len = "Z") and
+        len = ["z", "Z"] and
         (result = this.getSize_t() or result = this.getSsize_t())
         or
         len = "t" and result = this.getPtrdiff_t()
@@ -554,12 +662,12 @@ class FormatLiteral extends Literal {
         or
         len = "l" and result = this.getLongType()
         or
-        (len = "ll" or len = "L" or len = "q") and
+        len = ["ll", "L", "q"] and
         result instanceof LongLongType
         or
         len = "j" and result = this.getIntmax_t()
         or
-        (len = "z" or len = "Z") and
+        len = ["z", "Z"] and
         (result = this.getSize_t() or result = this.getSsize_t())
         or
         len = "t" and result = this.getPtrdiff_t()
@@ -585,9 +693,7 @@ class FormatLiteral extends Literal {
   FloatingPointType getFloatingPointConversion(int n) {
     exists(string len |
       len = this.getLength(n) and
-      if len = "L" or len = "ll"
-      then result instanceof LongDoubleType
-      else result instanceof DoubleType
+      if len = ["L", "ll"] then result instanceof LongDoubleType else result instanceof DoubleType
     )
   }
 
@@ -604,7 +710,7 @@ class FormatLiteral extends Literal {
         or
         len = "l" and base = this.getLongType()
         or
-        (len = "ll" or len = "L") and
+        len = ["ll", "L"] and
         base instanceof LongLongType
         or
         len = "q" and base instanceof LongLongType
@@ -651,12 +757,12 @@ class FormatLiteral extends Literal {
     exists(string len, string conv |
       this.parseConvSpec(n, _, _, _, _, _, len, conv) and
       (
-        (conv = "c" or conv = "C") and
+        conv = ["c", "C"] and
         len = "h" and
         result instanceof PlainCharType
         or
-        (conv = "c" or conv = "C") and
-        (len = "l" or len = "w") and
+        conv = ["c", "C"] and
+        len = ["l", "w"] and
         result = getWideCharType()
         or
         conv = "c" and
@@ -696,12 +802,12 @@ class FormatLiteral extends Literal {
     exists(string len, string conv |
       this.parseConvSpec(n, _, _, _, _, _, len, conv) and
       (
-        (conv = "s" or conv = "S") and
+        conv = ["s", "S"] and
         len = "h" and
         result.(PointerType).getBaseType() instanceof PlainCharType
         or
-        (conv = "s" or conv = "S") and
-        (len = "l" or len = "w") and
+        conv = ["s", "S"] and
+        len = ["l", "w"] and
         result.(PointerType).getBaseType() = getWideCharType()
         or
         conv = "s" and
@@ -738,10 +844,7 @@ class FormatLiteral extends Literal {
 
   private Type getConversionType9(int n) {
     this.getConversionChar(n) = "Z" and
-    (
-      this.getLength(n) = "l" or
-      this.getLength(n) = "w"
-    ) and
+    this.getLength(n) = ["l", "w"] and
     exists(Type t |
       t.getName() = "UNICODE_STRING" and
       result.(PointerType).getBaseType() = t
@@ -759,18 +862,46 @@ class FormatLiteral extends Literal {
   }
 
   /**
+   * Holds if the nth conversion specifier of this format string (if `mode = 2`), it's
+   * minimum field width (if `mode = 0`) or it's precision (if `mode = 1`) requires a
+   * format argument.
+   *
+   * Most conversion specifiers require a format argument, whereas minimum field width
+   * and precision only require a format argument if they are present and a `*` was
+   * used for it's value in the format string.
+   */
+  private predicate hasFormatArgumentIndexFor(int n, int mode) {
+    mode = 0 and
+    this.hasImplicitMinFieldWidth(n)
+    or
+    mode = 1 and
+    this.hasImplicitPrecision(n)
+    or
+    mode = 2 and
+    exists(this.getConvSpecOffset(n)) and
+    not this.getConversionChar(n) = "m"
+  }
+
+  /**
+   * Gets the computed format argument index for the nth conversion specifier of this
+   * format string (if `mode = 2`), it's minimum field width (if `mode = 0`) or it's
+   * precision (if `mode = 1`).  Has no result if that element is not present.  Does
+   * not account for positional arguments (`$`).
+   */
+  int getFormatArgumentIndexFor(int n, int mode) {
+    hasFormatArgumentIndexFor(n, mode) and
+    (3 * n) + mode =
+      rank[result + 1](int n2, int mode2 | hasFormatArgumentIndexFor(n2, mode2) | (3 * n2) + mode2)
+  }
+
+  /**
    * Gets the number of arguments required by the nth conversion specifier
    * of this format string.
    */
   int getNumArgNeeded(int n) {
     exists(this.getConvSpecOffset(n)) and
-    not this.getConversionChar(n) = "%" and
-    exists(int n1, int n2, int n3 |
-      (if this.hasImplicitMinFieldWidth(n) then n1 = 1 else n1 = 0) and
-      (if this.hasImplicitPrecision(n) then n2 = 1 else n2 = 0) and
-      (if this.getConversionChar(n) = "m" then n3 = 0 else n3 = 1) and
-      result = n1 + n2 + n3
-    )
+    exists(this.getConversionChar(n)) and
+    result = count(int mode | hasFormatArgumentIndexFor(n, mode))
   }
 
   /**
@@ -782,7 +913,7 @@ class FormatLiteral extends Literal {
       // At least one conversion specifier has a parameter field, in which case,
       // they all should have.
       result = max(string s | this.getParameterField(_) = s + "$" | s.toInt())
-    else result = sum(int n, int toSum | toSum = this.getNumArgNeeded(n) | toSum)
+    else result = count(int n, int mode | hasFormatArgumentIndexFor(n, mode))
   }
 
   /**
@@ -867,13 +998,11 @@ class FormatLiteral extends Literal {
           len = (afterdot.maximum(1) + 6).maximum(1 + 1 + dot + afterdot + 1 + 1 + 3)
         ) // (e.g. "-1.59203e-319")
         or
-        (
-          this.getConversionChar(n).toLowerCase() = "d" or
-          this.getConversionChar(n).toLowerCase() = "i"
-        ) and
+        this.getConversionChar(n).toLowerCase() = ["d", "i"] and
         // e.g. -2^31 = "-2147483648"
         exists(int sizeBits |
-          sizeBits = min(int bits |
+          sizeBits =
+            min(int bits |
               bits = getIntegralDisplayType(n).getSize() * 8
               or
               exists(IntegralType t |
@@ -890,7 +1019,8 @@ class FormatLiteral extends Literal {
         this.getConversionChar(n).toLowerCase() = "u" and
         // e.g. 2^32 - 1 = "4294967295"
         exists(int sizeBits |
-          sizeBits = min(int bits |
+          sizeBits =
+            min(int bits |
               bits = getIntegralDisplayType(n).getSize() * 8
               or
               exists(IntegralType t |
@@ -907,7 +1037,8 @@ class FormatLiteral extends Literal {
         this.getConversionChar(n).toLowerCase() = "x" and
         // e.g. "12345678"
         exists(int sizeBytes, int baseLen |
-          sizeBytes = min(int bytes |
+          sizeBytes =
+            min(int bytes |
               bytes = getIntegralDisplayType(n).getSize()
               or
               exists(IntegralType t |
@@ -934,7 +1065,8 @@ class FormatLiteral extends Literal {
         this.getConversionChar(n).toLowerCase() = "o" and
         // e.g. 2^32 - 1 = "37777777777"
         exists(int sizeBits, int baseLen |
-          sizeBits = min(int bits |
+          sizeBits =
+            min(int bits |
               bits = getIntegralDisplayType(n).getSize() * 8
               or
               exists(IntegralType t |
@@ -950,7 +1082,8 @@ class FormatLiteral extends Literal {
         )
         or
         this.getConversionChar(n).toLowerCase() = "s" and
-        len = min(int v |
+        len =
+          min(int v |
             v = this.getPrecision(n) or
             v = this.getUse().getFormatArgument(n).(AnalysedString).getMaxLength() - 1 // (don't count null terminator)
           )
@@ -983,8 +1116,8 @@ class FormatLiteral extends Literal {
     if n = 0
     then result = this.getFormat().substring(0, this.getConvSpecOffset(0))
     else
-      result = this
-            .getFormat()
+      result =
+        this.getFormat()
             .substring(this.getConvSpecOffset(n - 1) + this.getConvSpec(n - 1).length(),
               this.getConvSpecOffset(n))
   }
@@ -999,8 +1132,8 @@ class FormatLiteral extends Literal {
       (
         if n > 0
         then
-          result = this
-                .getFormat()
+          result =
+            this.getFormat()
                 .substring(this.getConvSpecOffset(n - 1) + this.getConvSpec(n - 1).length(),
                   this.getFormat().length())
         else result = this.getFormat()
@@ -1012,7 +1145,8 @@ class FormatLiteral extends Literal {
     if n = this.getNumConvSpec()
     then result = this.getConstantSuffix().length() + 1
     else
-      result = this.getConstantPart(n).length() + this.getMaxConvertedLength(n) +
+      result =
+        this.getConstantPart(n).length() + this.getMaxConvertedLength(n) +
           this.getMaxConvertedLengthAfter(n + 1)
   }
 
@@ -1020,7 +1154,8 @@ class FormatLiteral extends Literal {
     if n = this.getNumConvSpec()
     then result = this.getConstantSuffix().length() + 1
     else
-      result = this.getConstantPart(n).length() + this.getMaxConvertedLengthLimited(n) +
+      result =
+        this.getConstantPart(n).length() + this.getMaxConvertedLengthLimited(n) +
           this.getMaxConvertedLengthAfterLimited(n + 1)
   }
 

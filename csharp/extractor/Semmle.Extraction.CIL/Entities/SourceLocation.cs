@@ -1,27 +1,39 @@
 ﻿using System.Collections.Generic;
+using System.IO;
 using Semmle.Extraction.PDB;
 
 namespace Semmle.Extraction.CIL.Entities
 {
-    public interface ISourceLocation : ILocation
+    public sealed class PdbSourceLocation : LabelledEntity, ILocation
     {
-    }
-
-    public sealed class PdbSourceLocation : LabelledEntity, ISourceLocation
-    {
-        readonly Location location;
-        readonly PdbSourceFile file;
+        private readonly Location location;
+        private readonly PdbSourceFile file;
 
         public PdbSourceLocation(Context cx, PDB.Location location) : base(cx)
         {
             this.location = location;
             file = cx.CreateSourceFile(location.File);
-
-            ShortId = file.ShortId + separator + new IntId(location.StartLine) + separator + new IntId(location.StartColumn) + separator + new IntId(location.EndLine) + separator + new IntId(location.EndColumn);
         }
 
-        static readonly Id suffix = new StringId(";sourcelocation");
-        static readonly Id separator = new StringId(",");
+        public override void WriteId(TextWriter trapFile)
+        {
+            file.WriteId(trapFile);
+            trapFile.Write(',');
+            trapFile.Write(location.StartLine);
+            trapFile.Write(',');
+            trapFile.Write(location.StartColumn);
+            trapFile.Write(',');
+            trapFile.Write(location.EndLine);
+            trapFile.Write(',');
+            trapFile.Write(location.EndColumn);
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is PdbSourceLocation l && location.Equals(l.location);
+        }
+
+        public override int GetHashCode() => location.GetHashCode();
 
         public override IEnumerable<IExtractionProduct> Contents
         {
@@ -32,6 +44,6 @@ namespace Semmle.Extraction.CIL.Entities
             }
         }
 
-        public override Id IdSuffix => suffix;
+        public override string IdSuffix => ";sourcelocation";
     }
 }

@@ -9,20 +9,15 @@
  *       security
  *       external/cwe/cwe-676
  */
+
 import cpp
 
 predicate potentiallyDangerousFunction(Function f, string message) {
   exists(string name | f.hasGlobalName(name) |
-    (
-      name = "gmtime" or
-      name = "localtime" or
-      name = "ctime" or
-      name = "asctime"
-    ) and
+    name = ["gmtime", "localtime", "ctime", "asctime"] and
     message = "Call to " + name + " is potentially dangerous"
   )
 }
-
 
 from FunctionCall call, Function target, string message
 where

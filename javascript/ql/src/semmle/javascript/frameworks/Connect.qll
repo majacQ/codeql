@@ -30,17 +30,17 @@ module Connect {
      *
      * `kind` is one of: "error", "request", "response", "next".
      */
-    abstract SimpleParameter getRouteHandlerParameter(string kind);
+    abstract Parameter getRouteHandlerParameter(string kind);
 
     /**
      * Gets the parameter of the route handler that contains the request object.
      */
-    SimpleParameter getRequestParameter() { result = getRouteHandlerParameter("request") }
+    Parameter getRequestParameter() { result = getRouteHandlerParameter("request") }
 
     /**
      * Gets the parameter of the route handler that contains the response object.
      */
-    SimpleParameter getResponseParameter() { result = getRouteHandlerParameter("response") }
+    Parameter getResponseParameter() { result = getRouteHandlerParameter("response") }
   }
 
   /**
@@ -51,7 +51,7 @@ module Connect {
 
     StandardRouteHandler() { this = any(RouteSetup setup).getARouteHandler() }
 
-    override SimpleParameter getRouteHandlerParameter(string kind) {
+    override Parameter getRouteHandlerParameter(string kind) {
       result = getRouteHandlerParameter(astNode, kind)
     }
   }
@@ -125,9 +125,7 @@ module Connect {
       t.start() and
       result = getARouteHandlerExpr().flow().getALocalSource()
       or
-      exists(DataFlow::TypeBackTracker t2 |
-        result = getARouteHandler(t2).backtrack(t2, t)
-      )
+      exists(DataFlow::TypeBackTracker t2 | result = getARouteHandler(t2).backtrack(t2, t))
     }
 
     override Expr getServer() { result = server }
@@ -159,7 +157,6 @@ module Connect {
    */
   private class RequestInputAccess extends HTTP::RequestInputAccess {
     RequestExpr request;
-
     string kind;
 
     RequestInputAccess() {
@@ -181,12 +178,9 @@ module Connect {
    */
   private class TrackedRouteHandlerCandidateWithSetup extends RouteHandler,
     HTTP::Servers::StandardRouteHandler, DataFlow::FunctionNode {
+    TrackedRouteHandlerCandidateWithSetup() { this = any(RouteSetup s).getARouteHandler() }
 
-    TrackedRouteHandlerCandidateWithSetup() {
-      this = any(RouteSetup s).getARouteHandler()
-    }
-
-    override SimpleParameter getRouteHandlerParameter(string kind) {
+    override Parameter getRouteHandlerParameter(string kind) {
       result = getRouteHandlerParameter(astNode, kind)
     }
   }

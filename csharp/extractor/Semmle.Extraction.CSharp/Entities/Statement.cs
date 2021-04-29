@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.CSharp.Populators;
 using Microsoft.CodeAnalysis.CSharp;
 using Semmle.Extraction.Entities;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
@@ -13,7 +14,7 @@ namespace Semmle.Extraction.CSharp.Entities
         bool IsTopLevelParent { get; }
     }
 
-    abstract class Statement : FreshEntity, IExpressionParentEntity, IStatementParentEntity
+    internal abstract class Statement : FreshEntity, IExpressionParentEntity, IStatementParentEntity
     {
         protected Statement(Context cx) : base(cx) { }
 
@@ -37,9 +38,13 @@ namespace Semmle.Extraction.CSharp.Entities
         public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.NeedsLabel;
     }
 
-    abstract class Statement<TSyntax> : Statement where TSyntax : CSharpSyntaxNode
+    internal abstract class Statement<TSyntax> : Statement where TSyntax : CSharpSyntaxNode
     {
         protected readonly TSyntax Stmt;
+        private readonly int child;
+        private readonly Kinds.StmtKind kind;
+        private readonly IStatementParentEntity parent;
+        private readonly Location location;
 
         protected override CSharpSyntaxNode GetStatementSyntax() => Stmt;
 
@@ -47,32 +52,28 @@ namespace Semmle.Extraction.CSharp.Entities
             : base(cx)
         {
             Stmt = stmt;
+            this.parent = parent;
+            this.child = child;
+            this.location = location;
+            this.kind = kind;
             cx.BindComments(this, location.symbol);
-            cx.Emit(Tuples.statements(this, kind));
-            if (parent.IsTopLevelParent)
-                cx.Emit(Tuples.stmt_parent_top_level(this, child, parent));
-            else
-                cx.Emit(Tuples.stmt_parent(this, child, parent));
-            cx.Emit(Tuples.stmt_location(this, location));
         }
+
+        protected sealed override void Populate(TextWriter trapFile)
+        {
+            trapFile.statements(this, kind);
+            if (parent.IsTopLevelParent)
+                trapFile.stmt_parent_top_level(this, child, parent);
+            else
+                trapFile.stmt_parent(this, child, parent);
+            trapFile.stmt_location(this, location);
+            PopulateStatement(trapFile);
+        }
+
+        protected abstract void PopulateStatement(TextWriter trapFile);
 
         protected Statement(Context cx, TSyntax stmt, Kinds.StmtKind kind, IStatementParentEntity parent, int child)
             : this(cx, stmt, kind, parent, child, cx.Create(stmt.FixedLocation())) { }
-
-        /// <summary>
-        /// Populates statement-type specific relations in the trap file. The general relations
-        /// <code>statements</code> and <code>stmt_location</code> are populated by the constructor
-        /// (should not fail), so even if statement-type specific population fails (e.g., in
-        /// standalone extraction), the statement created via
-        /// <see cref="Statement.Create(Context, StatementSyntax, Statement, int)"/> will still
-        /// be valid.
-        /// </summary>
-        protected abstract void Populate();
-
-        protected void TryPopulate()
-        {
-            cx.Try(Stmt, null, Populate);
-        }
 
         public override string ToString() => Label.ToString();
     }

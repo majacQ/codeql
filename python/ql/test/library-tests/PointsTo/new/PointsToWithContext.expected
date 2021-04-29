@@ -1,4 +1,3 @@
-WARNING: Predicate points_to has been deprecated and may be removed in future (PointsToWithContext.ql:8,7-26)
 | a_simple.py:2 | ControlFlowNode for FloatLiteral | float 1.0 | builtin-class float | 2 | import |
 | a_simple.py:2 | ControlFlowNode for f1 | float 1.0 | builtin-class float | 2 | import |
 | a_simple.py:3 | ControlFlowNode for dict | builtin-class dict | builtin-class type | 3 | import |
@@ -22,12 +21,10 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | a_simple.py:18 | ControlFlowNode for multi_loop | Function multi_loop | builtin-class function | 18 | import |
 | a_simple.py:19 | ControlFlowNode for None | NoneType None | builtin-class NoneType | 19 | runtime |
 | a_simple.py:19 | ControlFlowNode for x | NoneType None | builtin-class NoneType | 19 | runtime |
-| a_simple.py:20 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 20 | runtime |
 | a_simple.py:23 | ControlFlowNode for FunctionExpr | Function with_definition | builtin-class function | 23 | import |
 | a_simple.py:23 | ControlFlowNode for with_definition | Function with_definition | builtin-class function | 23 | import |
 | a_simple.py:27 | ControlFlowNode for FunctionExpr | Function multi_loop_in_try | builtin-class function | 27 | import |
 | a_simple.py:27 | ControlFlowNode for multi_loop_in_try | Function multi_loop_in_try | builtin-class function | 27 | import |
-| a_simple.py:29 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 29 | runtime |
 | a_simple.py:31 | ControlFlowNode for KeyError | builtin-class KeyError | builtin-class type | 31 | runtime |
 | a_simple.py:34 | ControlFlowNode for FunctionExpr | Function f | builtin-class function | 34 | import |
 | a_simple.py:34 | ControlFlowNode for args | args | builtin-class tuple | 34 | runtime |
@@ -55,11 +52,14 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | a_simple.py:40 | ControlFlowNode for c | 'c' | builtin-class str | 38 | runtime |
 | a_simple.py:40 | ControlFlowNode for w | Tuple | builtin-class tuple | 40 | runtime |
 | a_simple.py:41 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 39 | runtime |
-| a_simple.py:41 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 41 | runtime |
 | a_simple.py:41 | ControlFlowNode for t | Tuple | builtin-class tuple | 39 | runtime |
 | a_simple.py:42 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 40 | runtime |
-| a_simple.py:42 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 42 | runtime |
 | a_simple.py:42 | ControlFlowNode for w | Tuple | builtin-class tuple | 40 | runtime |
+| a_simple.py:43 | ControlFlowNode for p | int 1 | builtin-class int | 41 | runtime |
+| a_simple.py:44 | ControlFlowNode for q | int 2 | builtin-class int | 41 | runtime |
+| a_simple.py:45 | ControlFlowNode for r | int 3 | builtin-class int | 41 | runtime |
+| a_simple.py:47 | ControlFlowNode for y | 'b' | builtin-class str | 42 | runtime |
+| a_simple.py:48 | ControlFlowNode for z | 'c' | builtin-class str | 42 | runtime |
 | a_simple.py:49 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 49 | runtime |
 | a_simple.py:49 | ControlFlowNode for b | 'b' | builtin-class str | 38 | runtime |
 | a_simple.py:49 | ControlFlowNode for c | 'c' | builtin-class str | 38 | runtime |
@@ -67,6 +67,11 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | a_simple.py:49 | ControlFlowNode for i | 'c' | builtin-class str | 38 | runtime |
 | a_simple.py:51 | ControlFlowNode for h | 'b' | builtin-class str | 38 | runtime |
 | a_simple.py:52 | ControlFlowNode for i | 'c' | builtin-class str | 38 | runtime |
+| a_simple.py:53 | ControlFlowNode for BinaryExpr | BinaryExpr | builtin-class tuple | 53 | runtime |
+| a_simple.py:53 | ControlFlowNode for IntegerLiteral | int 1 | builtin-class int | 53 | runtime |
+| a_simple.py:53 | ControlFlowNode for IntegerLiteral | int 2 | builtin-class int | 53 | runtime |
+| a_simple.py:53 | ControlFlowNode for Tuple | BinaryExpr | builtin-class tuple | 53 | runtime |
+| a_simple.py:53 | ControlFlowNode for Tuple | Tuple | builtin-class tuple | 53 | runtime |
 | b_condition.py:4 | ControlFlowNode for FunctionExpr | Function f | builtin-class function | 4 | import |
 | b_condition.py:4 | ControlFlowNode for f | Function f | builtin-class function | 4 | import |
 | b_condition.py:5 | ControlFlowNode for IfExp | NoneType None | builtin-class NoneType | 5 | runtime |
@@ -407,6 +412,8 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | h_classes.py:39 | ControlFlowNode for ClassExpr | class Derived3 | builtin-class type | 39 | import |
 | h_classes.py:39 | ControlFlowNode for Derived3 | class Derived3 | builtin-class type | 39 | import |
 | h_classes.py:42 | ControlFlowNode for Base | class Base | builtin-class type | 23 | import |
+| h_classes.py:42 | ControlFlowNode for Base() | Base() | *UNKNOWN TYPE* | 42 | import |
+| h_classes.py:42 | ControlFlowNode for thing | Base() | *UNKNOWN TYPE* | 42 | import |
 | h_classes.py:45 | ControlFlowNode for FunctionExpr | Function f | builtin-class function | 45 | import |
 | h_classes.py:45 | ControlFlowNode for f | Function f | builtin-class function | 45 | import |
 | h_classes.py:48 | ControlFlowNode for ClassExpr | class D | builtin-class type | 48 | import |
@@ -416,6 +423,22 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | h_classes.py:50 | ControlFlowNode for m | Function f | builtin-class function | 45 | import |
 | h_classes.py:52 | ControlFlowNode for FunctionExpr | Function n | builtin-class function | 52 | import |
 | h_classes.py:52 | ControlFlowNode for n | Function n | builtin-class function | 52 | import |
+| h_classes.py:55 | ControlFlowNode for int | builtin-class int | builtin-class type | 55 | import |
+| h_classes.py:55 | ControlFlowNode for int() | int() | builtin-class int | 55 | import |
+| h_classes.py:56 | ControlFlowNode for Str | '' | builtin-class str | 56 | import |
+| h_classes.py:56 | ControlFlowNode for type | builtin-class type | builtin-class type | 56 | import |
+| h_classes.py:56 | ControlFlowNode for type() | builtin-class str | builtin-class type | 56 | import |
+| h_classes.py:56 | ControlFlowNode for type()() | type()() | builtin-class str | 56 | import |
+| h_classes.py:57 | ControlFlowNode for list | builtin-class list | builtin-class type | 57 | import |
+| h_classes.py:57 | ControlFlowNode for list() | list() | builtin-class list | 57 | import |
+| h_classes.py:58 | ControlFlowNode for dict | builtin-class dict | builtin-class type | 58 | import |
+| h_classes.py:58 | ControlFlowNode for dict() | dict() | builtin-class dict | 58 | import |
+| h_classes.py:59 | ControlFlowNode for Str | 'hi' | builtin-class str | 59 | import |
+| h_classes.py:59 | ControlFlowNode for bool | builtin-class bool | builtin-class type | 59 | import |
+| h_classes.py:59 | ControlFlowNode for bool() | bool True | builtin-class bool | 59 | import |
+| h_classes.py:60 | ControlFlowNode for IntegerLiteral | int 0 | builtin-class int | 60 | import |
+| h_classes.py:60 | ControlFlowNode for bool | builtin-class bool | builtin-class type | 60 | import |
+| h_classes.py:60 | ControlFlowNode for bool() | bool False | builtin-class bool | 60 | import |
 | i_imports.py:3 | ControlFlowNode for IntegerLiteral | int 1 | builtin-class int | 3 | import |
 | i_imports.py:3 | ControlFlowNode for a | int 1 | builtin-class int | 3 | import |
 | i_imports.py:4 | ControlFlowNode for IntegerLiteral | int 2 | builtin-class int | 4 | import |
@@ -488,6 +511,12 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | j_convoluted_imports.py:16 | ControlFlowNode for moduleX | Module code.package.moduleX | builtin-class module | 0 | import |
 | j_convoluted_imports.py:17 | ControlFlowNode for Attribute | class Y | builtin-class type | 1 | import |
 | j_convoluted_imports.py:17 | ControlFlowNode for moduleX | Module code.package.moduleX | builtin-class module | 0 | import |
+| j_convoluted_imports.py:20 | ControlFlowNode for ImportExpr | Module code.test_package.module1 | builtin-class module | 20 | import |
+| j_convoluted_imports.py:22 | ControlFlowNode for ImportExpr | Module code.test_package.module2 | builtin-class module | 22 | import |
+| j_convoluted_imports.py:23 | ControlFlowNode for p | int 1 | builtin-class int | 3 | import |
+| j_convoluted_imports.py:24 | ControlFlowNode for q | int 2 | builtin-class int | 4 | import |
+| j_convoluted_imports.py:25 | ControlFlowNode for r | Dict | builtin-class dict | 5 | import |
+| j_convoluted_imports.py:25 | ControlFlowNode for r | int 3 | builtin-class int | 5 | import |
 | k_getsetattr.py:4 | ControlFlowNode for C | class C | builtin-class type | 4 | import |
 | k_getsetattr.py:4 | ControlFlowNode for ClassExpr | class C | builtin-class type | 4 | import |
 | k_getsetattr.py:4 | ControlFlowNode for object | builtin-class object | builtin-class type | 4 | import |
@@ -695,6 +724,25 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | l_calls.py:53 | ControlFlowNode for Attribute() | 'b' | builtin-class str | 53 | import |
 | l_calls.py:53 | ControlFlowNode for F | class F | builtin-class type | 47 | import |
 | l_calls.py:53 | ControlFlowNode for t | Tuple | builtin-class tuple | 41 | import |
+| l_calls.py:58 | ControlFlowNode for Attribute | Builtin-method bit_length | builtin-class method_descriptor | 58 | import |
+| l_calls.py:58 | ControlFlowNode for a | Builtin-method bit_length | builtin-class method_descriptor | 58 | import |
+| l_calls.py:58 | ControlFlowNode for int | builtin-class int | builtin-class type | 58 | import |
+| l_calls.py:59 | ControlFlowNode for Attribute | Builtin-method bit_length | builtin-class method_descriptor | 59 | import |
+| l_calls.py:59 | ControlFlowNode for Attribute() | Attribute() | builtin-class int | 59 | import |
+| l_calls.py:59 | ControlFlowNode for IntegerLiteral | int 5 | builtin-class int | 59 | import |
+| l_calls.py:59 | ControlFlowNode for b | Attribute() | builtin-class int | 59 | import |
+| l_calls.py:59 | ControlFlowNode for int | builtin-class int | builtin-class type | 59 | import |
+| l_calls.py:62 | ControlFlowNode for Attribute | Builtin-method get | builtin-class method_descriptor | 62 | import |
+| l_calls.py:62 | ControlFlowNode for c | Builtin-method get | builtin-class method_descriptor | 62 | import |
+| l_calls.py:62 | ControlFlowNode for dict | builtin-class dict | builtin-class type | 62 | import |
+| l_calls.py:63 | ControlFlowNode for Attribute | Builtin-method get | builtin-class method_descriptor | 63 | import |
+| l_calls.py:63 | ControlFlowNode for Dict | Dict | builtin-class dict | 63 | import |
+| l_calls.py:63 | ControlFlowNode for IntegerLiteral | int 5 | builtin-class int | 63 | import |
+| l_calls.py:63 | ControlFlowNode for Str | 'foo' | builtin-class str | 63 | import |
+| l_calls.py:63 | ControlFlowNode for dict | builtin-class dict | builtin-class type | 63 | import |
+| l_calls.py:64 | ControlFlowNode for a | Builtin-method bit_length | builtin-class method_descriptor | 58 | import |
+| l_calls.py:64 | ControlFlowNode for b | Attribute() | builtin-class int | 59 | import |
+| l_calls.py:64 | ControlFlowNode for c | Builtin-method get | builtin-class method_descriptor | 62 | import |
 | m_attributes.py:3 | ControlFlowNode for C | class C | builtin-class type | 3 | import |
 | m_attributes.py:3 | ControlFlowNode for ClassExpr | class C | builtin-class type | 3 | import |
 | m_attributes.py:3 | ControlFlowNode for object | builtin-class object | builtin-class type | 3 | import |
@@ -1170,7 +1218,6 @@ WARNING: Predicate points_to has been deprecated and may be removed in future (P
 | t_type.py:7 | ControlFlowNode for sys | Module sys | builtin-class module | 1 | import |
 | t_type.py:7 | ControlFlowNode for type | builtin-class type | builtin-class type | 7 | import |
 | t_type.py:7 | ControlFlowNode for type() | builtin-class module | builtin-class type | 7 | import |
-| t_type.py:8 | ControlFlowNode for unknown | ImportMember | *UNKNOWN TYPE* | 8 | import |
 | t_type.py:9 | ControlFlowNode for type | builtin-class type | builtin-class type | 9 | import |
 | t_type.py:9 | ControlFlowNode for type() | *UNKNOWN TYPE* | *UNKNOWN TYPE* | 9 | import |
 | t_type.py:10 | ControlFlowNode for Dict | Dict | builtin-class dict | 10 | import |

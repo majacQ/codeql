@@ -216,7 +216,7 @@ private predicate typeArgumentContainsAux1(RefType s, RefType t, int n) {
   |
     exists(RefType tUpperBound | tUpperBound = t.(Wildcard).getUpperBound().getType() |
       // ? extends T <= ? extends S if T <: S
-      hasSubtypeStar0(s.(Wildcard).getUpperBound().getType(), tUpperBound)
+      hasSubtypeStar(s.(Wildcard).getUpperBound().getType(), tUpperBound)
       or
       // ? extends T <= ?
       s.(Wildcard).isUnconstrained()
@@ -224,7 +224,7 @@ private predicate typeArgumentContainsAux1(RefType s, RefType t, int n) {
     or
     exists(RefType tLowerBound | tLowerBound = t.(Wildcard).getLowerBound().getType() |
       // ? super T <= ? super S if s <: T
-      hasSubtypeStar0(tLowerBound, s.(Wildcard).getLowerBound().getType())
+      hasSubtypeStar(tLowerBound, s.(Wildcard).getLowerBound().getType())
       or
       // ? super T <= ?
       s.(Wildcard).isUnconstrained()
@@ -237,10 +237,10 @@ private predicate typeArgumentContainsAux1(RefType s, RefType t, int n) {
     s = t
     or
     // T <= ? extends T
-    hasSubtypeStar0(s.(Wildcard).getUpperBound().getType(), t)
+    hasSubtypeStar(s.(Wildcard).getUpperBound().getType(), t)
     or
     // T <= ? super T
-    hasSubtypeStar0(t, s.(Wildcard).getLowerBound().getType())
+    hasSubtypeStar(t, s.(Wildcard).getLowerBound().getType())
   )
 }
 
@@ -249,17 +249,12 @@ private predicate wildcardExtendsObject(Wildcard wc) {
   wc.getUpperBound().getType() instanceof TypeObject
 }
 
-/**
- * DEPRECATED: Use `hasSubtype*` instead.
- */
-deprecated predicate hasSubtypeStar(RefType t, RefType sub) { hasSubtype*(t, sub) }
-
-private predicate hasSubtypeStar0(RefType t, RefType sub) {
+private predicate hasSubtypeStar(RefType t, RefType sub) {
   sub = t
   or
   hasSubtype(t, sub)
   or
-  exists(RefType mid | hasSubtypeStar0(t, mid) and hasSubtype(mid, sub))
+  exists(RefType mid | hasSubtypeStar(t, mid) and hasSubtype(mid, sub))
 }
 
 /** Holds if type `t` declares member `m`. */
@@ -323,6 +318,8 @@ class Array extends RefType, @array {
    * Gets the JVM descriptor for this type, as used in bytecode.
    */
   override string getTypeDescriptor() { result = "[" + this.getComponentType().getTypeDescriptor() }
+
+  override string getAPrimaryQlClass() { result = "Array" }
 }
 
 /**
@@ -529,7 +526,8 @@ class RefType extends Type, Annotatable, Modifiable, @reftype {
    * Gets the JVM descriptor for this type, as used in bytecode.
    */
   override string getTypeDescriptor() {
-    result = "L" + this.getPackage().getName().replaceAll(".", "/") + "/" +
+    result =
+      "L" + this.getPackage().getName().replaceAll(".", "/") + "/" +
         this.getSourceDeclaration().nestedName() + ";"
   }
 
@@ -617,6 +615,17 @@ class Class extends RefType, @class {
       result = this.getASupertype().(Class).getAnAnnotation()
     )
   }
+
+  override string getAPrimaryQlClass() { result = "Class" }
+}
+
+/**
+ * PREVIEW FEATURE in Java 14. Subject to removal in a future release.
+ *
+ * A record declaration.
+ */
+class Record extends Class {
+  Record() { isRecord(this) }
 }
 
 /** An intersection type. */
@@ -632,10 +641,12 @@ class IntersectionType extends RefType, @class {
 
   private RefType superInterface() { implInterface(this, result) }
 
+  /** Gets a textual representation of this type that includes all the intersected types. */
   string getLongName() {
     result = superType().toString() + concat(" & " + superInterface().toString())
   }
 
+  /** Gets the first bound of this intersection type. */
   RefType getFirstBound() { extendsReftype(this, result) }
 }
 
@@ -689,6 +700,8 @@ class AnonymousClass extends NestedClass {
    * the string `"<anonymous class>"` as a placeholder.
    */
   override string getQualifiedName() { result = "<anonymous class>" }
+
+  override string getAPrimaryQlClass() { result = "AnonymousClass" }
 }
 
 /** A local class. */
@@ -697,6 +710,8 @@ class LocalClass extends NestedClass {
 
   /** Gets the statement that declares this local class. */
   LocalClassDeclStmt getLocalClassDeclStmt() { isLocalClass(this, result) }
+
+  override string getAPrimaryQlClass() { result = "LocalClass" }
 }
 
 /** A top-level type. */
@@ -800,6 +815,8 @@ class Interface extends RefType, @interface {
     // JLS 9.1.1.1: "Every interface is implicitly abstract"
     any()
   }
+
+  override string getAPrimaryQlClass() { result = "Interface" }
 }
 
 /** A class or interface. */
@@ -862,11 +879,15 @@ class PrimitiveType extends Type, @primitive {
     getName().regexpMatch("(float|double|int|short|byte|long)") and
     result.getLiteral().regexpMatch("0(\\.0)?+[lLfFdD]?+")
   }
+
+  override string getAPrimaryQlClass() { result = "PrimitiveType" }
 }
 
 /** The type of the `null` literal. */
 class NullType extends Type, @primitive {
   NullType() { this.hasName("<nulltype>") }
+
+  override string getAPrimaryQlClass() { result = "NullType" }
 }
 
 /** The `void` type. */
@@ -877,6 +898,8 @@ class VoidType extends Type, @primitive {
    * Gets the JVM descriptor for this type, as used in bytecode.
    */
   override string getTypeDescriptor() { result = "V" }
+
+  override string getAPrimaryQlClass() { result = "VoidType" }
 }
 
 /**

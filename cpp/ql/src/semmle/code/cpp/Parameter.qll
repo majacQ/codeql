@@ -1,9 +1,24 @@
+/**
+ * Provides a class that models parameters to functions.
+ */
+
 import semmle.code.cpp.Location
 import semmle.code.cpp.Declaration
 private import semmle.code.cpp.internal.ResolveClass
 
 /**
- * A C/C++ function parameter or catch block parameter.
+ * A C/C++ function parameter or catch block parameter. For example the
+ * function parameter `p` and the catch block parameter `e` in the following
+ * code:
+ * ```
+ * void myFunction(int p) {
+ *   try {
+ *     ...
+ *   } catch (const std::exception &e) {
+ *     ...
+ *   }
+ * }
+ * ```
  *
  * For catch block parameters, there is a one-to-one correspondence between
  * the `Parameter` and its `ParameterDeclarationEntry`.
@@ -13,7 +28,6 @@ private import semmle.code.cpp.internal.ResolveClass
  * have multiple declarations.
  */
 class Parameter extends LocalScopeVariable, @parameter {
-
   /**
    * Gets the canonical name, or names, of this parameter.
    *
@@ -22,16 +36,20 @@ class Parameter extends LocalScopeVariable, @parameter {
    *  1. The name given to the parameter at the function's definition or
    *     (for catch block parameters) at the catch block.
    *  2. A name given to the parameter at a function declaration.
-   *  3. The name "p#i" where i is the index of the parameter.
+   *  3. The name "(unnamed parameter i)" where i is the index of the parameter.
    */
   override string getName() {
-    exists (VariableDeclarationEntry vde
-    | vde = getANamedDeclarationEntry() and result = vde.getName()
-    | vde.isDefinition() or not getANamedDeclarationEntry().isDefinition())
+    exists(VariableDeclarationEntry vde |
+      vde = getANamedDeclarationEntry() and result = vde.getName()
+    |
+      vde.isDefinition() or not getANamedDeclarationEntry().isDefinition()
+    )
     or
-    (not exists(getANamedDeclarationEntry()) and
-     result = "p#" + this.getIndex().toString())
+    not exists(getANamedDeclarationEntry()) and
+    result = "(unnamed parameter " + this.getIndex().toString() + ")"
   }
+
+  override string getAPrimaryQlClass() { result = "Parameter" }
 
   /**
    * Gets the name of this parameter, including it's type.
@@ -39,18 +57,15 @@ class Parameter extends LocalScopeVariable, @parameter {
    * For example: `int p`.
    */
   string getTypedName() {
-    exists (string typeString, string nameString
-    | (if exists(getType().getName())
-         then typeString = getType().getName()
-         else typeString = "")
-      and
-      (if exists(getName())
-         then nameString = getName()
-         else nameString = "")
-      and
-      (if typeString != "" and nameString != ""
-         then result = typeString + " " + nameString
-         else result = typeString + nameString))
+    exists(string typeString, string nameString |
+      (if exists(getType().getName()) then typeString = getType().getName() else typeString = "") and
+      (if exists(getName()) then nameString = getName() else nameString = "") and
+      (
+        if typeString != "" and nameString != ""
+        then result = typeString + " " + nameString
+        else result = typeString + nameString
+      )
+    )
   }
 
   private VariableDeclarationEntry getANamedDeclarationEntry() {
@@ -68,10 +83,12 @@ class Parameter extends LocalScopeVariable, @parameter {
    */
   private VariableDeclarationEntry getAnEffectiveDeclarationEntry() {
     if getFunction().isConstructedFrom(_)
-      then exists (Function prototypeInstantiation
-           | prototypeInstantiation.getParameter(getIndex()) = result.getVariable() and
-             getFunction().isConstructedFrom(prototypeInstantiation))
-      else result = getADeclarationEntry()
+    then
+      exists(Function prototypeInstantiation |
+        prototypeInstantiation.getParameter(getIndex()) = result.getVariable() and
+        getFunction().isConstructedFrom(prototypeInstantiation)
+      )
+    else result = getADeclarationEntry()
   }
 
   /**
@@ -81,19 +98,21 @@ class Parameter extends LocalScopeVariable, @parameter {
    * DEPRECATED: this method was used in a previous implementation of
    * getName, but is no longer in use.
    */
-  deprecated string getNameInBlock(Block b) {
-    exists (ParameterDeclarationEntry pde
-    | pde.getFunctionDeclarationEntry().getBlock() = b and
+  deprecated string getNameInBlock(BlockStmt b) {
+    exists(ParameterDeclarationEntry pde |
+      pde.getFunctionDeclarationEntry().getBlock() = b and
       this.getFunction().getBlock() = b and
       pde.getVariable() = this and
-      result = pde.getName())
+      result = pde.getName()
+    )
   }
 
   /**
    * Holds if this parameter has a name.
    *
    * In other words, this predicate holds precisely when the result of
-   * `getName()` is not "p#i" (where `i` is the index of the parameter).
+   * `getName()` is not "(unnamed parameter i)" (where `i` is the index
+   * of the parameter).
    */
   predicate isNamed() { exists(getANamedDeclarationEntry()) }
 
@@ -101,20 +120,22 @@ class Parameter extends LocalScopeVariable, @parameter {
    * Gets the function to which this parameter belongs, if it is a function
    * parameter.
    */
-  override Function getFunction() { params(underlyingElement(this),unresolveElement(result),_,_) }
+  override Function getFunction() {
+    params(underlyingElement(this), unresolveElement(result), _, _)
+  }
 
   /**
    * Gets the catch block to which this parameter belongs, if it is a catch
    * block parameter.
    */
-  Block getCatchBlock() { params(underlyingElement(this),unresolveElement(result),_,_) }
+  BlockStmt getCatchBlock() { params(underlyingElement(this), unresolveElement(result), _, _) }
 
   /**
    * Gets the zero-based index of this parameter.
    *
    * For catch block parameters, this is always zero.
    */
-  int getIndex() { params(underlyingElement(this),_,result,_) }
+  int getIndex() { params(underlyingElement(this), _, result, _) }
 
   /**
    * Gets the type of this parameter.
@@ -123,7 +144,7 @@ class Parameter extends LocalScopeVariable, @parameter {
    * as they are syntactic sugar for parameters of pointer type. The
    * result is an array type for such parameters.
    */
-  override Type getType() { params(underlyingElement(this),_,_,unresolveElement(result)) }
+  override Type getType() { params(underlyingElement(this), _, _, unresolveElement(result)) }
 
   /**
    * Gets the canonical location, or locations, of this parameter.
@@ -135,8 +156,21 @@ class Parameter extends LocalScopeVariable, @parameter {
    *    of the declaration locations.
    */
   override Location getLocation() {
-    exists(VariableDeclarationEntry vde | vde = getAnEffectiveDeclarationEntry() and result = vde.getLocation() |
+    exists(VariableDeclarationEntry vde |
+      vde = getAnEffectiveDeclarationEntry() and result = vde.getLocation()
+    |
       vde.isDefinition() or not getAnEffectiveDeclarationEntry().isDefinition()
     )
+  }
+}
+
+/**
+ * An `int` that is a parameter index for some function.  This is needed for binding in certain cases.
+ */
+class ParameterIndex extends int {
+  ParameterIndex() {
+    exists(Parameter p | this = p.getIndex()) or
+    exists(Call c | exists(c.getArgument(this))) or // permit indexing varargs
+    this = -1 // used for `this`
   }
 }

@@ -1,15 +1,16 @@
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.CSharp.Syntax; // lgtm[cs/similar-file]
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    class Throw : Expression<ThrowExpressionSyntax>
+    internal class Throw : Expression<ThrowExpressionSyntax>
     {
-        Throw(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.THROW)) { }
+        private Throw(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.THROW)) { }
 
         public static Expression Create(ExpressionNodeInfo info) => new Throw(info).TryPopulate();
 
-        protected override void Populate()
+        protected override void PopulateExpression(TextWriter trapFile)
         {
             Create(cx, Syntax.Expression, this, 0);
         }

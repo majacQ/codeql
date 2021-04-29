@@ -10,94 +10,154 @@
  */
 
 import python
-import semmle.python.security.TaintTracking
-
-
-/** A regular expression that identifies strings that look like they represent secret data that are not passwords. */
-private string suspiciousNonPassword() {
-  result = "(?is).*(account|accnt|(?<!un)trusted).*"
-}
-/** A regular expression that identifies strings that look like they represent secret data that are passwords. */
-private string suspiciousPassword() {
-  result = "(?is).*(password|passwd).*"
-}
-
-/** A regular expression that identifies strings that look like they represent secret data. */
-private string suspicious() {
-  result = suspiciousPassword() or result = suspiciousNonPassword()
-}
+import semmle.python.dataflow.TaintTracking
+import semmle.python.web.HttpRequest
 
 /**
- * A string for `match` that identifies strings that look like they represent secret data that is
- * hashed or encrypted.
+ * Provides heuristics for identifying names related to sensitive information.
+ *
+ * INTERNAL: Do not use directly.
+ * This is copied from the javascript library, but should be language independent.
  */
-private string nonSuspicious() {
-  result = "(?is).*(hash|(?<!un)encrypted|\\bcrypt\\b).*"
-}
+private module HeuristicNames {
+  /**
+   * Gets a regular expression that identifies strings that may indicate the presence of secret
+   * or trusted data.
+   */
+  string maybeSecret() { result = "(?is).*((?<!is)secret|(?<!un|is)trusted).*" }
 
-/** An expression that might contain sensitive data. */
-abstract class SensitiveExpr extends Expr { }
-
-/** A method access that might produce sensitive data. */
-class SensitiveCall extends SensitiveExpr, Call {
-    SensitiveCall() {
-        exists(string name |
-            name = this.getFunc().(Name).getId() or
-            name = this.getFunc().(Attribute).getName() or
-            exists(StringObject s |
-                this.getAnArg().refersTo(s) |
-                name = s.getText()
-            )
-            |
-            name.regexpMatch(suspicious()) and
-            not name.regexpMatch(nonSuspicious())
-        )
-    }
-}
-
-/** An access to a variable or property that might contain sensitive data. */
-abstract class SensitiveVariableAccess extends SensitiveExpr {
-
-  string name;
-
-  SensitiveVariableAccess() {
-    this.(Name).getId() = name or
-    this.(Attribute).getName() = name
+  /**
+   * Gets a regular expression that identifies strings that may indicate the presence of
+   * user names or other account information.
+   */
+  string maybeAccountInfo() {
+    result = "(?is).*acc(ou)?nt.*" or
+    result = "(?is).*(puid|username|userid).*"
   }
 
-}
-
-/** An access to a variable or property that might contain sensitive data. */
-private class BasicSensitiveVariableAccess extends SensitiveVariableAccess {
-
-  BasicSensitiveVariableAccess() {
-    name.regexpMatch(suspicious()) and not name.regexpMatch(nonSuspicious())
+  /**
+   * Gets a regular expression that identifies strings that may indicate the presence of
+   * a password or an authorization key.
+   */
+  string maybePassword() {
+    result = "(?is).*pass(wd|word|code|phrase)(?!.*question).*" or
+    result = "(?is).*(auth(entication|ori[sz]ation)?)key.*"
   }
 
+  /**
+   * Gets a regular expression that identifies strings that may indicate the presence of
+   * a certificate.
+   */
+  string maybeCertificate() { result = "(?is).*(cert)(?!.*(format|name)).*" }
+
+  /**
+   * Gets a regular expression that identifies strings that may indicate the presence
+   * of sensitive data, with `classification` describing the kind of sensitive data involved.
+   */
+  string maybeSensitive(SensitiveData data) {
+    result = maybeSecret() and data instanceof SensitiveData::Secret
+    or
+    result = maybeAccountInfo() and data instanceof SensitiveData::Id
+    or
+    result = maybePassword() and data instanceof SensitiveData::Password
+    or
+    result = maybeCertificate() and data instanceof SensitiveData::Certificate
+  }
+
+  /**
+   * Gets a regular expression that identifies strings that may indicate the presence of data
+   * that is hashed or encrypted, and hence rendered non-sensitive.
+   */
+  string notSensitive() {
+    result = "(?is).*(redact|censor|obfuscate|hash|md5|sha|((?<!un)(en))?(crypt|code)).*"
+  }
+
+  bindingset[name]
+  SensitiveData getSensitiveDataForName(string name) {
+    name.regexpMatch(HeuristicNames::maybeSensitive(result)) and
+    not name.regexpMatch(HeuristicNames::notSensitive())
+  }
 }
 
-class SensitiveData extends TaintKind {
-
-    SensitiveData() {
-        this = "sensitive.data"
-    }
-
+abstract class SensitiveData extends TaintKind {
+  bindingset[this]
+  SensitiveData() { this = this }
 }
 
+module SensitiveData {
+  class Secret extends SensitiveData {
+    Secret() { this = "sensitive.data.secret" }
 
-class SensitiveDataSource extends TaintSource {
+    override string repr() { result = "a secret" }
+  }
 
-    SensitiveDataSource() {
-        this.(ControlFlowNode).getNode() instanceof SensitiveExpr
+  class Id extends SensitiveData {
+    Id() { this = "sensitive.data.id" }
+
+    override string repr() { result = "an ID" }
+  }
+
+  class Password extends SensitiveData {
+    Password() { this = "sensitive.data.password" }
+
+    override string repr() { result = "a password" }
+  }
+
+  class Certificate extends SensitiveData {
+    Certificate() { this = "sensitive.data.certificate" }
+
+    override string repr() { result = "a certificate or key" }
+  }
+
+  private SensitiveData fromFunction(Value func) {
+    result = HeuristicNames::getSensitiveDataForName(func.getName())
+  }
+
+  abstract class Source extends TaintSource {
+    abstract string repr();
+  }
+
+  private class SensitiveCallSource extends Source {
+    SensitiveData data;
+
+    SensitiveCallSource() {
+      exists(Value callee | callee.getACall() = this | data = fromFunction(callee))
     }
 
-    override string toString() {
-        result = "sensitive.data.source"
+    override predicate isSourceOf(TaintKind kind) { kind = data }
+
+    override string repr() { result = "a call returning " + data.repr() }
+  }
+
+  /** An access to a variable or property that might contain sensitive data. */
+  private class SensitiveVariableAccess extends SensitiveData::Source {
+    SensitiveData data;
+
+    SensitiveVariableAccess() {
+      data = HeuristicNames::getSensitiveDataForName(this.(AttrNode).getName())
     }
 
-    override predicate isSourceOf(TaintKind kind) {
-        kind instanceof SensitiveData
+    override predicate isSourceOf(TaintKind kind) { kind = data }
+
+    override string repr() { result = "an attribute or property containing " + data.repr() }
+  }
+
+  private class SensitiveRequestParameter extends SensitiveData::Source {
+    SensitiveData data;
+
+    SensitiveRequestParameter() {
+      this.(CallNode).getFunction().(AttrNode).getName() = "get" and
+      exists(StringValue sensitive |
+        this.(CallNode).getAnArg().pointsTo(sensitive) and
+        data = HeuristicNames::getSensitiveDataForName(sensitive.getText())
+      )
     }
 
+    override predicate isSourceOf(TaintKind kind) { kind = data }
+
+    override string repr() { result = "a request parameter containing " + data.repr() }
+  }
 }
 
+//Backwards compatibility
+class SensitiveDataSource = SensitiveData::Source;

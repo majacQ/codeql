@@ -22,7 +22,7 @@ class Call extends DotNet::Call, Expr, @call {
    * Gets the static (compile-time) target of this call. For example, the
    * static target of `x.M()` on line 9 is `A.M` in
    *
-   * ```
+   * ```csharp
    * class A {
    *   virtual void M() { }
    * }
@@ -65,7 +65,7 @@ class Call extends DotNet::Call, Expr, @call {
    * on line 5, `o` is not an argument for `M1`'s `args` parameter, while
    * `new object[] { o }` on line 6 is, in
    *
-   * ```
+   * ```csharp
    * class C {
    *   void M1(params object[] args) { }
    *
@@ -143,7 +143,7 @@ class Call extends DotNet::Call, Expr, @call {
    * Unlike `getTarget()`, this predicate takes reflection/dynamic based calls,
    * virtual dispatch, and delegate calls into account. Example:
    *
-   * ```
+   * ```csharp
    * class A {
    *   virtual void M() { }
    * }
@@ -188,7 +188,7 @@ class Call extends DotNet::Call, Expr, @call {
    * Unlike `getArgument()`, this predicate takes reflection based calls and named
    * arguments into account. Example:
    *
-   * ```
+   * ```csharp
    * class A {
    *   virtual void M(int first, int second) { }
    *
@@ -261,7 +261,7 @@ class Call extends DotNet::Call, Expr, @call {
  * of the arguments on lines 4 and 5, respectively, are valid for the parameter
  * `args` on line 1 in
  *
- * ```
+ * ```csharp
  * void M(params object[] args) { ... }
  *
  * void CallM(object[] os, string[] ss, string s) {
@@ -280,7 +280,7 @@ private predicate isValidExplicitParamsType(Parameter p, Type t) {
 /**
  * A method call, for example `a.M()` on line 5 in
  *
- * ```
+ * ```csharp
  * class A {
  *   void M() { }
  *
@@ -295,7 +295,9 @@ class MethodCall extends Call, QualifiableExpr, LateBindableExpr, @method_invoca
 
   override Method getQualifiedDeclaration() { result = getTarget() }
 
-  override string toString() { result = "call to method " + this.getTarget().getName() }
+  override string toString() { result = "call to method " + concat(this.getTarget().getName()) }
+
+  override string getAPrimaryQlClass() { result = "MethodCall" }
 
   override Expr getRawArgument(int i) {
     if exists(getQualifier())
@@ -310,7 +312,7 @@ class MethodCall extends Call, QualifiableExpr, LateBindableExpr, @method_invoca
 /**
  * A call to an extension method, for example lines 5 and 6 in
  *
- * ```
+ * ```csharp
  * static class A {
  *   static void M(this int i) { }
  *
@@ -341,7 +343,7 @@ class ExtensionMethodCall extends MethodCall {
    * happens to be an extension method, for example the calls on lines 6 and
    * 7 (but not line 5) in
    *
-   * ```
+   * ```csharp
    * static class Extensions {
    *   public static void Ext(int i) { }
    *
@@ -363,7 +365,7 @@ class ExtensionMethodCall extends MethodCall {
 /**
  * A virtual method call, for example `a.M()` on line 5 in
  *
- * ```
+ * ```csharp
  * class A {
  *   public virtual void M() { }
  *
@@ -384,15 +386,17 @@ class VirtualMethodCall extends MethodCall {
  * A constructor initializer call, for example `base()` (line 6) and
  * `this(0)` (line 8) in
  *
- * ```
- * class A {
- *   public A() { }
+ * ```csharp
+ * class A
+ * {
+ *     public A() { }
  * }
  *
- * class B : A {
- *   public B(int x) : base() { }
+ * class B : A
+ * {
+ *     public B(int x) : base() { }
  *
- *   public B() : this(0) { }
+ *     public B() : this(0) { }
  * }
  * ```
  */
@@ -403,19 +407,62 @@ class ConstructorInitializer extends Call, @constructor_init_expr {
 
   override string toString() { result = "call to constructor " + this.getTarget().getName() }
 
+  override string getAPrimaryQlClass() { result = "ConstructorInitializer" }
+
+  private ValueOrRefType getTargetType() {
+    result = this.getTarget().getDeclaringType().getUnboundDeclaration()
+  }
+
+  private ValueOrRefType getConstructorType() {
+    result = this.getConstructor().getDeclaringType().getUnboundDeclaration()
+  }
+
+  /**
+   * Holds if this initialier is a `this` initializer, for example `this(0)`
+   * in
+   *
+   * ```csharp
+   * class A
+   * {
+   *     A(int i) { }
+   *     A() : this(0) { }
+   * }
+   * ```
+   */
+  predicate isThis() { this.getTargetType() = this.getConstructorType() }
+
+  /**
+   * Holds if this initialier is a `base` initializer, for example `base(0)`
+   * in
+   *
+   * ```csharp
+   * class A
+   * {
+   *     A(int i) { }
+   * }
+   *
+   * class B : A
+   * {
+   *     B() : base(0) { }
+   * }
+   * ```
+   */
+  predicate isBase() { this.getTargetType() != this.getConstructorType() }
+
   /**
    * Gets the constructor that this initializer call belongs to. For example,
    * the initializer call `base()` on line 7 belongs to the constructor `B`
    * on line 6 in
    *
-   * ```
-   * class A {
-   *   public A() { }
+   * ```csharp
+   * class A
+   * {
+   *     public A() { }
    * }
    *
-   * class B : A {
-   *   public B()
-   *     : base() { }
+   * class B : A
+   * {
+   *     public B() : base() { }
    * }
    * ```
    */
@@ -432,7 +479,7 @@ class ConstructorInitializer extends Call, @constructor_init_expr {
  * A call to a user-defined operator, for example `this + other`
  * on line 7 in
  *
- * ```
+ * ```csharp
  * class A {
  *   public static A operator+(A left, A right) {
  *     return left;
@@ -450,13 +497,15 @@ class OperatorCall extends Call, LateBindableExpr, @operator_invocation_expr {
   override Operator getARuntimeTarget() { result = Call.super.getARuntimeTarget() }
 
   override string toString() { result = "call to operator " + this.getTarget().getName() }
+
+  override string getAPrimaryQlClass() { result = "OperatorCall" }
 }
 
 /**
  * A call to a user-defined mutator operator, for example `a++` on
  * line 7 in
  *
- * ```
+ * ```csharp
  * class A {
  *   public static A operator++(A a) {
  *     return a;
@@ -481,7 +530,7 @@ class MutatorOperatorCall extends OperatorCall {
 /**
  * A delegate call, for example `x()` on line 5 in
  *
- * ```
+ * ```csharp
  * class A {
  *   Action X = () => { };
  *
@@ -538,7 +587,7 @@ class DelegateCall extends Call, @delegate_invocation_expr {
    * Gets the delegate expression of this delegate call. For example, the
    * delegate expression of `X()` on line 5 is the access to the field `X` in
    *
-   * ```
+   * ```csharp
    * class A {
    *   Action X = () => { };
    *
@@ -551,6 +600,8 @@ class DelegateCall extends Call, @delegate_invocation_expr {
   Expr getDelegateExpr() { result = this.getChild(-1) }
 
   override string toString() { result = "delegate call" }
+
+  override string getAPrimaryQlClass() { result = "DelegateCall" }
 }
 
 /**
@@ -570,7 +621,7 @@ class AccessorCall extends Call, QualifiableExpr, @call_access_expr {
  * A call to a property accessor, for example the call to `get_P` on
  * line 5 in
  *
- * ```
+ * ```csharp
  * class A {
  *   int P { get { return 0; } }
  *
@@ -595,13 +646,15 @@ class PropertyCall extends AccessorCall, PropertyAccessExpr {
   }
 
   override string toString() { result = PropertyAccessExpr.super.toString() }
+
+  override string getAPrimaryQlClass() { result = "PropertyCall" }
 }
 
 /**
  * A call to an indexer accessor, for example the call to `get_Item`
  * (defined on line 3) on line 7 in
  *
- * ```
+ * ```csharp
  * class A {
  *   string this[int i] {
  *     get { return i.ToString(); }
@@ -630,13 +683,15 @@ class IndexerCall extends AccessorCall, IndexerAccessExpr {
   }
 
   override string toString() { result = IndexerAccessExpr.super.toString() }
+
+  override string getAPrimaryQlClass() { result = "IndexerCall" }
 }
 
 /**
  * A call to an event accessor, for example the call to `add_Click`
  * (defined on line 5) on line 12 in
  *
- * ```
+ * ```csharp
  * class A {
  *   public delegate void EventHandler(object sender, object e);
  *
@@ -674,12 +729,14 @@ class EventCall extends AccessorCall, EventAccessExpr {
   }
 
   override string toString() { result = EventAccessExpr.super.toString() }
+
+  override string getAPrimaryQlClass() { result = "EventCall" }
 }
 
 /**
  * A call to a local function, for example the call `Fac(n)` on line 6 in
  *
- * ```
+ * ```csharp
  * int Choose(int n, int m) {
  *   int Fac(int x) {
  *     return x > 1 ? x * Fac(x - 1) : 1;
@@ -693,4 +750,6 @@ class LocalFunctionCall extends Call, @local_function_invocation_expr {
   override LocalFunction getTarget() { expr_call(this, result) }
 
   override string toString() { result = "call to local function " + getTarget().getName() }
+
+  override string getAPrimaryQlClass() { result = "LocalFunctionCall" }
 }

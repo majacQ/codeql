@@ -9,13 +9,14 @@
  * and its constructed generics (`ConstructedGeneric*`).
  *
  * Generics can be partially constructed if they are unbound generics contained
- * within constructed generic types. The predicate `getSourceDeclaration` refers
+ * within constructed generic types. The predicate `getUnboundDeclaration` refers
  * to the ultimate `UnboundGeneric` type/method as defined in the source code.
  */
 
 import Location
 import Namespace
 private import dotnet
+private import TypeRef
 
 /**
  * A generic declaration. Either an unbound generic (`UnboundGeneric`) or a
@@ -23,19 +24,19 @@ private import dotnet
  */
 class Generic extends DotNet::Generic, Declaration, @generic {
   Generic() {
-    is_generic(this) or
-    is_constructed(this)
+    type_parameters(_, _, this, _) or
+    type_arguments(_, _, this)
   }
 }
 
 /**
- * A generic declaration that can have type parameters.
+ * A generic declaration with type parameters.
  *
  * Either an unbound generic type (`UnboundGenericType`) or an unbound generic method
  * (`UnboundGenericMethod`).
  */
 class UnboundGeneric extends DotNet::UnboundGeneric, Generic {
-  UnboundGeneric() { is_generic(this) }
+  UnboundGeneric() { type_parameters(_, _, this, _) }
 
   override TypeParameter getTypeParameter(int n) { type_parameters(result, n, this, _) }
 
@@ -47,24 +48,21 @@ class UnboundGeneric extends DotNet::UnboundGeneric, Generic {
 }
 
 /**
- * A declaration constructed from an `UnboundGeneric` by supplying type arguments.
+ * A constructed generic.
  *
  * Either a constructed generic type (`ConstructedType`) or a constructed
  * generic method (`ConstructedMethod`).
  */
 class ConstructedGeneric extends DotNet::ConstructedGeneric, Generic {
-  ConstructedGeneric() { is_constructed(this) }
+  ConstructedGeneric() { type_arguments(_, _, this) }
 
   override UnboundGeneric getUnboundGeneric() { constructed_generic(this, result) }
 
-  override UnboundGeneric getSourceDeclaration() {
-    result = getUnboundGeneric().getSourceDeclaration()
+  override UnboundGeneric getUnboundDeclaration() {
+    result = getUnboundGeneric().getUnboundDeclaration()
   }
 
-  override int getNumberOfTypeArguments() {
-    // getTypeArgument() could fail if the type does not exist in the database
-    result = count(int i | type_arguments(_, i, this))
-  }
+  override int getNumberOfTypeArguments() { result = count(int i | type_arguments(_, i, this)) }
 
   override Type getTypeArgument(int i) { none() }
 
@@ -84,11 +82,12 @@ class ConstructedGeneric extends DotNet::ConstructedGeneric, Generic {
  */
 class UnboundGenericType extends ValueOrRefType, UnboundGeneric {
   /**
-   * Gets a bound/constructed version of this unbound generic type. This includes not only closed constructed types such as `G<int>`,
-   * but also open constructed types such as the `G<T>` in `class Other<T> { G<T> g; }`. Note that such a type is distinct from the
-   * `G<T>` used in the class definition, since in `G<T> g;` the `T` will be the actual type parameter used for the `Other` that contains
-   * `g`, whereas in `class G<T> { ... }` the `T` is a formal type parameter of `G`. It is important not to get confused by the superficial
-   * syntactic similarity.
+   * Gets a bound/constructed version of this unbound generic type. This includes
+   * not only closed constructed types such as `G<int>`, but also open constructed
+   * types such as the `G<T>` in `class Other<T> { G<T> g; }`. Note that such a type
+   * is distinct from the `G<T>` used in the class definition, since in `G<T> g;`
+   * the `T` will be the actual type parameter used for the `Other` that contains
+   * `g`, whereas in `class G<T> { ... }` the `T` is a formal type parameter of `G`.
    */
   override ConstructedType getAConstructedGeneric() {
     result = UnboundGeneric.super.getAConstructedGeneric()
@@ -115,8 +114,8 @@ class UnboundGenericType extends ValueOrRefType, UnboundGeneric {
     result = getNameWithoutBrackets() + "<" + this.typeParametersToString() + ">"
   }
 
-  override UnboundGenericType getSourceDeclaration() {
-    result = ValueOrRefType.super.getSourceDeclaration()
+  override UnboundGenericType getUnboundDeclaration() {
+    result = ValueOrRefType.super.getUnboundDeclaration()
   }
 
   final override Type getChild(int n) { result = getTypeParameter(n) }
@@ -169,7 +168,7 @@ class TypeParameter extends DotNet::TypeParameter, Type, @type_parameter {
     // A<int>.B<int> is a ConstructedGenericClass.
     exists(ConstructedGeneric c, UnboundGeneric u, int tpi |
       this = u.getTypeParameter(tpi) and
-      (u = c.getUnboundGeneric() or u = c.getSourceDeclaration()) and
+      (u = c.getUnboundGeneric() or u = c.getUnboundDeclaration()) and
       result = c.getTypeArgument(tpi)
     )
   }
@@ -185,6 +184,8 @@ class TypeParameter extends DotNet::TypeParameter, Type, @type_parameter {
 
   /** Gets the generic that defines this type parameter. */
   UnboundGeneric getGeneric() { type_parameters(this, _, result, _) }
+
+  override string getAPrimaryQlClass() { result = "TypeParameter" }
 }
 
 /**
@@ -192,31 +193,13 @@ class TypeParameter extends DotNet::TypeParameter, Type, @type_parameter {
  *
  * For example, `where` on line 2 in
  *
- * ```
+ * ```csharp
  * class Factory<T>
  *   where T : ICloneable {
  * }
  * ```
  */
 class TypeParameterConstraints extends Element, @type_parameter_constraints {
-  /**
-   * DEPRECATED: Use `getATypeConstraint()` instead.
-   * Gets a specific interface constraint, if any.
-   */
-  deprecated Interface getAnInterfaceConstraint() { result = getATypeConstraint() }
-
-  /**
-   * DEPRECATED: Use `getATypeConstraint()` instead.
-   * Gets a specific type parameter constraint, if any.
-   */
-  deprecated TypeParameter getATypeParameterConstraint() { result = getATypeConstraint() }
-
-  /**
-   * DEPRECATED: Use `getATypeConstraint()` instead.
-   * Gets the specific class constraint, if any.
-   */
-  deprecated Class getClassConstraint() { result = getATypeConstraint() }
-
   /** Gets a specific type constraint, if any. */
   Type getATypeConstraint() { specific_type_parameter_constraints(this, getTypeRef(result)) }
 
@@ -244,7 +227,7 @@ class TypeParameterConstraints extends Element, @type_parameter_constraints {
   predicate hasNullableRefTypeConstraint() { general_type_parameter_constraints(this, 5) }
 
   /** Gets a textual representation of these constraints. */
-  override string toString() { result = "where " + this.getTypeParameter().toString() + ": ..." }
+  override string toString() { result = "where " + this.getTypeParameter().getName() + ": ..." }
 }
 
 /**
@@ -253,7 +236,7 @@ class TypeParameterConstraints extends Element, @type_parameter_constraints {
  *
  * For example,
  *
- * ```
+ * ```csharp
  * struct KeyValuePair<Key, Value> {
  *   ...
  * }
@@ -268,15 +251,15 @@ class UnboundGenericStruct extends Struct, UnboundGenericType {
     result = UnboundGenericType.super.getAConstructedGeneric()
   }
 
-  override UnboundGenericStruct getSourceDeclaration() {
-    result = UnboundGenericType.super.getSourceDeclaration()
+  override UnboundGenericStruct getUnboundDeclaration() {
+    result = UnboundGenericType.super.getUnboundDeclaration()
   }
 }
 
 /**
  * An unbound generic class, for example
  *
- * ```
+ * ```csharp
  * class List<T> {
  *   ...
  * }
@@ -291,15 +274,15 @@ class UnboundGenericClass extends Class, UnboundGenericType {
     result = UnboundGenericType.super.getAConstructedGeneric()
   }
 
-  override UnboundGenericClass getSourceDeclaration() {
-    result = UnboundGenericType.super.getSourceDeclaration()
+  override UnboundGenericClass getUnboundDeclaration() {
+    result = UnboundGenericType.super.getUnboundDeclaration()
   }
 }
 
 /**
  * An unbound generic interface, for example
  *
- * ```
+ * ```csharp
  * interface IEnumerable<T> {
  *   ...
  * }
@@ -314,8 +297,8 @@ class UnboundGenericInterface extends Interface, UnboundGenericType {
     result = UnboundGenericType.super.getAConstructedGeneric()
   }
 
-  override UnboundGenericInterface getSourceDeclaration() {
-    result = UnboundGenericType.super.getSourceDeclaration()
+  override UnboundGenericInterface getUnboundDeclaration() {
+    result = UnboundGenericType.super.getUnboundDeclaration()
   }
 }
 
@@ -325,7 +308,7 @@ class UnboundGenericInterface extends Interface, UnboundGenericType {
  *
  * For example
  *
- * ```
+ * ```csharp
  * delegate void F<T>(T t);
  * ```
  */
@@ -338,53 +321,56 @@ class UnboundGenericDelegateType extends DelegateType, UnboundGenericType {
     result = UnboundGenericType.super.getAConstructedGeneric()
   }
 
-  override UnboundGenericDelegateType getSourceDeclaration() {
-    result = UnboundGenericType.super.getSourceDeclaration()
+  override UnboundGenericDelegateType getUnboundDeclaration() {
+    result = UnboundGenericType.super.getUnboundDeclaration()
   }
 
   override string toStringWithTypes() {
-    result = getNameWithoutBrackets() + "<" + this.typeParametersToString() + ">(" +
+    result =
+      getNameWithoutBrackets() + "<" + this.typeParametersToString() + ">(" +
         parameterTypesToString() + ")"
   }
 }
 
 /**
- * A constructed (bound) type. This is a generic type for which actual type arguments have been supplied,
- * for example `G<int>` or the `G<T>` in `class Other<T> { G<T> g; }`. Constructed types can be divided further into
- * those that are open (for example `G1<T>` or `G2<T,T,U,int>`), in the sense that one or more of their type arguments
- * is a type parameter, versus those that are closed (for example `G1<int>` or `G2<long,long,float,int>`). We do not
- * currently distinguish the two in this library.
+ * A constructed (bound) type. This is a generic type for which actual type
+ * arguments have been supplied, for example `G<int>` or the `G<T>` in
+ * `class Other<T> { G<T> g; }`. Constructed types can be divided further into
+ * those that are open (for example `G1<T>` or `G2<T,T,U,int>`), in the sense
+ * that one or more of their type arguments is a type parameter, versus those
+ * that are closed (for example `G1<int>` or `G2<long,long,float,int>`).
  *
- * Either a constructed `struct` (`ConstructedStruct`), constructed `class` (`ConstructedClass`),
- * constructed `interface` (`ConstructedInterface`), or constructed method
- * (`ConstructedMethod`).
+ * Either a constructed `struct` (`ConstructedStruct`), constructed `class`
+ * (`ConstructedClass`), constructed `interface` (`ConstructedInterface`),
+ * or constructed method (`ConstructedMethod`).
  */
 class ConstructedType extends ValueOrRefType, ConstructedGeneric {
-  override UnboundGenericType getSourceDeclaration() {
-    result = ConstructedGeneric.super.getSourceDeclaration()
+  override UnboundGenericType getUnboundDeclaration() {
+    result = ConstructedGeneric.super.getUnboundDeclaration()
   }
 
-  override Location getALocation() { result = this.getSourceDeclaration().getALocation() }
+  override Location getALocation() { result = this.getUnboundDeclaration().getALocation() }
 
   override Type getTypeArgument(int n) { type_arguments(getTypeRef(result), n, getTypeRef(this)) }
 
   override UnboundGenericType getUnboundGeneric() { constructed_generic(this, getTypeRef(result)) }
 
-  language[monotonicAggregates]
-  private string annotatedTypeArgumentsToString() {
-    result = concat(int i |
-        exists(this.getAnnotatedTypeArgument(i))
-      |
-        this.getAnnotatedTypeArgument(i).toString(), ", " order by i
-      )
-  }
-
   override string toStringWithTypes() {
-    result = getUnboundGeneric().getNameWithoutBrackets() + "<" +
-        this.annotatedTypeArgumentsToString() + ">"
+    result =
+      getUnboundGeneric().getNameWithoutBrackets() + "<" + this.getTypeArgumentsString() + ">"
   }
 
   final override Type getChild(int n) { result = getTypeArgument(n) }
+
+  language[monotonicAggregates]
+  private string getTypeArgumentsString() {
+    result =
+      concat(int i |
+        exists(this.getTypeArgument(i))
+      |
+        this.getTypeArgument(i).toString(), ", " order by i
+      )
+  }
 }
 
 /**
@@ -392,7 +378,7 @@ class ConstructedType extends ValueOrRefType, ConstructedGeneric {
  *
  * For example, `KeyValuePair<int, string>` on line 4 in
  *
- * ```
+ * ```csharp
  * struct KeyValuePair<Key, Value> { ... }
  *
  * class C {
@@ -401,8 +387,8 @@ class ConstructedType extends ValueOrRefType, ConstructedGeneric {
  * ```
  */
 class ConstructedStruct extends Struct, ConstructedType {
-  override UnboundGenericStruct getSourceDeclaration() {
-    result = ConstructedType.super.getSourceDeclaration()
+  override UnboundGenericStruct getUnboundDeclaration() {
+    result = ConstructedType.super.getUnboundDeclaration()
   }
 
   override UnboundGenericStruct getUnboundGeneric() {
@@ -415,7 +401,7 @@ class ConstructedStruct extends Struct, ConstructedType {
  *
  * For example, `List<int>` on line 4 in
  *
- * ```
+ * ```csharp
  * class List<T> { ... }
  *
  * class C {
@@ -424,8 +410,8 @@ class ConstructedStruct extends Struct, ConstructedType {
  * ```
  */
 class ConstructedClass extends Class, ConstructedType {
-  override UnboundGenericClass getSourceDeclaration() {
-    result = ConstructedType.super.getSourceDeclaration()
+  override UnboundGenericClass getUnboundDeclaration() {
+    result = ConstructedType.super.getUnboundDeclaration()
   }
 
   override UnboundGenericClass getUnboundGeneric() {
@@ -438,7 +424,7 @@ class ConstructedClass extends Class, ConstructedType {
  *
  * For example, `IEnumerable<string>` on line 4 in
  *
- * ```
+ * ```csharp
  * interface IEnumerable<T> { ... }
  *
  * class C {
@@ -447,8 +433,8 @@ class ConstructedClass extends Class, ConstructedType {
  * ```
  */
 class ConstructedInterface extends Interface, ConstructedType {
-  override UnboundGenericInterface getSourceDeclaration() {
-    result = ConstructedType.super.getSourceDeclaration()
+  override UnboundGenericInterface getUnboundDeclaration() {
+    result = ConstructedType.super.getUnboundDeclaration()
   }
 
   override UnboundGenericInterface getUnboundGeneric() {
@@ -461,7 +447,7 @@ class ConstructedInterface extends Interface, ConstructedType {
  *
  * For example, `F<int>` on line 4 in
  *
- * ```
+ * ```csharp
  * delegate void F<T>(T t);
  *
  * class C {
@@ -470,8 +456,8 @@ class ConstructedInterface extends Interface, ConstructedType {
  * ```
  */
 class ConstructedDelegateType extends DelegateType, ConstructedType {
-  override UnboundGenericDelegateType getSourceDeclaration() {
-    result = ConstructedType.super.getSourceDeclaration()
+  override UnboundGenericDelegateType getUnboundDeclaration() {
+    result = ConstructedType.super.getUnboundDeclaration()
   }
 
   override UnboundGenericDelegateType getUnboundGeneric() {
@@ -483,7 +469,7 @@ class ConstructedDelegateType extends DelegateType, ConstructedType {
  * An unbound generic method. This is a generic method whose signature involves formal type parameters,
  * For example `M<T>` on line 2 in
  *
- * ```
+ * ```csharp
  * class C {
  *   void M<T>() { ... }
  * }
@@ -500,8 +486,8 @@ class UnboundGenericMethod extends Method, UnboundGeneric {
   }
 
   override string toStringWithTypes() {
-    result = getName() + "<" + this.typeParametersToString() + ">" + "(" + parameterTypesToString() +
-        ")"
+    result =
+      getName() + "<" + this.typeParametersToString() + ">" + "(" + parameterTypesToString() + ")"
   }
 }
 
@@ -509,7 +495,7 @@ class UnboundGenericMethod extends Method, UnboundGeneric {
  * A constructed (bound) method, for example the target `M<int>` of the call on
  * line 5 in
  *
- * ```
+ * ```csharp
  * class C {
  *   void M<T>() { ... }
  *
@@ -524,27 +510,27 @@ class UnboundGenericMethod extends Method, UnboundGeneric {
  * corresponds to `UnboundGenericType`.
  */
 class ConstructedMethod extends Method, ConstructedGeneric {
-  override Location getALocation() { result = this.getSourceDeclaration().getALocation() }
+  override Location getALocation() { result = this.getUnboundDeclaration().getALocation() }
 
   override Type getTypeArgument(int n) { type_arguments(getTypeRef(result), n, this) }
 
   override UnboundGenericMethod getUnboundGeneric() { constructed_generic(this, result) }
 
   override string toStringWithTypes() {
-    result = getName() + "<" + this.typeArgumentsToString() + ">" + "(" + parameterTypesToString() +
-        ")"
+    result =
+      getName() + "<" + this.typeArgumentsToString() + ">" + "(" + parameterTypesToString() + ")"
   }
 
-  override UnboundGenericMethod getSourceDeclaration() {
-    result = Method.super.getSourceDeclaration()
+  override UnboundGenericMethod getUnboundDeclaration() {
+    result = Method.super.getUnboundDeclaration()
   }
 }
 
 /**
  * An unbound generic local function, for example `f` on line 3 in
  *
- * ```
- * class {
+ * ```csharp
+ * class C {
  *   void M() {
  *     void f<T>(T t) { ... }
  *   }
@@ -561,8 +547,8 @@ class UnboundLocalFunction extends LocalFunction, UnboundGeneric {
  * A constructed generic local function, for example the target `f<int>`
  * of the function call `f(5)` on line 4 in
  *
- * ```
- * class {
+ * ```csharp
+ * class C {
  *   void M() {
  *     void f<T>(T t) { ... }
  *     f(5);
@@ -571,8 +557,8 @@ class UnboundLocalFunction extends LocalFunction, UnboundGeneric {
  * ```
  */
 class ConstructedLocalFunction extends LocalFunction, ConstructedGeneric {
-  override UnboundLocalFunction getSourceDeclaration() {
-    result = LocalFunction.super.getSourceDeclaration()
+  override UnboundLocalFunction getUnboundDeclaration() {
+    result = LocalFunction.super.getUnboundDeclaration()
   }
 
   override UnboundLocalFunction getUnboundGeneric() {
@@ -597,7 +583,7 @@ class NonConstructedMethod extends Method {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * class A<T1> {
    *   void M1(T1 x1) { }
    *   void M2<T2>(T1 x1, T2 x) { }

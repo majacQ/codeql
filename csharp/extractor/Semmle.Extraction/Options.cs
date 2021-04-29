@@ -12,39 +12,44 @@ namespace Semmle.Extraction
         /// <summary>
         /// The specified number of threads, or the default if unspecified.
         /// </summary>
-        public int Threads = Extractor.DefaultNumberOfThreads;
+        public int Threads { get; private set; } = System.Environment.ProcessorCount;
 
         /// <summary>
         /// The verbosity used in output and logging.
         /// </summary>
-        public Verbosity Verbosity = Verbosity.Info;
+        public Verbosity Verbosity { get; protected set; } = Verbosity.Info;
 
         /// <summary>
         /// Whether to output to the console.
         /// </summary>
-        public bool Console = false;
+        public bool Console { get; private set; } = false;
 
         /// <summary>
         /// Holds if CIL should be extracted.
         /// </summary>
-        public bool CIL = false;
+        public bool CIL { get; private set; } = false;
 
         /// <summary>
         /// Holds if assemblies shouldn't be extracted twice.
         /// </summary>
-        public bool Cache = true;
+        public bool Cache { get; private set; } = true;
 
         /// <summary>
         /// Whether to extract PDB information.
         /// </summary>
-        public bool PDB = false;
+        public bool PDB { get; private set; } = false;
 
         /// <summary>
         /// Whether "fast extraction mode" has been enabled.
         /// </summary>
-        public bool Fast = false;
+        public bool Fast { get; private set; } = false;
 
-        public virtual bool handleOption(string key, string value)
+        /// <summary>
+        /// The compression algorithm used for trap files.
+        /// </summary>
+        public TrapWriter.CompressionMode TrapCompression { get; set; } = TrapWriter.CompressionMode.Gzip;
+
+        public virtual bool HandleOption(string key, string value)
         {
             switch (key)
             {
@@ -59,9 +64,9 @@ namespace Semmle.Extraction
             }
         }
 
-        public abstract bool handleArgument(string argument);
+        public abstract bool HandleArgument(string argument);
 
-        public virtual bool handleFlag(string flag, bool value)
+        public virtual bool HandleFlag(string flag, bool value)
         {
             switch (flag)
             {
@@ -85,11 +90,14 @@ namespace Semmle.Extraction
                     CIL = !value;
                     Fast = value;
                     return true;
+                case "brotli":
+                    TrapCompression = value ? TrapWriter.CompressionMode.Brotli : TrapWriter.CompressionMode.Gzip;
+                    return true;
                 default:
                     return false;
             }
         }
 
-        public abstract void invalidArgument(string argument);
+        public abstract void InvalidArgument(string argument);
     }
 }

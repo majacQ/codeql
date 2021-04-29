@@ -14,9 +14,9 @@ abstract class DefensiveExpressionTest extends DataFlow::ValueNode {
 }
 
 /**
- * INTERNAL: Do not use directly; use `DefensiveExpressionTest` instead.
+ * Provides classes for specific kinds of defensive programming patterns.
  */
-module Internal {
+module DefensiveExpressionTest {
   /**
    * A defensive truthiness check that may be worth keeping, even if it
    * is strictly speaking useless.
@@ -84,7 +84,6 @@ module Internal {
    */
   private class CompositeUndefinedNullTestPart extends DefensiveExpressionTest {
     UndefinedNullTest test;
-
     boolean polarity;
 
     CompositeUndefinedNullTestPart() {
@@ -112,12 +111,11 @@ module Internal {
    *
    * Example: `if (x === null) ...`.
    */
-  private class SanityCheckingUndefinedNullGuard extends DefensiveExpressionTest {
+  private class ConsistencyCheckingUndefinedNullGuard extends DefensiveExpressionTest {
     UndefinedNullTest test;
-
     boolean polarity;
 
-    SanityCheckingUndefinedNullGuard() {
+    ConsistencyCheckingUndefinedNullGuard() {
       exists(IfStmt c |
         this = c.getCondition().flow() and
         test = stripNotsAndParens(c.getCondition(), polarity) and
@@ -152,7 +150,6 @@ module Internal {
    */
   private class NullUndefinedComparison extends UndefinedNullTest {
     Expr operand;
-
     InferredType op2type;
 
     NullUndefinedComparison() {
@@ -188,6 +185,13 @@ module Internal {
     }
 
     override Expr getOperand() { result = operand }
+  }
+
+  /**
+   * Comparison against `undefined`, such as `x === undefined`.
+   */
+  class UndefinedComparison extends NullUndefinedComparison {
+    UndefinedComparison() { op2type = TTUndefined() }
   }
 
   /**
@@ -268,7 +272,6 @@ module Internal {
    */
   private class UndefinedNullTruthinessGuard extends DefensiveExpressionTest {
     VarRef guardVar;
-
     boolean polarity;
 
     UndefinedNullTruthinessGuard() {
@@ -296,7 +299,6 @@ module Internal {
    */
   private class UndefinedNullTypeGuard extends DefensiveExpressionTest {
     UndefinedNullTest test;
-
     boolean polarity;
 
     UndefinedNullTypeGuard() {
@@ -324,7 +326,6 @@ module Internal {
    */
   private class TypeofTest extends EqualityTest {
     Expr operand;
-
     TypeofTag tag;
 
     TypeofTest() {
@@ -362,7 +363,6 @@ module Internal {
    */
   private class FunctionTypeGuard extends DefensiveExpressionTest {
     TypeofTest test;
-
     boolean polarity;
 
     FunctionTypeGuard() {
@@ -387,7 +387,7 @@ module Internal {
   /**
    * A test for `undefined` using a `typeof` expression.
    *
-   * Example: `typeof x === undefined'.
+   * Example: `typeof x === "undefined"'.
    */
   class TypeofUndefinedTest extends UndefinedNullTest {
     TypeofTest test;

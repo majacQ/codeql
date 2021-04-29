@@ -1,3 +1,7 @@
+/**
+ * Provides classes and predicates for recognizing floating point expressions which cannot be NaN.
+ */
+
 import cpp
 private import semmle.code.cpp.rangeanalysis.RangeSSA
 
@@ -24,7 +28,7 @@ predicate nanExcludingComparison(ComparisonOperation guard, boolean polarity) {
  * by virtue of the guard in `def`.
  */
 private predicate excludesNan(RangeSsaDefinition def, VariableAccess v) {
-  exists(VariableAccess inCond, ComparisonOperation guard, boolean branch, LocalScopeVariable lsv |
+  exists(VariableAccess inCond, ComparisonOperation guard, boolean branch, StackVariable lsv |
     def.isGuardPhi(inCond, guard, branch) and
     inCond.getTarget() = lsv and
     v = def.getAUse(lsv) and

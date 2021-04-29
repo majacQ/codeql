@@ -1,11 +1,12 @@
 /** Provides classes relating to declarations and type members. */
 
-import Element
-import Variable
 import Callable
+import Element
 import Modifier
-private import Implements
+import Variable
 private import dotnet
+private import Implements
+private import TypeRef
 
 /**
  * A declaration.
@@ -15,8 +16,11 @@ private import dotnet
 class Declaration extends DotNet::Declaration, Element, @declaration {
   override ValueOrRefType getDeclaringType() { none() }
 
+  /** Holds if this declaration is unbound. */
+  final predicate isUnboundDeclaration() { this = this.getUnboundDeclaration() }
+
   /** Holds if this declaration is unconstructed and in source code. */
-  predicate isSourceDeclaration() { fromSource() and this = getSourceDeclaration() }
+  final predicate isSourceDeclaration() { this.fromSource() and this.isUnboundDeclaration() }
 
   override string toString() { result = this.getName() }
 
@@ -24,7 +28,7 @@ class Declaration extends DotNet::Declaration, Element, @declaration {
    * Gets the fully qualified name of this declaration, including types, for example
    * the fully qualified name with types of `M` on line 3 is `N.C.M(int, string)` in
    *
-   * ```
+   * ```csharp
    * namespace N {
    *   class C {
    *     void M(int i, string s) { }
@@ -195,7 +199,7 @@ class Virtualizable extends Member, @virtualizable {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * interface I { void M(); }
    *
    * class A { public void M() { } }
@@ -223,7 +227,7 @@ class Virtualizable extends Member, @virtualizable {
    *
    * Example:
    *
-   * ```
+   * ```csharp
    * interface I { void M(); }
    *
    * class A { public void M() { } }
@@ -251,7 +255,7 @@ class Virtualizable extends Member, @virtualizable {
    * Note that this is generally *not* equivalent with
    * `getOverridee*().getImplementee()`, as the example below illustrates:
    *
-   * ```
+   * ```csharp
    * interface I { void M(); }
    *
    * class A { public virtual void M() { } }

@@ -1,60 +1,59 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Entities;
-using System.Collections.Generic;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class UsingDirective : FreshEntity
+    internal class UsingDirective : FreshEntity
     {
-        readonly UsingDirectiveSyntax node;
+        private readonly UsingDirectiveSyntax node;
+        private readonly NamespaceDeclaration parent;
 
         public UsingDirective(Context cx, UsingDirectiveSyntax usingDirective, NamespaceDeclaration parent)
             : base(cx)
         {
             node = usingDirective;
-            var info = cx.Model(node).GetSymbolInfo(usingDirective.Name);
+            this.parent = parent;
+            TryPopulate();
+        }
 
-            if (usingDirective.StaticKeyword.Kind() == SyntaxKind.None)
+        protected override void Populate(TextWriter trapFile)
+        {
+            var info = cx.GetModel(node).GetSymbolInfo(node.Name);
+
+            if (node.StaticKeyword.Kind() == SyntaxKind.None)
             {
                 // A normal using
-                var namespaceSymbol = info.Symbol as INamespaceSymbol;
-
-                if (namespaceSymbol == null)
+                if (info.Symbol is INamespaceSymbol namespaceSymbol)
                 {
-                    cx.Extractor.MissingNamespace(usingDirective.Name.ToFullString());
-                    cx.ModelError(usingDirective, "Namespace not found");
-                    return;
+                    var ns = Namespace.Create(cx, namespaceSymbol);
+                    trapFile.using_namespace_directives(this, ns);
+                    trapFile.using_directive_location(this, cx.Create(ReportingLocation));
                 }
                 else
                 {
-                    var ns = Namespace.Create(cx, namespaceSymbol);
-                    cx.Emit(Tuples.using_namespace_directives(this, ns));
-                    cx.Emit(Tuples.using_directive_location(this, cx.Create(ReportingLocation)));
+                    cx.Extractor.MissingNamespace(node.Name.ToFullString(), cx.FromSource);
+                    cx.ModelError(node, "Namespace not found");
+                    return;
                 }
             }
             else
             {
                 // A "using static"
-                Type m = Type.Create(cx, (ITypeSymbol)info.Symbol);
-                cx.Emit(Tuples.using_static_directives(this, m.TypeRef));
-                cx.Emit(Tuples.using_directive_location(this, cx.Create(ReportingLocation)));
+                var m = Type.Create(cx, (ITypeSymbol)info.Symbol);
+                trapFile.using_static_directives(this, m.TypeRef);
+                trapFile.using_directive_location(this, cx.Create(ReportingLocation));
             }
 
             if (parent != null)
             {
-                cx.Emit(Tuples.parent_namespace_declaration(this, parent));
+                trapFile.parent_namespace_declaration(this, parent);
             }
         }
 
         public sealed override Microsoft.CodeAnalysis.Location ReportingLocation => node.GetLocation();
-
-        public IEnumerable<Tuple> GetTuples()
-        {
-            yield break;
-        }
 
         public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.NoLabel;
     }

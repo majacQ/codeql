@@ -19,10 +19,6 @@ private import semmle.code.java.dataflow.IntegerGuards
  * Restricted to BaseSSA-based reasoning.
  */
 predicate implies_v1(Guard g1, boolean b1, Guard g2, boolean b2) {
-  g1.(ParExpr).getExpr() = g2 and
-  b1 = b2 and
-  (b1 = true or b1 = false)
-  or
   g1.(AndBitwiseExpr).getAnOperand() = g2 and b1 = true and b2 = true
   or
   g1.(OrBitwiseExpr).getAnOperand() = g2 and b1 = false and b2 = false
@@ -107,7 +103,7 @@ predicate implies_v2(Guard g1, boolean b1, Guard g2, boolean b2) {
     uniqueValue(v, e, k) and
     guardImpliesEqual(g1, b1, v, k) and
     g2.directlyControls(e.getBasicBlock(), b2) and
-    not g2.directlyControls(getBasicBlockOfGuard(g1), b2)
+    not g2.directlyControls(g1.getBasicBlock(), b2)
   )
 }
 
@@ -217,16 +213,14 @@ private predicate hasPossibleUnknownValue(SsaVariable v) {
 
 /**
  * Gets a sub-expression of `e` whose value can flow to `e` through
- * `ConditionalExpr`s. Parentheses are also removed.
+ * `ConditionalExpr`s.
  */
 private Expr possibleValue(Expr e) {
-  result = possibleValue(e.(ParExpr).getExpr())
-  or
   result = possibleValue(e.(ConditionalExpr).getTrueExpr())
   or
   result = possibleValue(e.(ConditionalExpr).getFalseExpr())
   or
-  result = e and not e instanceof ParExpr and not e instanceof ConditionalExpr
+  result = e and not e instanceof ConditionalExpr
 }
 
 /**
@@ -253,7 +247,7 @@ private predicate possibleValue(SsaVariable v, boolean fromBackEdge, Expr e, Abs
   not hasPossibleUnknownValue(v) and
   exists(SsaExplicitUpdate def |
     def = getADefinition(v, fromBackEdge) and
-    e = possibleValue(def.getDefiningExpr().(VariableAssign).getSource().getProperExpr()) and
+    e = possibleValue(def.getDefiningExpr().(VariableAssign).getSource()) and
     k.getExpr() = e
   )
 }
@@ -272,15 +266,23 @@ private predicate uniqueValue(SsaVariable v, Expr e, AbstractValue k) {
 }
 
 /**
+ * Holds if `v1` and `v2` have the same value in `bb`.
+ */
+private predicate equalVarsInBlock(BasicBlock bb, SsaVariable v1, SsaVariable v2) {
+  exists(Guard guard, boolean branch |
+    guard.isEquality(v1.getAUse(), v2.getAUse(), branch) and
+    guardControls_v1(guard, bb, branch)
+  )
+}
+
+/**
  * Holds if `guard` evaluating to `branch` implies that `v` equals `k`.
  */
 private predicate guardImpliesEqual(Guard guard, boolean branch, SsaVariable v, AbstractValue k) {
-  guard.isEquality(v.getAUse(), k.getExpr(), branch)
-}
-
-private BasicBlock getBasicBlockOfGuard(Guard g) {
-  result = g.(Expr).getControlFlowNode().getBasicBlock() or
-  result = g.(SwitchCase).getSwitch().getExpr().getProperExpr().getControlFlowNode().getBasicBlock()
+  exists(SsaVariable v0 |
+    guard.isEquality(v0.getAUse(), k.getExpr(), branch) and
+    (v = v0 or equalVarsInBlock(guard.getBasicBlock(), v0, v))
+  )
 }
 
 private ControlFlowNode getAGuardBranchSuccessor(Guard g, boolean branch) {
@@ -297,9 +299,9 @@ private predicate guardControlsPhiBranch(
   SsaExplicitUpdate upd, SsaPhiNode phi, Guard guard, boolean branch, Expr e
 ) {
   guard.directlyControls(upd.getBasicBlock(), branch) and
-  upd.getDefiningExpr().(VariableAssign).getSource().getProperExpr() = e and
+  upd.getDefiningExpr().(VariableAssign).getSource() = e and
   upd = phi.getAPhiInput() and
-  getBasicBlockOfGuard(guard).bbStrictlyDominates(phi.getBasicBlock())
+  guard.getBasicBlock().bbStrictlyDominates(phi.getBasicBlock())
 }
 
 /**
@@ -311,12 +313,12 @@ private predicate guardControlsPhiBranch(
  */
 private predicate conditionalAssign(SsaVariable v, Guard guard, boolean branch, Expr e) {
   exists(ConditionalExpr c |
-    v.(SsaExplicitUpdate).getDefiningExpr().(VariableAssign).getSource().getProperExpr() = c and
-    guard = c.getCondition().getProperExpr()
+    v.(SsaExplicitUpdate).getDefiningExpr().(VariableAssign).getSource() = c and
+    guard = c.getCondition()
   |
-    branch = true and e = c.getTrueExpr().getProperExpr()
+    branch = true and e = c.getTrueExpr()
     or
-    branch = false and e = c.getFalseExpr().getProperExpr()
+    branch = false and e = c.getFalseExpr()
   )
   or
   exists(SsaExplicitUpdate upd, SsaPhiNode phi |
@@ -326,7 +328,7 @@ private predicate conditionalAssign(SsaVariable v, Guard guard, boolean branch, 
     forall(SsaVariable other | other != upd and other = phi.getAPhiInput() |
       guard.directlyControls(other.getBasicBlock(), branch.booleanNot())
       or
-      other.getBasicBlock().bbDominates(getBasicBlockOfGuard(guard)) and
+      other.getBasicBlock().bbDominates(guard.getBasicBlock()) and
       not other.isLiveAtEndOfBlock(getAGuardBranchSuccessor(guard, branch))
     )
   )
@@ -341,6 +343,11 @@ private predicate conditionalAssignVal(SsaVariable v, Guard guard, boolean branc
 
 private predicate relevantEq(SsaVariable v, AbstractValue val) {
   conditionalAssignVal(v, _, _, val)
+  or
+  exists(SsaVariable v0 |
+    conditionalAssignVal(v0, _, _, val) and
+    equalVarsInBlock(_, v0, v)
+  )
 }
 
 /**
@@ -349,16 +356,19 @@ private predicate relevantEq(SsaVariable v, AbstractValue val) {
 private predicate guardImpliesNotEqual1(
   Guard guard, boolean branch, SsaVariable v, AbstractValue val
 ) {
-  relevantEq(v, val) and
-  (
-    guard.isEquality(v.getAUse(), val.getExpr(), branch.booleanNot())
-    or
-    exists(AbstractValue val2 |
-      guard.isEquality(v.getAUse(), val2.getExpr(), branch) and
-      val != val2
-    )
-    or
-    guard.(InstanceOfExpr).getExpr() = sameValue(v, _) and branch = true and val = TAbsValNull()
+  exists(SsaVariable v0 |
+    relevantEq(v0, val) and
+    (
+      guard.isEquality(v0.getAUse(), val.getExpr(), branch.booleanNot())
+      or
+      exists(AbstractValue val2 |
+        guard.isEquality(v0.getAUse(), val2.getExpr(), branch) and
+        val != val2
+      )
+      or
+      guard.(InstanceOfExpr).getExpr() = sameValue(v0, _) and branch = true and val = TAbsValNull()
+    ) and
+    (v = v0 or equalVarsInBlock(guard.getBasicBlock(), v0, v))
   )
 }
 
@@ -368,13 +378,16 @@ private predicate guardImpliesNotEqual1(
 private predicate guardImpliesNotEqual2(
   Guard guard, boolean branch, SsaVariable v, AbstractValue val
 ) {
-  relevantEq(v, val) and
-  (
-    guard = directNullGuard(v, branch, false) and val = TAbsValNull()
-    or
-    exists(int k |
-      guard = integerGuard(v.getAUse(), branch, k, false) and
-      val = TAbsValInt(k)
-    )
+  exists(SsaVariable v0 |
+    relevantEq(v0, val) and
+    (
+      guard = directNullGuard(v0, branch, false) and val = TAbsValNull()
+      or
+      exists(int k |
+        guard = integerGuard(v0.getAUse(), branch, k, false) and
+        val = TAbsValInt(k)
+      )
+    ) and
+    (v = v0 or equalVarsInBlock(guard.getBasicBlock(), v0, v))
   )
 }

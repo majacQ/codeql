@@ -53,10 +53,11 @@ class MethodImplementation extends EntryPoint, @cil_method_implementation {
 
   /** Gets a string representing the disassembly of this implementation. */
   string getDisassembly() {
-    result = concat(Instruction i |
+    result =
+      concat(Instruction i |
         i = this.getAnInstruction()
       |
-        i.toString(), ", " order by i.getIndex()
+        i.toStringExtra(), ", " order by i.getIndex()
       )
   }
 }
@@ -79,19 +80,13 @@ class Method extends DotNet::Callable, Element, Member, TypeContainer, DataFlowN
 
   override string getName() { cil_method(this, result, _, _) }
 
-  override string toString() { result = this.getQualifiedName() }
+  override string toString() { result = this.getName() }
 
   override Type getDeclaringType() { cil_method(this, _, result, _) }
 
   override Location getLocation() { result = Element.super.getLocation() }
 
-  /**
-   * Gets a location of this method, if any.
-   *
-   * This predicate returns locations both in assemblies and in source code
-   * if available.
-   */
-  override Location getALocation() { cil_method_location(this, result) }
+  override Location getALocation() { cil_method_location(this.getUnboundDeclaration(), result) }
 
   override Parameter getRawParameter(int n) { cil_parameter(result, this, n, _) }
 
@@ -133,7 +128,7 @@ class Method extends DotNet::Callable, Element, Member, TypeContainer, DataFlowN
   /** Gets the unbound declaration of this method, or the method itself. */
   Method getUnboundMethod() { cil_method_source_declaration(this, result) }
 
-  override Method getSourceDeclaration() { result = getUnboundMethod() }
+  override Method getUnboundDeclaration() { result = getUnboundMethod() }
 
   /** Holds if this method is an instance constructor. */
   predicate isInstanceConstructor() { isSpecial() and getName() = ".ctor" }

@@ -93,6 +93,7 @@ import com.semmle.js.ast.jsx.JSXMemberExpression;
 import com.semmle.js.ast.jsx.JSXNamespacedName;
 import com.semmle.js.ast.jsx.JSXOpeningElement;
 import com.semmle.js.ast.jsx.JSXSpreadAttribute;
+import com.semmle.js.extractor.ExtractionMetrics.ExtractionPhase;
 import com.semmle.ts.ast.DecoratorList;
 import com.semmle.ts.ast.EnumDeclaration;
 import com.semmle.ts.ast.EnumMember;
@@ -171,11 +172,13 @@ public class CFGExtractor {
   private final TrapWriter trapwriter;
   private final Label toplevelLabel;
   private final LocationManager locationManager;
+  private final ExtractionMetrics metrics;
 
   public CFGExtractor(ASTExtractor astExtractor) {
     this.trapwriter = astExtractor.getTrapwriter();
     this.toplevelLabel = astExtractor.getToplevelLabel();
     this.locationManager = astExtractor.getLocationManager();
+    this.metrics = astExtractor.getMetrics();
   }
 
   @SuppressWarnings("unchecked")
@@ -1548,8 +1551,27 @@ public class CFGExtractor {
 
     @Override
     public Void visit(AssignmentExpression nd, SuccessorInfo i) {
-      visitAssign(nd, nd.getLeft(), nd.getRight());
-      succ(nd, i.getGuardedSuccessors(nd));
+      // `a &&= b` expands to `a || (a = b);`
+      // The CFG is a conditional assignment, so we go through the assignment `nd` last.
+      if ("&&=".equals(nd.getOperator()) || "||=".equals(nd.getOperator()) || "??=".equals(nd.getOperator())) {
+        if ("&&=".equals(nd.getOperator())) {
+          // from lhs to rhs on truthy. from lhs to false-branch on falsy.
+          visit(nd.getLeft(), First.of(nd.getRight()), i.getSuccessors(false));
+        } else if ("||=".equals(nd.getOperator())) {
+          // from lhs to true-branch on truthy. from lhs to rhs on falsy.
+          visit(nd.getLeft(), i.getSuccessors(true), First.of(nd.getRight()));
+        } else { // "??="
+          // the union of the above - truthyness is unknown.
+          visit(nd.getLeft(), union(First.of(nd.getRight()), i.getAllSuccessors()), null);
+        }
+        
+        visit(nd.getRight(), First.of(nd), null); // from right to assignment.
+
+        succ(nd, i.getGuardedSuccessors(nd));
+      } else {
+        visitAssign(nd, nd.getLeft(), nd.getRight());
+        succ(nd, i.getGuardedSuccessors(nd));
+      }
       return null;
     }
 
@@ -1955,6 +1977,8 @@ public class CFGExtractor {
   }
 
   public void extract(Node nd) {
+    metrics.startPhase(ExtractionPhase.CFGExtractor_extract);
     nd.accept(new V(), new SimpleSuccessorInfo(null));
+    metrics.stopPhase(ExtractionPhase.CFGExtractor_extract);
   }
 }

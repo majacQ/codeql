@@ -5,51 +5,62 @@ using Microsoft.CodeAnalysis;
 using System.Collections.Generic;
 using Semmle.Util;
 using System.Linq;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    class Lambda : Expression<AnonymousFunctionExpressionSyntax>, IStatementParentEntity
+    internal class Lambda : Expression<AnonymousFunctionExpressionSyntax>, IStatementParentEntity
     {
         bool IStatementParentEntity.IsTopLevelParent => false;
 
-        protected override void Populate() { }
+        protected override void PopulateExpression(TextWriter trapFile) { }
 
-        void VisitParameter(ParameterSyntax p)
+        private void VisitParameter(ParameterSyntax p)
         {
-            var symbol = cx.Model(p).GetDeclaredSymbol(p);
+            var symbol = cx.GetModel(p).GetDeclaredSymbol(p);
             Parameter.Create(cx, symbol, this);
         }
 
-        Lambda(ExpressionNodeInfo info, CSharpSyntaxNode body, IEnumerable<ParameterSyntax> @params)
+        private Lambda(ExpressionNodeInfo info, CSharpSyntaxNode body, IEnumerable<ParameterSyntax> @params)
             : base(info)
         {
+            if (cx.GetModel(info.Node).GetSymbolInfo(info.Node).Symbol is IMethodSymbol symbol)
+            {
+                Modifier.ExtractModifiers(cx, info.Context.TrapWriter.Writer, this, symbol);
+            }
+            else
+            {
+                cx.ModelError(info.Node, "Unknown declared symbol");
+            }
+
             // No need to use `Populate` as the population happens later
             cx.PopulateLater(() =>
             {
                 foreach (var param in @params)
                     VisitParameter(param);
 
-                if (body is ExpressionSyntax)
-                    Create(cx, (ExpressionSyntax)body, this, 0);
-                else if (body is BlockSyntax)
-                    Statements.Block.Create(cx, (BlockSyntax)body, this, 0);
+                if (body is ExpressionSyntax exprBody)
+                    Create(cx, exprBody, this, 0);
+                else if (body is BlockSyntax blockBody)
+                    Statements.Block.Create(cx, blockBody, this, 0);
                 else
                     cx.ModelError(body, "Unhandled lambda body");
             });
         }
 
-        Lambda(ExpressionNodeInfo info, ParenthesizedLambdaExpressionSyntax node)
+        private Lambda(ExpressionNodeInfo info, ParenthesizedLambdaExpressionSyntax node)
             : this(info.SetKind(ExprKind.LAMBDA), node.Body, node.ParameterList.Parameters) { }
 
         public static Lambda Create(ExpressionNodeInfo info, ParenthesizedLambdaExpressionSyntax node) => new Lambda(info, node);
 
-        Lambda(ExpressionNodeInfo info, SimpleLambdaExpressionSyntax node)
+        private Lambda(ExpressionNodeInfo info, SimpleLambdaExpressionSyntax node)
             : this(info.SetKind(ExprKind.LAMBDA), node.Body, Enumerators.Singleton(node.Parameter)) { }
 
         public static Lambda Create(ExpressionNodeInfo info, SimpleLambdaExpressionSyntax node) => new Lambda(info, node);
 
-        Lambda(ExpressionNodeInfo info, AnonymousMethodExpressionSyntax node) :
-            this(info.SetKind(ExprKind.ANONYMOUS_METHOD), node.Body, node.ParameterList == null ? Enumerable.Empty<ParameterSyntax>() : node.ParameterList.Parameters) { }
+        private Lambda(ExpressionNodeInfo info, AnonymousMethodExpressionSyntax node) :
+            this(info.SetKind(ExprKind.ANONYMOUS_METHOD), node.Body, node.ParameterList == null ? Enumerable.Empty<ParameterSyntax>() : node.ParameterList.Parameters)
+        { }
 
         public static Lambda Create(ExpressionNodeInfo info, AnonymousMethodExpressionSyntax node) => new Lambda(info, node);
     }

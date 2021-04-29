@@ -1,11 +1,12 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;  // lgtm[cs/similar-file]
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class Unchecked : Statement<CheckedStatementSyntax>
+    internal class Unchecked : Statement<CheckedStatementSyntax>
     {
-        Unchecked(Context cx, CheckedStatementSyntax stmt, IStatementParentEntity parent, int child)
+        private Unchecked(Context cx, CheckedStatementSyntax stmt, IStatementParentEntity parent, int child)
             : base(cx, stmt, StmtKind.UNCHECKED, parent, child) { }
 
         public static Unchecked Create(Context cx, CheckedStatementSyntax node, IStatementParentEntity parent, int child)
@@ -15,7 +16,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             Statement.Create(cx, Stmt.Block, this, 0);
         }

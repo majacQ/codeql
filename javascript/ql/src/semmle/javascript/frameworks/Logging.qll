@@ -17,8 +17,9 @@ abstract class LoggerCall extends DataFlow::CallNode {
 /**
  * Gets a log level name that is used in RFC5424, `npm`, `console`.
  */
-private string getAStandardLoggerMethodName() {
+string getAStandardLoggerMethodName() {
   result = "crit" or
+  result = "dir" or
   result = "debug" or
   result = "error" or
   result = "emerg" or
@@ -28,6 +29,7 @@ private string getAStandardLoggerMethodName() {
   result = "notice" or
   result = "silly" or
   result = "trace" or
+  result = "verbose" or
   result = "warn"
 }
 
@@ -36,11 +38,22 @@ private string getAStandardLoggerMethodName() {
  */
 private module Console {
   /**
-   * Gets a data flow source node for the console library.
+   * An API entrypoint for the global `console` variable.
    */
-  private DataFlow::SourceNode console() {
-    result = DataFlow::moduleImport("console") or
-    result = DataFlow::globalVarRef("console")
+  private class ConsoleGlobalEntry extends API::EntryPoint {
+    ConsoleGlobalEntry() { this = "ConsoleGlobalEntry" }
+
+    override DataFlow::SourceNode getAUse() { result = DataFlow::globalVarRef("console") }
+
+    override DataFlow::Node getARhs() { none() }
+  }
+
+  /**
+   * Gets a api node for the console library.
+   */
+  private API::Node console() {
+    result = API::moduleImport("console") or
+    result = API::root().getASuccessor(any(ConsoleGlobalEntry e))
   }
 
   /**
@@ -54,14 +67,23 @@ private module Console {
         name = getAStandardLoggerMethodName() or
         name = "assert"
       ) and
-      this = console().getAMethodCall(name)
+      this = console().getMember(name).getACall()
     }
 
     override DataFlow::Node getAMessageComponent() {
-      if name = "assert"
-      then result = getArgument([1 .. getNumArgument()])
-      else result = getAnArgument()
+      (
+        if name = "assert"
+        then result = getArgument([1 .. getNumArgument()])
+        else result = getAnArgument()
+      )
+      or
+      result = getASpreadArgument()
     }
+
+    /**
+     * Gets the name of the console logging method, e.g. "log", "error", "assert", etc.
+     */
+    string getName() { result = name }
   }
 }
 
@@ -74,7 +96,7 @@ private module Loglevel {
    */
   class LoglevelLoggerCall extends LoggerCall {
     LoglevelLoggerCall() {
-      this = DataFlow::moduleMember("loglevel", getAStandardLoggerMethodName()).getACall()
+      this = API::moduleImport("loglevel").getMember(getAStandardLoggerMethodName()).getACall()
     }
 
     override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
@@ -90,9 +112,12 @@ private module Winston {
    */
   class WinstonLoggerCall extends LoggerCall, DataFlow::MethodCallNode {
     WinstonLoggerCall() {
-      this = DataFlow::moduleMember("winston", "createLogger")
+      this =
+        API::moduleImport("winston")
+            .getMember("createLogger")
+            .getReturn()
+            .getMember(getAStandardLoggerMethodName())
             .getACall()
-            .getAMethodCall(getAStandardLoggerMethodName())
     }
 
     override DataFlow::Node getAMessageComponent() {
@@ -112,9 +137,56 @@ private module log4js {
    */
   class Log4jsLoggerCall extends LoggerCall {
     Log4jsLoggerCall() {
-      this = DataFlow::moduleMember("log4js", "getLogger")
+      this =
+        API::moduleImport("log4js")
+            .getMember("getLogger")
+            .getReturn()
+            .getMember(getAStandardLoggerMethodName())
             .getACall()
-            .getAMethodCall(getAStandardLoggerMethodName())
+    }
+
+    override DataFlow::Node getAMessageComponent() { result = getAnArgument() }
+  }
+}
+
+/**
+ * Provides classes for working with [npmlog](https://github.com/npm/npmlog)
+ */
+private module Npmlog {
+  /**
+   * A call to the npmlog logging mechanism.
+   */
+  class Npmlog extends LoggerCall {
+    string name;
+
+    Npmlog() {
+      this = API::moduleImport("npmlog").getMember(name).getACall() and
+      name = getAStandardLoggerMethodName()
+    }
+
+    override DataFlow::Node getAMessageComponent() {
+      (
+        if name = "log"
+        then result = getArgument([1 .. getNumArgument()])
+        else result = getAnArgument()
+      )
+      or
+      result = getASpreadArgument()
+    }
+  }
+}
+
+/**
+ * Provides classes for working with [fancy-log](https://github.com/gulpjs/fancy-log).
+ */
+private module Fancylog {
+  /**
+   * A call to the fancy-log logging mechanism.
+   */
+  class Fancylog extends LoggerCall {
+    Fancylog() {
+      this = API::moduleImport("fancy-log").getMember(getAStandardLoggerMethodName()).getACall() or
+      this = API::moduleImport("fancy-log").getACall()
     }
 
     override DataFlow::Node getAMessageComponent() { result = getAnArgument() }

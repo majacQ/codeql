@@ -11,8 +11,8 @@
  */
 
 import csharp
-import semmle.code.csharp.dataflow.flowsources.Remote
-import semmle.code.csharp.dataflow.flowsources.Local
+import semmle.code.csharp.security.dataflow.flowsources.Remote
+import semmle.code.csharp.security.dataflow.flowsources.Local
 import semmle.code.csharp.dataflow.TaintTracking
 import semmle.code.csharp.frameworks.Format
 import DataFlow::PathGraph
@@ -27,7 +27,7 @@ class FormatStringConfiguration extends TaintTracking::Configuration {
   }
 
   override predicate isSink(DataFlow::Node sink) {
-    sink.asExpr() = any(FormatCall call).getFormatExpr()
+    sink.asExpr() = any(FormatCall call | call.hasInsertions()).getFormatExpr()
   }
 }
 

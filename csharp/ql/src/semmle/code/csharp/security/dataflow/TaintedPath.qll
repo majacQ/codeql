@@ -7,7 +7,7 @@ import csharp
 
 module TaintedPath {
   import semmle.code.csharp.controlflow.Guards
-  import semmle.code.csharp.dataflow.flowsources.Remote
+  import semmle.code.csharp.security.dataflow.flowsources.Remote
   import semmle.code.csharp.frameworks.system.IO
   import semmle.code.csharp.frameworks.system.Web
   import semmle.code.csharp.security.Sanitizers
@@ -94,28 +94,25 @@ module TaintedPath {
   }
 
   /**
-   * Holds if this expression is part of a check that is insufficient to prevent path tampering.
+   * A weak guard that is insufficient to prevent path tampering.
    */
-  private predicate inWeakCheck(Expr e) {
-    // None of these are sufficient to guarantee that a string is safe.
-    exists(MethodCall m, Method def | m.getTarget() = def |
-      m.getQualifier() = e and
-      (
-        def.getName() = "StartsWith" or
-        def.getName() = "EndsWith"
+  private class WeakGuard extends Guard {
+    WeakGuard() {
+      // None of these are sufficient to guarantee that a string is safe.
+      exists(MethodCall mc, Method m | this = mc and mc.getTarget() = m |
+        m.getName() = "StartsWith" or
+        m.getName() = "EndsWith" or
+        m.getName() = "IsNullOrEmpty" or
+        m.getName() = "IsNullOrWhitespace" or
+        m = any(SystemIOFileClass f).getAMethod("Exists") or
+        m = any(SystemIODirectoryClass f).getAMethod("Exists")
       )
       or
-      m.getArgument(0) = e and
-      (
-        def.getName() = "IsNullOrEmpty" or
-        def.getName() = "IsNullOrWhitespace" or
-        def = any(SystemIOFileClass f).getAMethod("Exists") or
-        def = any(SystemIODirectoryClass f).getAMethod("Exists")
-      )
-    )
-    or
-    // Checking against `null` has no bearing on path traversal.
-    exists(EqualityOperation b | b.getAnOperand() = e | b.getAnOperand() instanceof NullLiteral)
+      // Checking against `null` has no bearing on path traversal.
+      this.controlsNode(_, _, any(AbstractValues::NullValue nv))
+      or
+      this.(LogicalOperation).getAnOperand() instanceof WeakGuard
+    }
   }
 
   /**
@@ -126,9 +123,9 @@ module TaintedPath {
   class PathCheck extends Sanitizer {
     PathCheck() {
       // This expression is structurally replicated in a dominating guard which is not a "weak" check
-      exists(Expr e, AbstractValues::BooleanValue v |
-        exists(this.(GuardedDataFlowNode).getAGuard(e, v)) and
-        not inWeakCheck(e)
+      exists(Guard g, AbstractValues::BooleanValue v |
+        g = this.(GuardedDataFlowNode).getAGuard(_, v) and
+        not g instanceof WeakGuard
       )
     }
   }

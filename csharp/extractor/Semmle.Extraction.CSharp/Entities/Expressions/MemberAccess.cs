@@ -1,15 +1,14 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Kinds;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    class MemberAccess : Expression
+    internal class MemberAccess : Expression
     {
         private MemberAccess(ExpressionNodeInfo info, ExpressionSyntax qualifier, ISymbol target) : base(info)
         {
+            var trapFile = info.Context.TrapWriter.Writer;
             Qualifier = Create(cx, qualifier, this, -1);
 
             if (target == null)
@@ -19,31 +18,34 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             }
             else
             {
-                cx.Emit(Tuples.expr_access(this, cx.CreateEntity(target)));
+                var t = cx.CreateEntity(target);
+                trapFile.expr_access(this, t);
             }
         }
 
-        public static Expression Create(ExpressionNodeInfo info, ConditionalAccessExpressionSyntax node) =>
+        public static Expression Create(ExpressionNodeInfo info, ConditionalAccessExpressionSyntax node)
+        {
             // The qualifier is located by walking the syntax tree.
             // `node.WhenNotNull` will contain a MemberBindingExpressionSyntax, calling the method below.
-            Create(info.Context, node.WhenNotNull, info.Parent, info.Child);
+            return CreateFromNode(new ExpressionNodeInfo(info.Context, node.WhenNotNull, info.Parent, info.Child, info.TypeInfo));
+        }
 
         public static Expression Create(ExpressionNodeInfo info, MemberBindingExpressionSyntax node)
         {
             var expr = Create(info, FindConditionalQualifier(node), node.Name);
-            expr.MakeConditional();
+            expr.MakeConditional(info.Context.TrapWriter.Writer);
             return expr;
         }
 
         public static Expression Create(ExpressionNodeInfo info, MemberAccessExpressionSyntax node) =>
             Create(info, node.Expression, node.Name);
 
-        static Expression Create(ExpressionNodeInfo info, ExpressionSyntax expression, SimpleNameSyntax name)
+        private static Expression Create(ExpressionNodeInfo info, ExpressionSyntax expression, SimpleNameSyntax name)
         {
             if (IsDynamic(info.Context, expression))
             {
                 var expr = new MemberAccess(info.SetKind(ExprKind.DYNAMIC_MEMBER_ACCESS), expression, null);
-                info.Context.Emit(Tuples.dynamic_member_name(expr, name.Identifier.Text));
+                info.Context.TrapWriter.Writer.dynamic_member_name(expr, name.Identifier.Text);
                 return expr;
             }
 
@@ -67,7 +69,9 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             if (symbol == null)
             {
                 info.Context.ModelError(info.Node, "Failed to determine symbol for member access");
-                return new MemberAccess(info.SetKind(ExprKind.UNKNOWN), expression, symbol);
+                // Default to property access - this can still give useful results but
+                // the target of the expression should be checked in QL.
+                return new MemberAccess(info.SetKind(ExprKind.PROPERTY_ACCESS), expression, symbol);
             }
 
             ExprKind kind;
@@ -87,6 +91,9 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     return TypeAccess.Create(info);
                 case SymbolKind.Event:
                     kind = ExprKind.EVENT_ACCESS;
+                    break;
+                case SymbolKind.Namespace:
+                    kind = ExprKind.NAMESPACE_ACCESS;
                     break;
                 default:
                     info.Context.ModelError(info.Node, "Unhandled symbol for member access");

@@ -11,13 +11,13 @@
  *       external/cwe/cwe-088
  */
 
-import semmle.code.java.Expr
+import java
 import semmle.code.java.dataflow.FlowSources
 import semmle.code.java.security.ExternalProcess
 import ExecCommon
 import DataFlow::PathGraph
 
-from DataFlow::PathNode source, DataFlow::PathNode sink, StringArgumentToExec execArg
+from DataFlow::PathNode source, DataFlow::PathNode sink, ArgumentToExec execArg
 where execTainted(source, sink, execArg)
 select execArg, source, sink, "$@ flows to here and is used in a command.", source.getNode(),
   "User-provided value"

@@ -1,4 +1,5 @@
 import csharp
+import semmle.code.csharp.controlflow.Guards
 private import semmle.code.csharp.dataflow.internal.DataFlowPrivate
 
 class MyFlowSource extends DataFlow::Node {
@@ -12,11 +13,9 @@ class MyFlowSource extends DataFlow::Node {
     or
     this.asParameter().hasName("tainted")
     or
-    exists(Expr e |
-      this = TImplicitDelegateOutNode(e.getAControlFlowNode(), _)
-    |
-      e.(DelegateCreation).getArgument().(MethodAccess).getTarget().hasName("TaintedMethod") or
-      e.(LambdaExpr).getExpressionBody().(StringLiteral).getValue() = "taint source"
+    exists(MyFlowSource mid, DataFlow::ExprNode e |
+      TaintTracking::localTaintStep+(mid, e) and
+      e.getExpr() = this.asExpr().(ArrayCreation).getInitializer().getAnElement()
     )
   }
 }

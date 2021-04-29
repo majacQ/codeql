@@ -11,7 +11,7 @@ import javascript
  * Example:
  *
  * ```
- * define(['a', 'b'], function(a, b) {
+ * define(['fs', 'express'], function(fs, express) {
  *   ...
  * });
  * ```
@@ -19,7 +19,7 @@ import javascript
  * The first argument is an (optional) array of dependencies,
  * the second a factory method or object.
  *
- * We also recognize the three-argument form `define('m', ['a', 'b'], ...)`
+ * We also recognize the three-argument form `define('m', ['fs', 'express'], ...)`
  * where the first argument is the module name, the second argument an
  * array of dependencies, and the third argument a factory method or object.
  */
@@ -56,8 +56,14 @@ class AmdModuleDefinition extends CallExpr {
    */
   pragma[nomagic]
   DataFlow::SourceNode getFactoryNode() {
-    result.flowsToExpr(getLastArgument()) and
+    result = getFactoryNodeInternal() and
     result instanceof DataFlow::ValueNode
+  }
+
+  private DataFlow::Node getFactoryNodeInternal() {
+    // To avoid recursion, this should not depend on `SourceNode`.
+    result = DataFlow::valueNode(getLastArgument()) or
+    result = getFactoryNodeInternal().getAPredecessor()
   }
 
   /** Gets the expression defining this module. */
@@ -107,14 +113,14 @@ class AmdModuleDefinition extends CallExpr {
   /**
    * Gets the `i`th parameter of the factory function of this module.
    */
-  private SimpleParameter getFactoryParameter(int i) {
-    getFactoryNode().(DataFlow::FunctionNode).getParameter(i) = DataFlow::parameterNode(result)
+  private Parameter getFactoryParameter(int i) {
+    getFactoryNodeInternal().asExpr().(Function).getParameter(i) = result
   }
 
   /**
    * Gets the parameter corresponding to the pseudo-dependency `require`.
    */
-  SimpleParameter getRequireParameter() {
+  Parameter getRequireParameter() {
     result = getDependencyParameter("require")
     or
     // if no dependencies are listed, the first parameter is assumed to be `require`
@@ -127,7 +133,7 @@ class AmdModuleDefinition extends CallExpr {
   /**
    * Gets the parameter corresponding to the pseudo-dependency `exports`.
    */
-  SimpleParameter getExportsParameter() {
+  Parameter getExportsParameter() {
     result = getDependencyParameter("exports")
     or
     // if no dependencies are listed, the second parameter is assumed to be `exports`
@@ -137,7 +143,7 @@ class AmdModuleDefinition extends CallExpr {
   /**
    * Gets the parameter corresponding to the pseudo-dependency `module`.
    */
-  SimpleParameter getModuleParameter() {
+  Parameter getModuleParameter() {
     result = getDependencyParameter("module")
     or
     // if no dependencies are listed, the third parameter is assumed to be `module`
@@ -186,10 +192,10 @@ private class AmdDependencyPath extends PathExprCandidate {
 }
 
 /** A constant path element appearing in an AMD dependency expression. */
-private class ConstantAmdDependencyPathElement extends PathExprInModule, ConstantString {
+private class ConstantAmdDependencyPathElement extends PathExpr, ConstantString {
   ConstantAmdDependencyPathElement() { this = any(AmdDependencyPath amd).getAPart() }
 
-  override string getValue() { result = this.(ConstantString).getStringValue() }
+  override string getValue() { result = getStringValue() }
 }
 
 /**
@@ -253,8 +259,7 @@ private class AmdDependencyImport extends Import {
    * Gets the module whose absolute path matches this import, if there is only a single such module.
    */
   private Module resolveByAbsolutePath() {
-    count(guessTarget()) = 1 and
-    result.getFile() = guessTarget()
+    result.getFile() = unique(File file | file = guessTarget())
   }
 
   override Module getImportedModule() {
@@ -274,15 +279,24 @@ private class AmdDependencyImport extends Import {
 
 /**
  * An AMD-style module.
+ *
+ * Example:
+ *
+ * ```
+ * define(['fs', 'express'], function(fs, express) {
+ *   ...
+ * });
+ * ```
  */
 class AmdModule extends Module {
-  AmdModule() { strictcount(AmdModuleDefinition def | amdModuleTopLevel(def, this)) = 1 }
+  cached
+  AmdModule() { exists(unique(AmdModuleDefinition def | amdModuleTopLevel(def, this))) }
 
   /** Gets the definition of this module. */
   AmdModuleDefinition getDefine() { amdModuleTopLevel(result, this) }
 
-  override predicate exports(string name, ASTNode export) {
-    exists(DataFlow::PropWrite pwn | export = pwn.getAstNode() |
+  override DataFlow::Node getAnExportedValue(string name) {
+    exists(DataFlow::PropWrite pwn | result = pwn.getRhs() |
       pwn.getBase().analyze().getAValue() = getDefine().getAModuleExportsValue() and
       name = pwn.getPropertyName()
     )

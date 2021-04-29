@@ -12,26 +12,10 @@
  */
 
 import python
-import semmle.python.security.Paths
+import semmle.python.security.dataflow.SqlInjection
+import DataFlow::PathGraph
 
-/* Sources */
-import semmle.python.web.HttpRequest
-
-/* Sinks */
-import semmle.python.security.injection.Sql
-import semmle.python.web.django.Db
-import semmle.python.web.django.Model
-
-class SQLInjectionConfiguration extends TaintTracking::Configuration {
-
-    SQLInjectionConfiguration() { this = "SQL injection configuration" }
-
-    override predicate isSource(TaintTracking::Source source) { source instanceof HttpRequestTaintSource }
-
-    override predicate isSink(TaintTracking::Sink sink) { sink instanceof SqlInjectionSink }
-
-}
-
-from SQLInjectionConfiguration config, TaintedPathSource src, TaintedPathSink sink
-where config.hasFlowPath(src, sink)
-select sink.getSink(), src, sink, "This SQL query depends on $@.", src.getSource(), "a user-provided value"
+from SQLInjectionConfiguration config, DataFlow::PathNode source, DataFlow::PathNode sink
+where config.hasFlowPath(source, sink)
+select sink.getNode(), source, sink, "This SQL query depends on $@.", source.getNode(),
+  "a user-provided value"

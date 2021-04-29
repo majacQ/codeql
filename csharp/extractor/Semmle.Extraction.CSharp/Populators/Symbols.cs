@@ -1,13 +1,11 @@
-using System;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Semmle.Extraction.CSharp.Entities;
 
 namespace Semmle.Extraction.CSharp.Populators
 {
-    class Symbols : SymbolVisitor<IEntity>
+    internal class Symbols : SymbolVisitor<IEntity>
     {
-        readonly Context cx;
+        private readonly Context cx;
 
         public Symbols(Context cx)
         {
@@ -30,7 +28,7 @@ namespace Semmle.Extraction.CSharp.Populators
 
         public override IEntity VisitNamespace(INamespaceSymbol ns) => Namespace.Create(cx, ns);
 
-        public override IEntity VisitParameter(IParameterSymbol param) => Parameter.GetAlreadyCreated(cx, param);
+        public override IEntity VisitParameter(IParameterSymbol param) => Parameter.Create(cx, param);
 
         public override IEntity VisitProperty(IPropertySymbol symbol) => Property.Create(cx, symbol);
 

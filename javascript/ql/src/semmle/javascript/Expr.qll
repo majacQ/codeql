@@ -4,19 +4,22 @@
 
 import javascript
 
-/** A program element that is either an expression or a type annotation. */
-class ExprOrType extends @exprortype, Documentable {
+/**
+ * A program element that is either an expression or a type annotation.
+ *
+ * Examples:
+ *
+ * ```
+ * x + 1
+ * string[]
+ * ```
+ */
+class ExprOrType extends @expr_or_type, Documentable {
   /** Gets the statement in which this expression or type appears. */
-  Stmt getEnclosingStmt() { enclosingStmt(this, result) }
+  Stmt getEnclosingStmt() { enclosing_stmt(this, result) }
 
   /** Gets the function in which this expression or type appears, if any. */
   Function getEnclosingFunction() { result = getContainer() }
-
-  /**
-   * Gets the statement container (function or toplevel) in which
-   * this expression or type appears.
-   */
-  StmtContainer getContainer() { exprContainers(this, result) }
 
   /**
    * Gets the JSDoc comment associated with this expression or type or its parent statement, if any.
@@ -25,14 +28,21 @@ class ExprOrType extends @exprortype, Documentable {
     result = getOwnDocumentation()
     or
     // if there is no JSDoc for the expression itself, check the enclosing property or statement
+    not exists(getOwnDocumentation()) and
     (
-      not exists(getOwnDocumentation()) and
-      if getParent() instanceof Property
-      then result = getParent().(Property).getDocumentation()
-      else
-        if getParent() instanceof MethodDeclaration
-        then result = getParent().(MethodDeclaration).getDocumentation()
-        else result = getEnclosingStmt().getDocumentation()
+      exists(Property prop | prop = getParent() | result = prop.getDocumentation())
+      or
+      exists(MethodDeclaration decl | decl = getParent() | result = decl.getDocumentation())
+      or
+      exists(VariableDeclarator decl | decl = getParent() | result = decl.getDocumentation())
+      or
+      exists(DeclStmt stmt | this = stmt.getDecl(0) | result = stmt.getDocumentation())
+      or
+      exists(DotExpr dot | this = dot.getProperty() | result = dot.getDocumentation())
+      or
+      exists(AssignExpr e | this = e.getRhs() | result = e.getDocumentation())
+      or
+      exists(ParExpr p | this = p.getExpression() | result = p.getDocumentation())
     )
   }
 
@@ -41,7 +51,7 @@ class ExprOrType extends @exprortype, Documentable {
     exists(Token tk | tk = result.getComment().getNextToken() |
       tk = this.getFirstToken()
       or
-      exists(Expr p | p.stripParens() = this | tk = p.getFirstToken())
+      exists(Expr p | p.getUnderlyingValue() = this | tk = p.getFirstToken())
     )
   }
 
@@ -81,14 +91,16 @@ class ExprOrType extends @exprortype, Documentable {
   Expr getUnderlyingValue() { result = this }
 }
 
-/** An expression. */
+/**
+ * An expression.
+ *
+ * Example:
+ *
+ * ```
+ * Math.sqrt(x*x + y*y)
+ * ```
+ */
 class Expr extends @expr, ExprOrStmt, ExprOrType, AST::ValueNode {
-  /**
-   * Gets the statement container (function or toplevel) in which
-   * this expression appears.
-   */
-  override StmtContainer getContainer() { exprContainers(this, result) }
-
   /** Gets this expression, with any surrounding parentheses removed. */
   override Expr stripParens() { result = this }
 
@@ -96,7 +108,8 @@ class Expr extends @expr, ExprOrStmt, ExprOrType, AST::ValueNode {
   int getIntValue() { none() }
 
   /** Gets the constant string value this expression evaluates to, if any. */
-  string getStringValue() { none() }
+  cached
+  string getStringValue() { result = getStringValue(this) }
 
   /** Holds if this expression is impure, that is, its evaluation could have side effects. */
   predicate isImpure() { any() }
@@ -165,13 +178,13 @@ class Expr extends @expr, ExprOrStmt, ExprOrType, AST::ValueNode {
   /**
    * Holds if the syntactic context that the expression appears in relies on the expression
    * being non-null/non-undefined.
-   * 
+   *
    * A context relies on the subexpression being non-null/non-undefined if either...
-   * 
+   *
    *   * Using null or undefined would cause a runtime error
    *   * Using null or undefined would cause no error due to type conversion, but the
    *     behavior in the broader context is sufficiently non-obvious to warrant explicitly
-   *     converting to ensure that readers understand the intent  
+   *     converting to ensure that readers understand the intent
    */
   predicate inNullSensitiveContext() {
     exists(ExprOrStmt ctx |
@@ -221,23 +234,82 @@ class Expr extends @expr, ExprOrStmt, ExprOrType, AST::ValueNode {
       ctx.(ConditionalExpr).inNullSensitiveContext()
     )
   }
+
+  pragma[inline]
+  private Stmt getRawEnclosingStmt(Expr e) {
+    // For performance reasons, we need the enclosing statement without overrides
+    enclosing_stmt(e, result)
+  }
+
+  /**
+   * Gets the data-flow node where exceptions thrown by this expression will
+   * propagate if this expression causes an exception to be thrown.
+   */
+  pragma[inline]
+  DataFlow::Node getExceptionTarget() {
+    result = getCatchParameterFromStmt(getRawEnclosingStmt(this))
+    or
+    not exists(getCatchParameterFromStmt(getRawEnclosingStmt(this))) and
+    result =
+      any(DataFlow::FunctionNode f | f.getFunction() = this.getContainer()).getExceptionalReturn()
+  }
 }
 
-/** An identifier. */
+cached
+private DataFlow::Node getCatchParameterFromStmt(Stmt stmt) {
+  result =
+    DataFlow::parameterNode(stmt.getEnclosingTryCatchStmt().getACatchClause().getAParameter())
+}
+
+/**
+ * An identifier.
+ *
+ * Example:
+ *
+ * ```
+ * x
+ * ```
+ */
 class Identifier extends @identifier, ExprOrType {
   /** Gets the name of this identifier. */
   string getName() { literals(result, _, this) }
+
+  override string getAPrimaryQlClass() { result = "Identifier" }
 }
 
 /**
  * A statement or property label, that is, an identifier that
  * does not refer to a variable.
+ *
+ * Examples:
+ *
+ * ```
+ * outer:                       // `outer` is a statement label
+ * for(i=0; i<a.length; ++i) {  // `length` is a property label
+ *   // ...
+ * }
+ * ```
  */
 class Label extends @label, Identifier, Expr {
   override predicate isImpure() { none() }
+
+  override string getAPrimaryQlClass() { result = "Label" }
 }
 
-/** A literal. */
+/**
+ * A literal.
+ *
+ * Examples:
+ *
+ * ```
+ * null      // null literal
+ * true      // Boolean literal
+ * 2         // number literal
+ * 3n        // BigInt literal
+ * "hello"   // string literal
+ * /jsx?/    // regular-expression literal
+ * ```
+ */
 class Literal extends @literal, Expr {
   /** Gets the value of this literal, as a string. */
   string getValue() { literals(result, _, this) }
@@ -249,10 +321,20 @@ class Literal extends @literal, Expr {
   string getRawValue() { literals(_, result, this) }
 
   override predicate isImpure() { none() }
+
+  override string getAPrimaryQlClass() { result = "Literal" }
 }
 
-/** A parenthesized expression. */
-class ParExpr extends @parexpr, Expr {
+/**
+ * A parenthesized expression.
+ *
+ * Example:
+ *
+ * ```
+ * (function() { console.log("Hello, world!"); }())
+ * ```
+ */
+class ParExpr extends @par_expr, Expr {
   /** Gets the expression within parentheses. */
   Expr getExpression() { result = this.getChildExpr(0) }
 
@@ -265,16 +347,47 @@ class ParExpr extends @parexpr, Expr {
   override Expr getUnderlyingValue() { result = getExpression().getUnderlyingValue() }
 
   override Expr getUnderlyingReference() { result = getExpression().getUnderlyingReference() }
+
+  override string getAPrimaryQlClass() { result = "ParExpr" }
 }
 
-/** A `null` literal. */
-class NullLiteral extends @nullliteral, Literal { }
+/**
+ * A `null` literal.
+ *
+ * Example:
+ *
+ * ```
+ * null
+ * ```
+ */
+class NullLiteral extends @null_literal, Literal { }
 
-/** A Boolean literal, that is, either `true` or `false`. */
-class BooleanLiteral extends @booleanliteral, Literal { }
+/**
+ * A Boolean literal, that is, either `true` or `false`.
+ *
+ * Examples:
+ *
+ * ```
+ * true
+ * false
+ * ```
+ */
+class BooleanLiteral extends @boolean_literal, Literal { }
 
-/** A numeric literal. */
-class NumberLiteral extends @numberliteral, Literal {
+/**
+ * A numeric literal.
+ *
+ * Examples:
+ *
+ * ```
+ * 0b101
+ * 0o31
+ * 25
+ * 0xffff
+ * 6.626e-34
+ * ```
+ */
+class NumberLiteral extends @number_literal, Literal {
   /** Gets the integer value of this literal. */
   override int getIntValue() { result = getValue().toInt() }
 
@@ -282,8 +395,16 @@ class NumberLiteral extends @numberliteral, Literal {
   float getFloatValue() { result = getValue().toFloat() }
 }
 
-/** A bigint literal. */
-class BigIntLiteral extends @bigintliteral, Literal {
+/**
+ * A BigInt literal.
+ *
+ * Example:
+ *
+ * ```
+ * 9007199254740991n
+ * ```
+ */
+class BigIntLiteral extends @bigint_literal, Literal {
   /**
    * Gets the integer value of this literal if it can be represented
    * as a QL integer value.
@@ -297,13 +418,41 @@ class BigIntLiteral extends @bigintliteral, Literal {
   float getFloatValue() { result = getValue().toFloat() }
 }
 
-/** A string literal. */
-class StringLiteral extends @stringliteral, Literal {
-  override string getStringValue() { result = getValue() }
+/**
+ * A string literal, either single-quoted or double-quoted.
+ *
+ * Note that template literals are represented by a different class, `TemplateLiteral`.
+ *
+ * Examples:
+ *
+ * ```
+ * "Hello, world!\n"
+ * 'Hello, "world"!'
+ * ```
+ */
+class StringLiteral extends @string_literal, Literal {
+  /**
+   * Gets the value of this string literal parsed as a regular expression, if possible.
+   *
+   * All string literals have an associated regular expression tree, provided they can
+   * be parsed without syntax errors.
+   */
+  RegExpTerm asRegExp() { this = result.getParent() }
 }
 
-/** A regular expression literal. */
-class RegExpLiteral extends @regexpliteral, Literal, RegExpParent {
+/**
+ * A regular expression literal.
+ *
+ * Note that this class does not cover regular expressions constructed by calling the built-in
+ * `RegExp` function.
+ *
+ * Example:
+ *
+ * ```
+ * /(?i)ab*c(d|e)$/
+ * ```
+ */
+class RegExpLiteral extends @regexp_literal, Literal, RegExpParent {
   /** Gets the root term of this regular expression literal. */
   RegExpTerm getRoot() { this = result.getParent() }
 
@@ -311,20 +460,30 @@ class RegExpLiteral extends @regexpliteral, Literal, RegExpParent {
   string getFlags() { result = getValue().regexpCapture(".*/(\\w*)$", 1) }
 
   /** Holds if this regular expression has an `m` flag. */
-  predicate isMultiline() { getFlags().matches("%m%") }
+  predicate isMultiline() { RegExp::isMultiline(getFlags()) }
 
   /** Holds if this regular expression has a `g` flag. */
-  predicate isGlobal() { getFlags().matches("%g%") }
+  predicate isGlobal() { RegExp::isGlobal(getFlags()) }
 
   /** Holds if this regular expression has an `i` flag. */
-  predicate isIgnoreCase() { getFlags().matches("%i%") }
+  predicate isIgnoreCase() { RegExp::isIgnoreCase(getFlags()) }
 
   /** Holds if this regular expression has an `s` flag. */
-  predicate isDotAll() { getFlags().matches("%s%") }
+  predicate isDotAll() { RegExp::isDotAll(getFlags()) }
+
+  override string getAPrimaryQlClass() { result = "RegExpLiteral" }
 }
 
-/** A `this` expression. */
-class ThisExpr extends @thisexpr, Expr {
+/**
+ * A `this` expression.
+ *
+ * Example:
+ *
+ * ```
+ * this
+ * ```
+ */
+class ThisExpr extends @this_expr, Expr {
   override predicate isImpure() { none() }
 
   /**
@@ -342,10 +501,20 @@ class ThisExpr extends @thisexpr, Expr {
     or
     result = getContainer().(TopLevel)
   }
+
+  override string getAPrimaryQlClass() { result = "ThisExpr" }
 }
 
-/** An array literal. */
-class ArrayExpr extends @arrayexpr, Expr {
+/**
+ * An array literal.
+ *
+ * Examples:
+ *
+ * ```
+ * [ 1, , [ 3, 4 ] ]
+ * ```
+ */
+class ArrayExpr extends @array_expr, Expr {
   /** Gets the `i`th element of this array literal. */
   Expr getElement(int i) { result = this.getChildExpr(i) }
 
@@ -353,7 +522,7 @@ class ArrayExpr extends @arrayexpr, Expr {
   Expr getAnElement() { result = this.getAChildExpr() }
 
   /** Gets the number of elements in this array literal. */
-  int getSize() { arraySize(this, result) }
+  int getSize() { array_size(this, result) }
 
   /**
    * Holds if this array literal includes a trailing comma after the
@@ -371,10 +540,26 @@ class ArrayExpr extends @arrayexpr, Expr {
   predicate hasOmittedElement() { elementIsOmitted(_) }
 
   override predicate isImpure() { getAnElement().isImpure() }
+
+  override string getAPrimaryQlClass() { result = "ArrayExpr" }
 }
 
-/** An object literal. */
-class ObjectExpr extends @objexpr, Expr {
+/**
+ * An object literal, containing zero or more property definitions.
+ *
+ * Example:
+ *
+ * ```
+ * var p = {  // object literal containing five property definitions
+ *   x: 1,
+ *   y: 1,
+ *   diag: function() { return this.x - this.y; },
+ *   get area() { return this.x * this.y; },
+ *   set area(a) { this.x = Math.sqrt(a); this.y = Math.sqrt(a); }
+ * };
+ * ```
+ */
+class ObjectExpr extends @obj_expr, Expr {
   /** Gets the `i`th property in this object literal. */
   Property getProperty(int i) { properties(result, this, i, _, _) }
 
@@ -397,11 +582,27 @@ class ObjectExpr extends @objexpr, Expr {
   predicate hasTrailingComma() { this.getLastToken().getPreviousToken().getValue() = "," }
 
   override predicate isImpure() { getAProperty().isImpure() }
+
+  override string getAPrimaryQlClass() { result = "ObjectExpr" }
 }
 
 /**
  * A property definition in an object literal, which may be either
  * a value property, a property getter, or a property setter.
+ *
+ * Note that property definitions are not expressions.
+ *
+ * Examples:
+ *
+ * ```
+ * var p = {
+ *   x: 1,                                                          // value property
+ *   y: 1,                                                          // value property
+ *   diag: function() { return this.x - this.y; },                  // value property
+ *   get area() { return this.x * this.y; },                        // property getter
+ *   set area(a) { this.x = Math.sqrt(a); this.y = Math.sqrt(a); }  // property setter
+ * }
+ * ```
  */
 class Property extends @property, Documentable {
   Property() {
@@ -429,10 +630,10 @@ class Property extends @property, Documentable {
   }
 
   /** Holds if the name of this property is computed. */
-  predicate isComputed() { isComputed(this) }
+  predicate isComputed() { is_computed(this) }
 
   /** Holds if this property is defined using method syntax. */
-  predicate isMethod() { isMethod(this) }
+  predicate isMethod() { is_method(this) }
 
   /** Holds if this property is defined using shorthand syntax. */
   predicate isShorthand() { getNameExpr().getLocation() = getInit().getLocation() }
@@ -442,9 +643,6 @@ class Property extends @property, Documentable {
 
   /** Gets the (0-based) index at which this property appears in its enclosing literal. */
   int getIndex() { this = getObjectExpr().getProperty(result) }
-
-  /** Gets the function or toplevel in which this property occurs. */
-  StmtContainer getContainer() { result = getObjectExpr().getContainer() }
 
   /**
    * Holds if this property is impure, that is, the evaluation of its name or
@@ -486,36 +684,116 @@ class Property extends @property, Documentable {
    * decorators `@A` and `@B`.
    */
   Decorator getADecorator() { result = getDecorator(_) }
+
+  override string getAPrimaryQlClass() { result = "Property" }
 }
 
-/** A value property in an object literal. */
+/**
+ * A value property definition in an object literal.
+ *
+ * Examples:
+ *
+ * ```
+ * var p = {
+ *   x: 1,                                                          // value property
+ *   y: 1,                                                          // value property
+ *   diag: function() { return this.x - this.y; },                  // value property
+ * }
+ * ```
+ */
 class ValueProperty extends Property, @value_property { }
 
-/** A property getter or setter in an object literal. */
+/**
+ * A property getter or setter in an object literal.
+ *
+ * Examples:
+ *
+ * ```
+ * var p = {
+ *   x: 1,
+ *   y: 1,
+ *   diag: function() { return this.x - this.y; },
+ *   get area() { return this.x * this.y; },                        // property getter
+ *   set area(a) { this.x = Math.sqrt(a); this.y = Math.sqrt(a); }  // property setter
+ * }
+ * ```
+ */
 class PropertyAccessor extends Property, @property_accessor {
   override FunctionExpr getInit() { result = Property.super.getInit() }
 }
 
-/** A property getter in an object literal. */
+/**
+ * A property getter in an object literal.
+ *
+ * Example:
+ *
+ * ```
+ * var p = {
+ *   x: 1,
+ *   y: 1,
+ *   diag: function() { return this.x - this.y; },
+ *   get area() { return this.x * this.y; },                        // property getter
+ *   set area(a) { this.x = Math.sqrt(a); this.y = Math.sqrt(a); }
+ * }
+ * ```
+ */
 class PropertyGetter extends PropertyAccessor, @property_getter { }
 
-/** A property setter in an object literal. */
+/**
+ * A property setter in an object literal.
+ *
+ * Example:
+ *
+ * ```
+ * var p = {
+ *   x: 1,
+ *   y: 1,
+ *   diag: function() { return this.x - this.y; },
+ *   get area() { return this.x * this.y; },
+ *   set area(a) { this.x = Math.sqrt(a); this.y = Math.sqrt(a); }  // property setter
+ * }
+ * ```
+ */
 class PropertySetter extends PropertyAccessor, @property_setter { }
 
 /**
- * A spread property in an object literal, such as `...others` in
- * `{ x: 42, ...others }`. The value of a spread property is always
+ * A spread property in an object literal.
+ *
+ * The initializer of a spread property is always
  * a `SpreadElement`.
+ *
+ * Example:
+ *
+ * ```
+ * var options = {
+ *   ...defaultOptions,  // spread property
+ *   password: pwd
+ * }
+ * ```
  */
 class SpreadProperty extends Property {
   SpreadProperty() { not exists(getNameExpr()) }
 }
 
-/** A function expression. */
-class FunctionExpr extends @functionexpr, Expr, Function {
-  /** Gets the name of this function expression, if any. */
-  override string getName() { result = getId().getName() }
-
+/**
+ * A (non-arrow) function expression.
+ *
+ * Examples:
+ *
+ * ```
+ * var greet =
+ *   function g() {          // function expression with name `g`
+ *     console.log("Hi!");
+ *   };
+ *
+ * class C {
+ *   m() {                   // methods are (anonymous) function expressions
+ *     return 1;
+ *   }
+ * }
+ * ```
+ */
+class FunctionExpr extends @function_expr, Expr, Function {
   /** Holds if this function expression is a property setter. */
   predicate isSetter() { exists(PropertySetter s | s.getInit() = this) }
 
@@ -531,10 +809,20 @@ class FunctionExpr extends @functionexpr, Expr, Function {
   override StmtContainer getEnclosingContainer() { result = Expr.super.getContainer() }
 
   override predicate isImpure() { none() }
+
+  override string getAPrimaryQlClass() { result = "FunctionExpr" }
 }
 
-/** An arrow expression. */
-class ArrowFunctionExpr extends @arrowfunctionexpr, Expr, Function {
+/**
+ * An arrow function expression.
+ *
+ * Examples:
+ *
+ * ```
+ * var greet =
+ *   () => console.log("Hi!");  // arrow function expression
+ */
+class ArrowFunctionExpr extends @arrow_function_expr, Expr, Function {
   /** Gets the statement in which this expression appears. */
   override Stmt getEnclosingStmt() { result = Expr.super.getEnclosingStmt() }
 
@@ -543,10 +831,20 @@ class ArrowFunctionExpr extends @arrowfunctionexpr, Expr, Function {
   override predicate isImpure() { none() }
 
   override Function getThisBinder() { result = getEnclosingContainer().(Function).getThisBinder() }
+
+  override string getAPrimaryQlClass() { result = "ArrowFunctionExpr" }
 }
 
-/** A sequence expression (also known as comma expression). */
-class SeqExpr extends @seqexpr, Expr {
+/**
+ * A sequence expression (also known as comma expression).
+ *
+ * Example:
+ *
+ * ```
+ * x++, y++
+ * ```
+ */
+class SeqExpr extends @seq_expr, Expr {
   /** Gets the `i`th expression in this sequence. */
   Expr getOperand(int i) { result = getChildExpr(i) }
 
@@ -561,13 +859,21 @@ class SeqExpr extends @seqexpr, Expr {
 
   override predicate isImpure() { getAnOperand().isImpure() }
 
-  override string getStringValue() { result = getLastOperand().getStringValue() }
-
   override Expr getUnderlyingValue() { result = getLastOperand().getUnderlyingValue() }
+
+  override string getAPrimaryQlClass() { result = "SeqExpr" }
 }
 
-/** A conditional expression. */
-class ConditionalExpr extends @conditionalexpr, Expr {
+/**
+ * A conditional expression.
+ *
+ * Example:
+ *
+ * ```
+ * x == 0 ? 0 : 1/x
+ * ```
+ */
+class ConditionalExpr extends @conditional_expr, Expr {
   /** Gets the condition expression of this conditional. */
   Expr getCondition() { result = getChildExpr(0) }
 
@@ -584,11 +890,22 @@ class ConditionalExpr extends @conditionalexpr, Expr {
     getCondition().isImpure() or
     getABranch().isImpure()
   }
+
+  override string getAPrimaryQlClass() { result = "ConditionalExpr" }
 }
 
 /**
  * An invocation expression, that is, either a function call or
  * a `new` expression.
+ *
+ * Examples:
+ *
+ * ```
+ * f(1)
+ * x.f(1, ...args)
+ * f.call(x, 1)
+ * new Array(16)
+ * ```
  */
 class InvokeExpr extends @invokeexpr, Expr {
   /** Gets the expression specifying the function to be called. */
@@ -686,19 +1003,50 @@ class InvokeExpr extends @invokeexpr, Expr {
   Function getResolvedCallee() { result = getResolvedCalleeName().getImplementation() }
 }
 
-/** A `new` expression. */
-class NewExpr extends @newexpr, InvokeExpr { }
+/**
+ * A `new` expression.
+ *
+ * Example:
+ *
+ * ```
+ * new Array(16)
+ * ```
+ */
+class NewExpr extends @new_expr, InvokeExpr {
+  override string getAPrimaryQlClass() { result = "NewExpr" }
+}
 
-/** A function call expression. */
-class CallExpr extends @callexpr, InvokeExpr {
+/**
+ * A function call expression.
+ *
+ * Examples:
+ *
+ * ```
+ * f()
+ * require('express')()
+ * x.f()
+ * ```
+ */
+class CallExpr extends @call_expr, InvokeExpr {
   /**
    * Gets the expression specifying the receiver on which the function
    * is invoked, if any.
    */
   Expr getReceiver() { result = getCallee().(PropAccess).getBase() }
+
+  override string getAPrimaryQlClass() { result = "CallExpr" }
 }
 
-/** A method call expression. */
+/**
+ * A method call expression.
+ *
+ * Examples:
+ *
+ * ```
+ * Object.create(null)
+ * [1, 2, 3].forEach(alert);
+ * ```
+ */
 class MethodCallExpr extends CallExpr {
   MethodCallExpr() { getCallee().stripParens() instanceof PropAccess }
 
@@ -719,11 +1067,20 @@ class MethodCallExpr extends CallExpr {
 
   /** Holds if this invocation calls method `m` on expression `base`. */
   predicate calls(Expr base, string m) { getMethodRef().accesses(base, m) }
+
+  override string getAPrimaryQlClass() { result = "MethodCallExpr" }
 }
 
 /**
  * A property access, that is, either a dot expression of the form
  * `e.f` or an index expression of the form `e[p]`.
+ *
+ * Examples:
+ *
+ * ```
+ * Math.PI
+ * arguments[i]
+ * ```
  */
 class PropAccess extends @propaccess, Expr {
   /** Gets the base expression on which the property is accessed. */
@@ -762,18 +1119,36 @@ class PropAccess extends @propaccess, Expr {
   override Expr getUnderlyingReference() { result = this }
 }
 
-/** A dot expression. */
-class DotExpr extends @dotexpr, PropAccess {
+/**
+ * A dot expression.
+ *
+ * Example:
+ *
+ * ```
+ * Math.PI
+ * ```
+ */
+class DotExpr extends @dot_expr, PropAccess {
   override string getPropertyName() { result = getProperty().getName() }
 
   /** Gets the identifier specifying the name of the accessed property. */
   Identifier getProperty() { result = getChildExpr(1) }
 
   override predicate isImpure() { getBase().isImpure() }
+
+  override string getAPrimaryQlClass() { result = "DotExpr" }
 }
 
-/** An index expression (also known as computed property access). */
-class IndexExpr extends @indexexpr, PropAccess {
+/**
+ * An index expression (also known as computed property access).
+ *
+ * Example:
+ *
+ * ```
+ * arguments[i]
+ * ```
+ */
+class IndexExpr extends @index_expr, PropAccess {
   /** Gets the expression specifying the name of the accessed property. */
   Expr getIndex() { result = getChildExpr(1) }
 
@@ -783,9 +1158,20 @@ class IndexExpr extends @indexexpr, PropAccess {
     getBase().isImpure() or
     getIndex().isImpure()
   }
+
+  override string getAPrimaryQlClass() { result = "IndexExpr" }
 }
 
-/** An expression with a unary operator. */
+/**
+ * An expression with a unary operator.
+ *
+ * Examples:
+ *
+ * ```
+ * -x
+ * !!done
+ * ```
+ */
 class UnaryExpr extends @unaryexpr, Expr {
   /** Gets the operand of this unary operator. */
   Expr getOperand() { result = getChildExpr(0) }
@@ -798,53 +1184,132 @@ class UnaryExpr extends @unaryexpr, Expr {
   override ControlFlowNode getFirstControlFlowNode() {
     result = getOperand().getFirstControlFlowNode()
   }
+
+  override string getAPrimaryQlClass() { result = "UnaryExpr" }
 }
 
-/** An arithmetic negation expression (also known as unary minus). */
-class NegExpr extends @negexpr, UnaryExpr {
+/**
+ * An arithmetic negation expression (also known as unary minus).
+ *
+ * Example:
+ *
+ * ```
+ * -x
+ * ```
+ */
+class NegExpr extends @neg_expr, UnaryExpr {
   override string getOperator() { result = "-" }
 
   override int getIntValue() { result = -getOperand().getIntValue() }
 }
 
-/** A unary plus expression. */
-class PlusExpr extends @plusexpr, UnaryExpr {
+/**
+ * A unary plus expression.
+ *
+ * Example:
+ *
+ * ```
+ * +x
+ * ```
+ */
+class PlusExpr extends @plus_expr, UnaryExpr {
   override string getOperator() { result = "+" }
 }
 
-/** A logical negation expression. */
-class LogNotExpr extends @lognotexpr, UnaryExpr {
+/**
+ * A logical negation expression.
+ *
+ * Example:
+ *
+ * ```
+ * !done
+ * ```
+ */
+class LogNotExpr extends @log_not_expr, UnaryExpr {
   override string getOperator() { result = "!" }
 }
 
-/** A bitwise negation expression. */
-class BitNotExpr extends @bitnotexpr, UnaryExpr {
+/**
+ * A bitwise negation expression.
+ *
+ * Example:
+ *
+ * ```
+ * ~bitmask
+ * ```
+ */
+class BitNotExpr extends @bit_not_expr, UnaryExpr {
   override string getOperator() { result = "~" }
 }
 
-/** A `typeof` expression. */
-class TypeofExpr extends @typeofexpr, UnaryExpr {
+/**
+ * A `typeof` expression.
+ *
+ * Example:
+ *
+ * ```
+ * typeof A.prototype
+ * ```
+ */
+class TypeofExpr extends @typeof_expr, UnaryExpr {
   override string getOperator() { result = "typeof" }
 }
 
-/** A `void` expression. */
-class VoidExpr extends @voidexpr, UnaryExpr {
+/**
+ * A `void` expression.
+ *
+ * Example:
+ *
+ * ```
+ * void(0)
+ * ```
+ */
+class VoidExpr extends @void_expr, UnaryExpr {
   override string getOperator() { result = "void" }
 }
 
-/** A `delete` expression. */
-class DeleteExpr extends @deleteexpr, UnaryExpr {
+/**
+ * A `delete` expression.
+ *
+ * Example:
+ *
+ * ```
+ * delete elt[_expando]
+ * ```
+ */
+class DeleteExpr extends @delete_expr, UnaryExpr {
   override string getOperator() { result = "delete" }
 
   override predicate isImpure() { any() }
 }
 
-/** A spread element. */
-class SpreadElement extends @spreadelement, UnaryExpr {
+/**
+ * A spread element.
+ *
+ * Example:
+ *
+ * ```
+ * [].concat(
+ *   ...lists  // a spread element
+ * )
+ * ```
+ */
+class SpreadElement extends @spread_element, UnaryExpr {
   override string getOperator() { result = "..." }
+
+  override string getAPrimaryQlClass() { result = "SpreadElement" }
 }
 
-/** An expression with a binary operator. */
+/**
+ * An expression with a binary operator.
+ *
+ * Examples:
+ *
+ * ```
+ * x + 1
+ * a instanceof Array
+ * ```
+ */
 class BinaryExpr extends @binaryexpr, Expr {
   /** Gets the left operand of this binary operator. */
   Expr getLeftOperand() { result = getChildExpr(0) }
@@ -889,17 +1354,37 @@ class BinaryExpr extends @binaryexpr, Expr {
       result = c4 - c3 - 1
     )
   }
+
+  override string getAPrimaryQlClass() { result = "BinaryExpr" }
 }
 
 /**
  * A comparison expression, that is, either an equality test
  * (`==`, `!=`, `===`, `!==`) or a relational expression
  * (`<`, `<=`, `>=`, `>`).
+ *
+ * Examples:
+ *
+ * ```
+ * x !== y
+ * y < 0
+ * ```
  */
 class Comparison extends @comparison, BinaryExpr { }
 
-/** An equality test using `==`, `!=`, `===` or `!==`. */
-class EqualityTest extends @equalitytest, Comparison {
+/**
+ * An equality test using `==`, `!=`, `===` or `!==`.
+ *
+ * Examples:
+ *
+ * ```
+ * "" == arg
+ * x != null
+ * recv === undefined
+ * res !== res
+ * ```
+ */
+class EqualityTest extends @equality_test, Comparison {
   /** Gets the polarity of this test: `true` for equalities, `false` for inequalities. */
   boolean getPolarity() {
     (this instanceof EqExpr or this instanceof StrictEqExpr) and
@@ -908,146 +1393,430 @@ class EqualityTest extends @equalitytest, Comparison {
     (this instanceof NEqExpr or this instanceof StrictNEqExpr) and
     result = false
   }
+
+  /**
+   * Holds if the equality operator is strict (`===` or `!==`).
+   */
+  predicate isStrict() { this instanceof StrictEqExpr or this instanceof StrictNEqExpr }
 }
 
-/** An equality test using `==`. */
-class EqExpr extends @eqexpr, EqualityTest {
+/**
+ * An equality test using `==`.
+ *
+ * Example:
+ *
+ * ```
+ * "" == arg
+ * ```
+ */
+class EqExpr extends @eq_expr, EqualityTest {
   override string getOperator() { result = "==" }
 }
 
-/** An inequality test using `!=`. */
-class NEqExpr extends @neqexpr, EqualityTest {
+/**
+ * An inequality test using `!=`.
+ *
+ * Example:
+ *
+ * ```
+ * x != null
+ * ```
+ */
+class NEqExpr extends @neq_expr, EqualityTest {
   override string getOperator() { result = "!=" }
 }
 
-/** A strict equality test using `===`. */
-class StrictEqExpr extends @eqqexpr, EqualityTest {
+/**
+ * A strict equality test using `===`.
+ *
+ * Example:
+ *
+ * ```
+ * recv === undefined
+ * ```
+ */
+class StrictEqExpr extends @eqq_expr, EqualityTest {
   override string getOperator() { result = "===" }
 }
 
-/** A strict inequality test using `!==`. */
-class StrictNEqExpr extends @neqqexpr, EqualityTest {
+/**
+ * A strict inequality test using `!==`.
+ *
+ * Example:
+ *
+ * ```
+ * res !== res
+ * ```
+ */
+class StrictNEqExpr extends @neqq_expr, EqualityTest {
   override string getOperator() { result = "!==" }
 }
 
-/** A less-than expression. */
-class LTExpr extends @ltexpr, Comparison {
+/**
+ * A less-than expression.
+ *
+ * Example:
+ *
+ * ```
+ * i < 10
+ * ```
+ */
+class LTExpr extends @lt_expr, Comparison {
   override string getOperator() { result = "<" }
 }
 
-/** A less-than-or-equal expression. */
-class LEExpr extends @leexpr, Comparison {
+/**
+ * A less-than-or-equal expression.
+ *
+ * Example:
+ *
+ * ```
+ * x+1 <= a.length
+ * ```
+ */
+class LEExpr extends @le_expr, Comparison {
   override string getOperator() { result = "<=" }
 }
 
-/** A greater-than expression. */
-class GTExpr extends @gtexpr, Comparison {
+/**
+ * A greater-than expression.
+ *
+ * Example:
+ *
+ * ```
+ * a[j] > a[k]
+ * ```
+ */
+class GTExpr extends @gt_expr, Comparison {
   override string getOperator() { result = ">" }
 }
 
-/** A greater-than-or-equal expression. */
-class GEExpr extends @geexpr, Comparison {
+/**
+ * A greater-than-or-equal expression.
+ *
+ * Example:
+ *
+ * ```
+ * x >= 0
+ * ```
+ */
+class GEExpr extends @ge_expr, Comparison {
   override string getOperator() { result = ">=" }
 }
 
-/** A left-shift expression using `<<`. */
-class LShiftExpr extends @lshiftexpr, BinaryExpr {
+/**
+ * A left-shift expression using `<<`.
+ *
+ * Example:
+ *
+ * ```
+ * 2 << i
+ * ```
+ */
+class LShiftExpr extends @lshift_expr, BinaryExpr {
   override string getOperator() { result = "<<" }
 }
 
-/** A right-shift expression using `>>`. */
-class RShiftExpr extends @rshiftexpr, BinaryExpr {
+/**
+ * A right-shift expression using `>>`.
+ *
+ * Example:
+ *
+ * ```
+ * r >> 8
+ * ```
+ */
+class RShiftExpr extends @rshift_expr, BinaryExpr {
   override string getOperator() { result = ">>" }
 }
 
-/** An unsigned right-shift expression using `>>>`. */
-class URShiftExpr extends @urshiftexpr, BinaryExpr {
+/**
+ * An unsigned right-shift expression using `>>>`.
+ *
+ * Example:
+ *
+ * ```
+ * u >>> v
+ * ```
+ */
+class URShiftExpr extends @urshift_expr, BinaryExpr {
   override string getOperator() { result = ">>>" }
 }
 
-/** An addition expression. */
-class AddExpr extends @addexpr, BinaryExpr {
+/**
+ * An addition or string-concatenation expression.
+ *
+ * Examples:
+ *
+ * ```
+ * a + b
+ * msg + "\n"
+ * ```
+ */
+class AddExpr extends @add_expr, BinaryExpr {
   override string getOperator() { result = "+" }
+}
 
-  override string getStringValue() {
-    result = getLeftOperand().getStringValue() + getRightOperand().getStringValue()
+/**
+ * Gets the string value for the expression `e`.
+ * This string-value is either a constant-string, or the result from a simple string-concatenation.
+ */
+private string getStringValue(Expr e) {
+  result = getConstantString(e)
+  or
+  result = getConcatenatedString(e)
+}
+
+/**
+ * Gets the constant string value for the expression `e`.
+ */
+private string getConstantString(Expr e) {
+  result = getConstantString(e.getUnderlyingValue())
+  or
+  result = e.(StringLiteral).getValue()
+  or
+  exists(TemplateLiteral lit | lit = e |
+    // fold singletons
+    lit.getNumChildExpr() = 0 and
+    result = ""
+    or
+    e.getNumChildExpr() = 1 and
+    result = getConstantString(lit.getElement(0))
+  )
+  or
+  result = e.(TemplateElement).getValue()
+}
+
+/**
+ * Holds if `add` is a string-concatenation where all the transitive leafs have a constant string value.
+ */
+private predicate hasAllConstantLeafs(AddExpr add) {
+  forex(Expr leaf | leaf = getAnAddOperand*(add) and not exists(getAnAddOperand(leaf)) |
+    exists(getConstantString(leaf))
+  )
+}
+
+/**
+ * Gets the concatenated string for a string-concatenation `add`.
+ * Only has a result if `add` is not itself an operand in another string-concatenation with all constant leafs.
+ */
+private string getConcatenatedString(Expr add) {
+  result = getConcatenatedString(add.getUnderlyingValue())
+  or
+  result =
+    strictconcat(Expr leaf |
+      leaf = getAnAddOperand*(add.(SmallConcatRoot))
+    |
+      getConstantString(leaf)
+      order by
+        leaf.getLocation().getStartLine(), leaf.getLocation().getStartColumn()
+    )
+}
+
+/**
+ * An expr that is the root of a string concatenation of constant parts,
+ * and the length of the resulting concatenation is less than 1 million chars.
+ */
+private class SmallConcatRoot extends Expr {
+  SmallConcatRoot() {
+    not this = getAnAddOperand(any(AddExpr parent | hasAllConstantLeafs(parent))) and
+    hasAllConstantLeafs(this) and
+    sum(Expr leaf | leaf = getAnAddOperand*(this) | getConstantString(leaf).length()) < 1000 * 1000
   }
 }
 
-/** A subtraction expression. */
-class SubExpr extends @subexpr, BinaryExpr {
+/**
+ * Gets an operand from `add`.
+ * Is specialized to `AddExpr` such that `getAnAddOperand*(add)` can be used to get a leaf from a string-concatenation transitively.
+ */
+private Expr getAnAddOperand(AddExpr add) { result = add.getAnOperand().getUnderlyingValue() }
+
+/**
+ * A subtraction expression.
+ *
+ * Example:
+ *
+ * ```
+ * w - len
+ * ```
+ */
+class SubExpr extends @sub_expr, BinaryExpr {
   override string getOperator() { result = "-" }
 }
 
-/** A multiplication expression. */
-class MulExpr extends @mulexpr, BinaryExpr {
+/**
+ * A multiplication expression.
+ *
+ * Example:
+ *
+ * ```
+ * x * y
+ * ```
+ */
+class MulExpr extends @mul_expr, BinaryExpr {
   override string getOperator() { result = "*" }
 }
 
-/** A division expression. */
-class DivExpr extends @divexpr, BinaryExpr {
+/**
+ * A division expression.
+ *
+ * Example:
+ *
+ * ```
+ * gg / ac
+ * ```
+ */
+class DivExpr extends @div_expr, BinaryExpr {
   override string getOperator() { result = "/" }
 }
 
-/** A modulo expression. */
-class ModExpr extends @modexpr, BinaryExpr {
+/**
+ * A modulo expression.
+ *
+ * Example:
+ *
+ * ```
+ * n % 2
+ * ```
+ */
+class ModExpr extends @mod_expr, BinaryExpr {
   override string getOperator() { result = "%" }
 }
 
-/** An exponentiation expression. */
-class ExpExpr extends @expexpr, BinaryExpr {
+/**
+ * An exponentiation expression.
+ *
+ * Example:
+ *
+ * ```
+ * p ** 10
+ * ```
+ */
+class ExpExpr extends @exp_expr, BinaryExpr {
   override string getOperator() { result = "**" }
 }
 
-/** A bitwise 'or' expression. */
-class BitOrExpr extends @bitorexpr, BinaryExpr {
+/**
+ * A bitwise 'or' expression.
+ *
+ * Example:
+ *
+ * ```
+ * O_RDWR | O_APPEND
+ * ```
+ */
+class BitOrExpr extends @bitor_expr, BinaryExpr {
   override string getOperator() { result = "|" }
 }
 
-/** An exclusive 'or' expression. */
-class XOrExpr extends @xorexpr, BinaryExpr {
+/**
+ * An exclusive 'or' expression.
+ *
+ * Example:
+ *
+ * ```
+ * x ^ 1
+ * ```
+ */
+class XOrExpr extends @xor_expr, BinaryExpr {
   override string getOperator() { result = "^" }
 }
 
-/** A bitwise 'and' expression. */
-class BitAndExpr extends @bitandexpr, BinaryExpr {
+/**
+ * A bitwise 'and' expression.
+ *
+ * Example:
+ *
+ * ```
+ * flags & O_APPEND
+ * ```
+ */
+class BitAndExpr extends @bitand_expr, BinaryExpr {
   override string getOperator() { result = "&" }
 }
 
-/** An `in` expression. */
-class InExpr extends @inexpr, BinaryExpr {
+/**
+ * An `in` expression.
+ *
+ * Example:
+ *
+ * ```
+ * "leftpad" in String.prototype
+ * ```
+ */
+class InExpr extends @in_expr, BinaryExpr {
   override string getOperator() { result = "in" }
 }
 
-/** An `instanceof` expression. */
-class InstanceofExpr extends @instanceofexpr, BinaryExpr {
+/**
+ * An `instanceof` expression.
+ *
+ * Example:
+ *
+ * ```
+ * b instanceof Buffer
+ * ```
+ */
+class InstanceofExpr extends @instanceof_expr, BinaryExpr {
   override string getOperator() { result = "instanceof" }
 }
 
-/** A logical 'and' expression. */
-class LogAndExpr extends @logandexpr, BinaryExpr {
+/**
+ * A logical 'and' expression.
+ *
+ * Example:
+ *
+ * ```
+ * x != null && x.f
+ * ```
+ */
+class LogAndExpr extends @logand_expr, BinaryExpr {
   override string getOperator() { result = "&&" }
 
   override ControlFlowNode getFirstControlFlowNode() { result = this }
 }
 
-/** A logical 'or' expression. */
-class LogOrExpr extends @logorexpr, BinaryExpr {
+/**
+ * A logical 'or' expression.
+ *
+ * Example:
+ *
+ * ```
+ * x == null || x.f
+ * ```
+ */
+class LogOrExpr extends @logor_expr, BinaryExpr {
   override string getOperator() { result = "||" }
 
   override ControlFlowNode getFirstControlFlowNode() { result = this }
 }
 
-/** A nullish coalescing '??' expression. */
-class NullishCoalescingExpr extends @nullishcoalescingexpr, BinaryExpr {
+/**
+ * A nullish coalescing '??' expression.
+ *
+ * Example:
+ *
+ * ```
+ * x ?? f
+ * ```
+ */
+class NullishCoalescingExpr extends @nullishcoalescing_expr, BinaryExpr {
   override string getOperator() { result = "??" }
 
   override ControlFlowNode getFirstControlFlowNode() { result = this }
 }
 
 /**
- * A logical binary expression, that is, either a logical
- * 'or' or a logical 'and' expression.
+ * A short-circuiting logical binary expression, that is, a logical 'or' expression,
+ * a logical 'and' expression, or a nullish-coalescing expression.
+ *
+ * Examples:
+ *
+ * ```
+ * x && x.f
+ * !x || x.f
+ * x ?? f
+ * ```
  */
 class LogicalBinaryExpr extends BinaryExpr {
   LogicalBinaryExpr() {
@@ -1060,6 +1829,14 @@ class LogicalBinaryExpr extends BinaryExpr {
 /**
  * A bitwise binary expression, that is, either a bitwise
  * 'and', a bitwise 'or', or an exclusive 'or' expression.
+ *
+ * Examples:
+ *
+ * ```
+ * qw & 0xffff
+ * O_RDWR | O_APPEND
+ * x ^ 1
+ * ```
  */
 class BitwiseBinaryExpr extends BinaryExpr {
   BitwiseBinaryExpr() {
@@ -1069,7 +1846,17 @@ class BitwiseBinaryExpr extends BinaryExpr {
   }
 }
 
-/** A shift expression. */
+/**
+ * A shift expression.
+ *
+ * Examples:
+ *
+ * ```
+ * 2 << i
+ * r >> 8
+ * u >>> v
+ * ```
+ */
 class ShiftExpr extends BinaryExpr {
   ShiftExpr() {
     this instanceof LShiftExpr or
@@ -1078,7 +1865,16 @@ class ShiftExpr extends BinaryExpr {
   }
 }
 
-/** An assignment expression, either compound or simple. */
+/**
+ * An assignment expression, either compound or simple.
+ *
+ * Examples:
+ *
+ * ```
+ * x = y
+ * sum += element
+ * ```
+ */
 class Assignment extends @assignment, Expr {
   /** Gets the left hand side of this assignment. */
   Expr getLhs() { result = getChildExpr(0) }
@@ -1092,51 +1888,218 @@ class Assignment extends @assignment, Expr {
   override ControlFlowNode getFirstControlFlowNode() { result = getLhs().getFirstControlFlowNode() }
 }
 
-/** A simple assignment expression. */
-class AssignExpr extends @assignexpr, Assignment {
+/**
+ * A simple assignment expression.
+ *
+ * Example:
+ *
+ * ```
+ * x = y
+ * ```
+ */
+class AssignExpr extends @assign_expr, Assignment {
   override Expr getUnderlyingValue() { result = getRhs().getUnderlyingValue() }
+
+  override string getAPrimaryQlClass() { result = "AssignExpr" }
 }
 
-/** A compound assign expression. */
-abstract class CompoundAssignExpr extends Assignment { }
+private class TCompoundAssignExpr =
+  @assign_add_expr or @assign_sub_expr or @assign_mul_expr or @assign_div_expr or
+      @assign_mod_expr or @assign_exp_expr or @assign_lshift_expr or @assign_rshift_expr or
+      @assign_urshift_expr or @assign_or_expr or @assign_xor_expr or @assign_and_expr or
+      @assignlogandexpr or @assignlogorexpr or @assignnullishcoalescingexpr;
 
-/** A compound add-assign expression. */
-class AssignAddExpr extends @assignaddexpr, CompoundAssignExpr { }
+/**
+ * A compound assign expression.
+ *
+ * Examples:
+ *
+ * ```
+ * sum += element
+ * x /= 2
+ * ```
+ */
+class CompoundAssignExpr extends TCompoundAssignExpr, Assignment {
+  override string getAPrimaryQlClass() { result = "CompoundAssignExpr" }
+}
 
-/** A compound subtract-assign expression. */
-class AssignSubExpr extends @assignsubexpr, CompoundAssignExpr { }
+/**
+ * A compound add-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * sum += element
+ * ```
+ */
+class AssignAddExpr extends @assign_add_expr, CompoundAssignExpr { }
 
-/** A compound multiply-assign expression. */
-class AssignMulExpr extends @assignmulexpr, CompoundAssignExpr { }
+/**
+ * A compound subtract-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * i -= 2
+ * ```
+ */
+class AssignSubExpr extends @assign_sub_expr, CompoundAssignExpr { }
 
-/** A compound divide-assign expression. */
-class AssignDivExpr extends @assigndivexpr, CompoundAssignExpr { }
+/**
+ * A compound multiply-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * x *= y
+ * ```
+ */
+class AssignMulExpr extends @assign_mul_expr, CompoundAssignExpr { }
 
-/** A compound modulo-assign expression. */
-class AssignModExpr extends @assignmodexpr, CompoundAssignExpr { }
+/**
+ * A compound divide-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * n /= 10
+ * ```
+ */
+class AssignDivExpr extends @assign_div_expr, CompoundAssignExpr { }
 
-/** A compound exponentiate-assign expression. */
-class AssignExpExpr extends @assignexpexpr, CompoundAssignExpr { }
+/**
+ * A compound modulo-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * m %= 3
+ * ```
+ */
+class AssignModExpr extends @assign_mod_expr, CompoundAssignExpr { }
 
-/** A compound left-shift-assign expression. */
-class AssignLShiftExpr extends @assignlshiftexpr, CompoundAssignExpr { }
+/**
+ * A compound exponentiate-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * scale **= 10
+ * ```
+ */
+class AssignExpExpr extends @assign_exp_expr, CompoundAssignExpr { }
 
-/** A compound right-shift-assign expression. */
-class AssignRShiftExpr extends @assignrshiftexpr, CompoundAssignExpr { }
+/**
+ * A compound left-shift-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * exp <<= 2
+ * ```
+ */
+class AssignLShiftExpr extends @assign_lshift_expr, CompoundAssignExpr { }
 
-/** A compound unsigned-right-shift-assign expression. */
-class AssignURShiftExpr extends @assignurshiftexpr, CompoundAssignExpr { }
+/**
+ * A compound right-shift-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * qw >>= 8
+ * ```
+ */
+class AssignRShiftExpr extends @assign_rshift_expr, CompoundAssignExpr { }
 
-/** A compound bitwise-'or'-assign expression. */
-class AssignOrExpr extends @assignorexpr, CompoundAssignExpr { }
+/**
+ * A compound unsigned-right-shift-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * bits >>>= 16
+ * ```
+ */
+class AssignURShiftExpr extends @assign_urshift_expr, CompoundAssignExpr { }
 
-/** A compound exclusive-'or'-assign expression. */
-class AssignXOrExpr extends @assignxorexpr, CompoundAssignExpr { }
+/**
+ * A compound bitwise-'or'-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * flags |= O_CREAT
+ * ```
+ */
+class AssignOrExpr extends @assign_or_expr, CompoundAssignExpr { }
 
-/** A compound bitwise-'and'-assign expression. */
-class AssignAndExpr extends @assignandexpr, CompoundAssignExpr { }
+/**
+ * A compound exclusive-'or'-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * bits ^= mask
+ * ```
+ */
+class AssignXOrExpr extends @assign_xor_expr, CompoundAssignExpr { }
 
-/** An update expression, that is, an increment or decrement expression. */
+/**
+ * A compound bitwise-'and'-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * data &= 0xffff
+ * ```
+ */
+class AssignAndExpr extends @assign_and_expr, CompoundAssignExpr { }
+
+/**
+ * A logical-'or'-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * x ||= y
+ * ```
+ */
+class AssignLogOrExpr extends @assignlogorexpr, CompoundAssignExpr { }
+
+/**
+ * A logical-'and'-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * x &&= y
+ * ```
+ */
+class AssignLogAndExpr extends @assignlogandexpr, CompoundAssignExpr { }
+
+/**
+ * A 'nullish-coalescing'-assign expression.
+ *
+ * Example:
+ *
+ * ```
+ * x ??= y
+ * ```
+ */
+class AssignNullishCoalescingExpr extends @assignnullishcoalescingexpr, CompoundAssignExpr { }
+
+/**
+ * An update expression, that is, an increment or decrement expression.
+ *
+ * Examples:
+ *
+ * ```
+ * ++i
+ * --i
+ * i++
+ * i--
+ * ```
+ */
 class UpdateExpr extends @updateexpr, Expr {
   /** Gets the operand of this update. */
   Expr getOperand() { result = getChildExpr(0) }
@@ -1150,39 +2113,81 @@ class UpdateExpr extends @updateexpr, Expr {
   override ControlFlowNode getFirstControlFlowNode() {
     result = getOperand().getFirstControlFlowNode()
   }
+
+  override string getAPrimaryQlClass() { result = "UpdateExpr" }
 }
 
-/** A prefix increment expression. */
-class PreIncExpr extends @preincexpr, UpdateExpr {
+/**
+ * A prefix increment expression.
+ *
+ * Example:
+ *
+ * ```
+ * ++i
+ * ```
+ */
+class PreIncExpr extends @preinc_expr, UpdateExpr {
   override predicate isPrefix() { any() }
 
   override string getOperator() { result = "++" }
 }
 
-/** A postfix increment expression. */
-class PostIncExpr extends @postincexpr, UpdateExpr {
+/**
+ * A postfix increment expression.
+ *
+ * Example:
+ *
+ * ```
+ * i++
+ * ```
+ */
+class PostIncExpr extends @postinc_expr, UpdateExpr {
   override string getOperator() { result = "++" }
 }
 
-/** A prefix decrement expression. */
-class PreDecExpr extends @predecexpr, UpdateExpr {
+/**
+ * A prefix decrement expression.
+ *
+ * Example:
+ *
+ * ```
+ * --i
+ * ```
+ */
+class PreDecExpr extends @predec_expr, UpdateExpr {
   override predicate isPrefix() { any() }
 
   override string getOperator() { result = "--" }
 }
 
-/** A postfix decrement expression. */
-class PostDecExpr extends @postdecexpr, UpdateExpr {
+/**
+ * A postfix decrement expression.
+ *
+ * Example:
+ *
+ * ```
+ * i--
+ * ```
+ */
+class PostDecExpr extends @postdec_expr, UpdateExpr {
   override string getOperator() { result = "--" }
 }
 
-/** A `yield` expression. */
-class YieldExpr extends @yieldexpr, Expr {
+/**
+ * A `yield` expression.
+ *
+ * Example:
+ *
+ * ```
+ * yield next
+ * ```
+ */
+class YieldExpr extends @yield_expr, Expr {
   /** Gets the operand of this `yield` expression. */
   Expr getOperand() { result = getChildExpr(0) }
 
   /** Holds if this is a `yield*` expression. */
-  predicate isDelegating() { isDelegating(this) }
+  predicate isDelegating() { is_delegating(this) }
 
   override predicate isImpure() { any() }
 
@@ -1191,13 +2196,22 @@ class YieldExpr extends @yieldexpr, Expr {
     or
     not exists(getOperand()) and result = this
   }
+
+  override string getAPrimaryQlClass() { result = "YieldExpr" }
 }
 
 /**
  * A comprehension expression, that is, either an array comprehension
  * expression or a generator expression.
+ *
+ * Examples:
+ *
+ * ```
+ * [for (x of xs) x*x]
+ * (for (x of xs) x*x)
+ * ```
  */
-class ComprehensionExpr extends @comprehensionexpr, Expr {
+class ComprehensionExpr extends @comprehension_expr, Expr {
   /** Gets the `n`th comprehension block in this comprehension. */
   ComprehensionBlock getBlock(int n) {
     exists(int idx |
@@ -1241,16 +2255,50 @@ class ComprehensionExpr extends @comprehensionexpr, Expr {
   predicate isPostfix() {
     exists(Token tk | tk = getFirstToken().getNextToken() | not tk.getValue().regexpMatch("if|for"))
   }
+
+  override string getAPrimaryQlClass() { result = "ComprehensionExpr" }
 }
 
-/** An array comprehension expression. */
-class ArrayComprehensionExpr extends @arraycomprehensionexpr, ComprehensionExpr { }
+/**
+ * An array comprehension expression.
+ *
+ * Example:
+ *
+ * ```
+ * [for (x of xs) x*x]
+ * ```
+ */
+class ArrayComprehensionExpr extends @array_comprehension_expr, ComprehensionExpr { }
 
-/** A generator expression. */
-class GeneratorExpr extends @generatorexpr, ComprehensionExpr { }
+/**
+ * A generator expression.
+ *
+ * Example:
+ *
+ * ```
+ * (for (x of xs) x*x)
+ * ```
+ */
+class GeneratorExpr extends @generator_expr, ComprehensionExpr { }
 
-/** A comprehension block. */
-class ComprehensionBlock extends @comprehensionblock, Expr {
+/**
+ * A comprehension block in a comprehension expression.
+ *
+ * Examples:
+ *
+ * ```
+ * [
+ *   for (x of [1, 2 3])    // comprehension block
+ *     x*x
+ * ]
+ *
+ * [
+ *   for (x in o)           // comprehension block
+ *     "_" + x
+ * ]
+ * ```
+ */
+class ComprehensionBlock extends @comprehension_block, Expr {
   /** Gets the iterating variable or pattern of this comprehension block. */
   BindingPattern getIterator() { result = getChildExpr(0) }
 
@@ -1261,15 +2309,51 @@ class ComprehensionBlock extends @comprehensionblock, Expr {
     getIterator().isImpure() or
     getDomain().isImpure()
   }
+
+  override string getAPrimaryQlClass() { result = "ComprehensionBlock" }
 }
 
-/** A `for`-`in` comprehension block. */
-class ForInComprehensionBlock extends @forincomprehensionblock, ComprehensionBlock { }
+/**
+ * A `for`-`in` comprehension block in a comprehension expression.
+ *
+ * Example:
+ *
+ * ```
+ * [
+ *   for (x in o)           // comprehension block
+ *     "_" + x
+ * ]
+ * ```
+ */
+class ForInComprehensionBlock extends @for_in_comprehension_block, ComprehensionBlock { }
 
-/** A `for`-`of` comprehension block. */
-class ForOfComprehensionBlock extends @forofcomprehensionblock, ComprehensionBlock { }
+/**
+ * A `for`-`of` comprehension block in a comprehension expression.
+ *
+ * Example:
+ *
+ * ```
+ * [
+ *   for (x of [1, 2 3])    // comprehension block
+ *     x*x
+ * ]
+ * ```
+ */
+class ForOfComprehensionBlock extends @for_of_comprehension_block, ComprehensionBlock { }
 
-/** A binary arithmetic expression using `+`, `-`, `/`, `%` or `**`. */
+/**
+ * A binary arithmetic expression using `+`, `-`, `/`, `%` or `**`.
+ *
+ * Examples:
+ *
+ * ```
+ * x + y
+ * i - 1
+ * dist / scale
+ * k % 2
+ * p ** 10
+ * ```
+ */
 class ArithmeticExpr extends BinaryExpr {
   ArithmeticExpr() {
     this instanceof AddExpr or
@@ -1281,7 +2365,17 @@ class ArithmeticExpr extends BinaryExpr {
   }
 }
 
-/** A logical expression using `&&`, `||`, or `!`. */
+/**
+ * A logical expression using `&&`, `||`, or `!`.
+ *
+ * Examples:
+ *
+ * ```
+ * x && x.f
+ * x == null || x.f
+ * !x
+ * ```
+ */
 class LogicalExpr extends Expr {
   LogicalExpr() {
     this instanceof LogicalBinaryExpr or
@@ -1289,7 +2383,21 @@ class LogicalExpr extends Expr {
   }
 }
 
-/** A bitwise expression using `&`, `|`, `^`, `~`, `<<`, `>>`, or `>>>`. */
+/**
+ * A bitwise expression using `&`, `|`, `^`, `~`, `<<`, `>>`, or `>>>`.
+ *
+ * Examples:
+ *
+ * ```
+ * qw & 0xffff
+ * O_RDWR | O_APPEND
+ * x ^ 1
+ * ~bitmask
+ * 2 << i
+ * r >> 8
+ * u >>> v
+ * ```
+ */
 class BitwiseExpr extends Expr {
   BitwiseExpr() {
     this instanceof BitwiseBinaryExpr or
@@ -1298,7 +2406,16 @@ class BitwiseExpr extends Expr {
   }
 }
 
-/** A strict equality test using `!==` or `===`. */
+/**
+ * A strict equality test using `!==` or `===`.
+ *
+ * Examples:
+ *
+ * ```
+ * recv === undefined
+ * res !== res
+ * ```
+ */
 class StrictEqualityTest extends EqualityTest {
   StrictEqualityTest() {
     this instanceof StrictEqExpr or
@@ -1306,7 +2423,16 @@ class StrictEqualityTest extends EqualityTest {
   }
 }
 
-/** A non-strict equality test using `!=` or `==`. */
+/**
+ * A non-strict equality test using `!=` or `==`.
+ *
+ * Examples:
+ *
+ * ```
+ * "" == arg
+ * x != null
+ * ```
+ */
 class NonStrictEqualityTest extends EqualityTest {
   NonStrictEqualityTest() {
     this instanceof EqExpr or
@@ -1314,7 +2440,18 @@ class NonStrictEqualityTest extends EqualityTest {
   }
 }
 
-/** A relational comparison using `<`, `<=`, `>=`, or `>`. */
+/**
+ * A relational comparison using `<`, `<=`, `>=`, or `>`.
+ *
+ * Examples:
+ *
+ * ```
+ * i < 10
+ * x+1 <= a.length
+ * x >= 0
+ * a[j] > a[k]
+ * ```
+ */
 class RelationalComparison extends Comparison {
   RelationalComparison() {
     this instanceof LTExpr or
@@ -1350,17 +2487,43 @@ class RelationalComparison extends Comparison {
   }
 }
 
-/** A (pre or post) increment expression. */
+/**
+ * A (pre or post) increment expression.
+ *
+ * Examples:
+ *
+ * ```
+ * ++i
+ * i++
+ * ```
+ */
 class IncExpr extends UpdateExpr {
   IncExpr() { this instanceof PreIncExpr or this instanceof PostIncExpr }
 }
 
-/** A (pre or post) decrement expression. */
+/**
+ * A (pre or post) decrement expression.
+ *
+ * Examples:
+ *
+ * ```
+ * --i
+ * i--
+ * ```
+ */
 class DecExpr extends UpdateExpr {
   DecExpr() { this instanceof PreDecExpr or this instanceof PostDecExpr }
 }
 
-/** An old-style `let` expression of the form `let(vardecls) expr`. */
+/**
+ * An old-style `let` expression of the form `let(vardecls) expr`.
+ *
+ * Example:
+ *
+ * ```
+ * let (x = f()) x*x
+ * ```
+ */
 class LegacyLetExpr extends Expr, @legacy_letexpr {
   /** Gets the `i`th declarator in this `let` expression. */
   VariableDeclarator getDecl(int i) { result = getChildExpr(i) and i >= 0 }
@@ -1370,13 +2533,22 @@ class LegacyLetExpr extends Expr, @legacy_letexpr {
 
   /** Gets the expression this `let` expression scopes over. */
   Expr getBody() { result = getChildExpr(-1) }
+
+  override string getAPrimaryQlClass() { result = "LegacyLetExpr" }
 }
 
-/** An immediately invoked function expression (IIFE). */
+/**
+ * An immediately invoked function expression (IIFE).
+ *
+ * Example:
+ *
+ * ```
+ * (function() { return this; })()
+ * ```
+ */
 class ImmediatelyInvokedFunctionExpr extends Function {
   /** The invocation expression of this IIFE. */
   InvokeExpr invk;
-
   /**
    * The kind of invocation by which this IIFE is invoked: `"call"`
    * for a direct function call, `"call"` or `"apply"` for a reflective
@@ -1446,8 +2618,16 @@ class ImmediatelyInvokedFunctionExpr extends Function {
   }
 }
 
-/** An `await` expression. */
-class AwaitExpr extends @awaitexpr, Expr {
+/**
+ * An `await` expression.
+ *
+ * Example:
+ *
+ * ```
+ * await p()
+ * ```
+ */
+class AwaitExpr extends @await_expr, Expr {
   /** Gets the operand of this `await` expression. */
   Expr getOperand() { result = getChildExpr(0) }
 
@@ -1456,6 +2636,8 @@ class AwaitExpr extends @awaitexpr, Expr {
   override ControlFlowNode getFirstControlFlowNode() {
     result = getOperand().getFirstControlFlowNode()
   }
+
+  override string getAPrimaryQlClass() { result = "AwaitExpr" }
 }
 
 /**
@@ -1464,16 +2646,31 @@ class AwaitExpr extends @awaitexpr, Expr {
  * Inside a generator function, `function.sent` evaluates to the value passed
  * to the generator by the `next` method that most recently resumed execution
  * of the generator.
+ *
+ * Example:
+ *
+ * ```
+ * function.sent
+ * ```
  */
-class FunctionSentExpr extends @functionsentexpr, Expr {
+class FunctionSentExpr extends @function_sent_expr, Expr {
   override predicate isImpure() { none() }
+
+  override string getAPrimaryQlClass() { result = "FunctionSentExpr" }
 }
 
 /**
  * A decorator applied to a class, property or member definition.
  *
- * For example, in the class declaration `@A class C { }`,
- * `@A` is a decorator applied to class `C`.
+ *
+ * Example:
+ *
+ * ```
+ * @A @testable(true) class C { // `@A` and `@testable(true)` are decorators
+ *   @Test test1() {            // `@Test` is a decorator
+ *   }
+ * }
+ * ```
  */
 class Decorator extends @decorator, Expr {
   /**
@@ -1495,11 +2692,22 @@ class Decorator extends @decorator, Expr {
   override ControlFlowNode getFirstControlFlowNode() {
     result = getExpression().getFirstControlFlowNode()
   }
+
+  override string getAPrimaryQlClass() { result = "Decorator" }
 }
 
 /**
  * A program element to which decorators can be applied,
  * that is, a class, a property or a member definition.
+ *
+ * Examples:
+ *
+ * ```
+ * @A @testable(true) class C { // class `C` is decoratable
+ *   @Test test1() {            // method `test1` is decoratable
+ *   }
+ * }
+ * ```
  */
 class Decoratable extends ASTNode {
   Decoratable() {
@@ -1528,10 +2736,16 @@ class Decoratable extends ASTNode {
 }
 
 /**
- * A function bind expression either of the form `b::f`, or of the
- * form `::b.f`.
+ * A function-bind expression.
+ *
+ * Examples:
+ *
+ * ```
+ * b::f
+ * ::b.f
+ * ```
  */
-class FunctionBindExpr extends @bindexpr, Expr {
+class FunctionBindExpr extends @bind_expr, Expr {
   /**
    * Gets the object of this function bind expression; undefined for
    * expressions of the form `::b.f`.
@@ -1546,12 +2760,20 @@ class FunctionBindExpr extends @bindexpr, Expr {
     or
     not exists(getObject()) and result = getCallee().getFirstControlFlowNode()
   }
+
+  override string getAPrimaryQlClass() { result = "FunctionBindExpr" }
 }
 
 /**
- * A dynamic import expression of the form `import(source)`.
+ * A dynamic import expression.
+ *
+ * Example:
+ *
+ * ```
+ * import("fs")
+ * ```
  */
-class DynamicImportExpr extends @dynamicimport, Expr, Import {
+class DynamicImportExpr extends @dynamic_import, Expr, Import {
   /** Gets the expression specifying the path of the imported module. */
   Expr getSource() { result = getChildExpr(0) }
 
@@ -1564,22 +2786,33 @@ class DynamicImportExpr extends @dynamicimport, Expr, Import {
   override Module getEnclosingModule() { result = getTopLevel() }
 
   override DataFlow::Node getImportedModuleNode() { result = DataFlow::valueNode(this) }
+
+  override string getAPrimaryQlClass() { result = "DynamicImportExpr" }
 }
 
 /** A literal path expression appearing in a dynamic import. */
-private class LiteralDynamicImportPath extends PathExprInModule, ConstantString {
+private class LiteralDynamicImportPath extends PathExpr, ConstantString {
   LiteralDynamicImportPath() {
     exists(DynamicImportExpr di | this.getParentExpr*() = di.getSource())
   }
 
-  override string getValue() { result = this.(ConstantString).getStringValue() }
+  override string getValue() { result = getStringValue() }
 }
 
 /**
- * A call or member access that evaluates to `undefined` if its base operand evaluates to `undefined` or `null`.
+ * A call or member access that evaluates to `undefined` if its base operand evaluates to
+ * `undefined` or `null`.
+ *
+ * Examples:
+ *
+ * ```
+ * x ?? f
+ * ```
  */
 class OptionalUse extends Expr, @optionalchainable {
   OptionalUse() { isOptionalChaining(this) }
+
+  override string getAPrimaryQlClass() { result = "OptionalUse" }
 }
 
 private class ChainElem extends Expr, @optionalchainable {
@@ -1593,6 +2826,8 @@ private class ChainElem extends Expr, @optionalchainable {
 }
 
 /**
+ * INTERNAL: This class should not be used by queries.
+ *
  * The root in a chain of calls or property accesses, where at least one call or property access is optional.
  */
 class OptionalChainRoot extends ChainElem {
@@ -1607,4 +2842,18 @@ class OptionalChainRoot extends ChainElem {
    * Gets an optional call or property access in the chain of this root.
    */
   OptionalUse getAnOptionalUse() { result = optionalUse }
+}
+
+/**
+ * An `import.meta` expression.
+ *
+ * Example:
+ * ```js
+ * let url = import.meta.url;
+ * ```
+ */
+class ImportMetaExpr extends @import_meta_expr, Expr {
+  override predicate isImpure() { none() }
+
+  override string getAPrimaryQlClass() { result = "ImportMetaExpr" }
 }

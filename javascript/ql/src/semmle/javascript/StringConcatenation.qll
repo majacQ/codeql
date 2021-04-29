@@ -9,10 +9,11 @@ module StringConcatenation {
   private DataFlow::Node getAssignAddResult(AssignAddExpr expr) {
     result = expr.flow()
     or
-    result = DataFlow::ssaDefinitionNode(SSA::definition(expr))
+    result = DataFlow::lvalueNode(expr.getTarget())
   }
 
   /** Gets the `n`th operand to the string concatenation defining `node`. */
+  pragma[nomagic]
   DataFlow::Node getOperand(DataFlow::Node node, int n) {
     exists(AddExpr add | node = add.flow() |
       n = 0 and result = add.getLeftOperand().flow()
@@ -49,6 +50,24 @@ module StringConcatenation {
     exists(DataFlow::CallNode call | node = call |
       call = Closure::moduleImport("goog.string.buildString").getACall() and
       result = call.getArgument(n)
+    )
+    or
+    exists(DataFlow::MethodCallNode call |
+      node = call and
+      call.getMethodName() = "concat" and
+      not (
+        exists(DataFlow::ArrayCreationNode array |
+          array.flowsTo(call.getAnArgument()) or array.flowsTo(call.getReceiver())
+        )
+        or
+        DataFlow::reflectiveCallNode(_) = call
+      ) and
+      (
+        n = 0 and
+        result = call.getReceiver()
+        or
+        result = call.getArgument(n - 1)
+      )
     )
   }
 

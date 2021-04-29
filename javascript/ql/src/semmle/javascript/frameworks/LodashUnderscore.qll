@@ -14,10 +14,6 @@ module LodashUnderscore {
     abstract string getName();
   }
 
-  private class MemberAsSourceNode extends DataFlow::SourceNode::Range {
-    MemberAsSourceNode() { this instanceof Member }
-  }
-
   /**
    * An import of `lodash` or `underscore` accessing a given member of that package.
    */
@@ -366,15 +362,12 @@ module LodashUnderscore {
    */
   private class ExceptionStep extends DataFlow::CallNode, DataFlow::AdditionalFlowStep {
     ExceptionStep() {
-      exists(string name |
-        this = member(name).getACall()
-      |
+      exists(string name | this = member(name).getACall() |
         // Members ending with By, With, or While indicate that they are a variant of
         // another function that takes a callback.
         name.matches("%By") or
         name.matches("%With") or
         name.matches("%While") or
-
         // Other members that don't fit the above pattern.
         name = "each" or
         name = "eachRight" or
@@ -401,6 +394,59 @@ module LodashUnderscore {
       succ = this.getExceptionalReturn()
     }
   }
+
+  /**
+   * Holds if there is a taint-step involving a (non-function) underscore method from `pred` to `succ`.
+   */
+  private predicate underscoreTaintStep(DataFlow::Node pred, DataFlow::Node succ) {
+    exists(string name, DataFlow::CallNode call |
+      call = any(Member member | member.getName() = name).getACall()
+    |
+      name =
+        [
+          "find", "filter", "findWhere", "where", "reject", "pluck", "max", "min", "sortBy",
+          "shuffle", "sample", "toArray", "partition", "compact", "first", "initial", "last",
+          "rest", "flatten", "without", "difference", "uniq", "unique", "unzip", "transpose",
+          "object", "chunk", "values", "mapObject", "pick", "omit", "defaults", "clone", "tap",
+          "identity",
+          // String category
+          "camelCase", "capitalize", "deburr", "kebabCase", "lowerCase", "lowerFirst", "pad",
+          "padEnd", "padStart", "repeat", "replace", "snakeCase", "split", "startCase", "toLower",
+          "toUpper", "trim", "trimEnd", "trimStart", "truncate", "unescape", "upperCase",
+          "upperFirst", "words"
+        ] and
+      pred = call.getArgument(0) and
+      succ = call
+      or
+      name = ["union", "zip"] and
+      pred = call.getAnArgument() and
+      succ = call
+      or
+      name =
+        ["each", "map", "every", "some", "max", "min", "sortBy", "partition", "mapObject", "tap"] and
+      pred = call.getArgument(0) and
+      succ = call.getABoundCallbackParameter(1, 0)
+      or
+      name = ["reduce", "reduceRight"] and
+      pred = call.getArgument(0) and
+      succ = call.getABoundCallbackParameter(1, 1)
+      or
+      name = ["map", "reduce", "reduceRight"] and
+      pred = call.getCallback(1).getAReturn() and
+      succ = call
+    )
+  }
+
+  /**
+   * A model for taint-steps involving (non-function) underscore methods.
+   */
+  private class UnderscoreTaintStep extends TaintTracking::AdditionalTaintStep {
+    UnderscoreTaintStep() { underscoreTaintStep(this, _) }
+
+    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
+      underscoreTaintStep(pred, succ) and pred = this
+    }
+  }
 }
 
 /**
@@ -410,103 +456,100 @@ module LodashUnderscore {
  * However, since the function could be invoked in another way, we additionally
  * still infer the ordinary abstract value.
  */
-private class AnalyzedThisInBoundCallback extends AnalyzedNode, DataFlow::ThisNode {
-  AnalyzedNode thisSource;
+private class LodashCallbackAsPartialInvoke extends DataFlow::PartialInvokeNode::Range,
+  DataFlow::CallNode {
+  int callbackIndex;
+  int contextIndex;
 
-  AnalyzedThisInBoundCallback() {
-    exists(
-      DataFlow::CallNode bindingCall, string binderName, int callbackIndex, int contextIndex,
-      int argumentCount
-    |
-      bindingCall = LodashUnderscore::member(binderName).getACall() and
-      bindingCall.getNumArgument() = argumentCount and
-      getBinder() = bindingCall.getCallback(callbackIndex) and
-      thisSource = bindingCall.getArgument(contextIndex)
+  LodashCallbackAsPartialInvoke() {
+    exists(string name, int argumentCount |
+      this = LodashUnderscore::member(name).getACall() and
+      getNumArgument() = argumentCount
     |
       (
-        binderName = "bind" or
-        binderName = "callback" or
-        binderName = "iteratee"
+        name = "bind" or
+        name = "callback" or
+        name = "iteratee"
       ) and
       callbackIndex = 0 and
       contextIndex = 1 and
       argumentCount = 2
       or
       (
-        binderName = "all" or
-        binderName = "any" or
-        binderName = "collect" or
-        binderName = "countBy" or
-        binderName = "detect" or
-        binderName = "dropRightWhile" or
-        binderName = "dropWhile" or
-        binderName = "each" or
-        binderName = "eachRight" or
-        binderName = "every" or
-        binderName = "filter" or
-        binderName = "find" or
-        binderName = "findIndex" or
-        binderName = "findKey" or
-        binderName = "findLast" or
-        binderName = "findLastIndex" or
-        binderName = "findLastKey" or
-        binderName = "forEach" or
-        binderName = "forEachRight" or
-        binderName = "forIn" or
-        binderName = "forInRight" or
-        binderName = "groupBy" or
-        binderName = "indexBy" or
-        binderName = "map" or
-        binderName = "mapKeys" or
-        binderName = "mapValues" or
-        binderName = "max" or
-        binderName = "min" or
-        binderName = "omit" or
-        binderName = "partition" or
-        binderName = "pick" or
-        binderName = "reject" or
-        binderName = "remove" or
-        binderName = "select" or
-        binderName = "some" or
-        binderName = "sortBy" or
-        binderName = "sum" or
-        binderName = "takeRightWhile" or
-        binderName = "takeWhile" or
-        binderName = "tap" or
-        binderName = "thru" or
-        binderName = "times" or
-        binderName = "unzipWith" or
-        binderName = "zipWith"
+        name = "all" or
+        name = "any" or
+        name = "collect" or
+        name = "countBy" or
+        name = "detect" or
+        name = "dropRightWhile" or
+        name = "dropWhile" or
+        name = "each" or
+        name = "eachRight" or
+        name = "every" or
+        name = "filter" or
+        name = "find" or
+        name = "findIndex" or
+        name = "findKey" or
+        name = "findLast" or
+        name = "findLastIndex" or
+        name = "findLastKey" or
+        name = "forEach" or
+        name = "forEachRight" or
+        name = "forIn" or
+        name = "forInRight" or
+        name = "groupBy" or
+        name = "indexBy" or
+        name = "map" or
+        name = "mapKeys" or
+        name = "mapValues" or
+        name = "max" or
+        name = "min" or
+        name = "omit" or
+        name = "partition" or
+        name = "pick" or
+        name = "reject" or
+        name = "remove" or
+        name = "select" or
+        name = "some" or
+        name = "sortBy" or
+        name = "sum" or
+        name = "takeRightWhile" or
+        name = "takeWhile" or
+        name = "tap" or
+        name = "thru" or
+        name = "times" or
+        name = "unzipWith" or
+        name = "zipWith"
       ) and
       callbackIndex = 1 and
       contextIndex = 2 and
       argumentCount = 3
       or
       (
-        binderName = "foldl" or
-        binderName = "foldr" or
-        binderName = "inject" or
-        binderName = "reduce" or
-        binderName = "reduceRight" or
-        binderName = "transform"
+        name = "foldl" or
+        name = "foldr" or
+        name = "inject" or
+        name = "reduce" or
+        name = "reduceRight" or
+        name = "transform"
       ) and
       callbackIndex = 1 and
       contextIndex = 3 and
       argumentCount = 4
       or
       (
-        binderName = "sortedlastIndex"
+        name = "sortedlastIndex"
         or
-        binderName = "assign"
+        name = "assign"
         or
-        binderName = "eq"
+        name = "eq"
         or
-        binderName = "extend"
+        name = "extend"
         or
-        binderName = "merge"
+        name = "merge"
         or
-        binderName = "sortedIndex" and
-        binderName = "uniq"
+        name = "sortedIndex" and
+        name = "uniq"
       ) and
       callbackIndex = 2 and
       contextIndex = 3 and
@@ -514,8 +557,8 @@ private class AnalyzedThisInBoundCallback extends AnalyzedNode, DataFlow::ThisNo
     )
   }
 
-  override AbstractValue getALocalValue() {
-    result = thisSource.getALocalValue() or
-    result = AnalyzedNode.super.getALocalValue()
+  override DataFlow::Node getBoundReceiver(DataFlow::Node callback) {
+    callback = getArgument(callbackIndex) and
+    result = getArgument(contextIndex)
   }
 }

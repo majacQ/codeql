@@ -3,7 +3,7 @@
  * @description Authentication by checking that the peer's address
  *              matches a known IP or web address is unsafe as it is
  *              vulnerable to spoofing attacks.
- * @kind problem
+ * @kind path-problem
  * @problem.severity warning
  * @precision medium
  * @id cpp/user-controlled-bypass
@@ -12,13 +12,12 @@
  */
 
 import semmle.code.cpp.security.TaintTracking
+import TaintedWithPath
 
 predicate hardCodedAddressOrIP(StringLiteral txt) {
-  exists(string s
-  | s = txt.getValueText()
-  | // Hard-coded ip addresses, such as 127.0.0.1
+  exists(string s | s = txt.getValueText() |
+    // Hard-coded ip addresses, such as 127.0.0.1
     s.regexpMatch("\"[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+\"") or
-
     // Hard-coded addresses such as www.mycompany.com
     s.matches("\"www.%\"") or
     s.matches("\"http:%\"") or
@@ -84,41 +83,41 @@ predicate hardCodedAddressOrIP(StringLiteral txt) {
     s.matches("\"%.sg\"") or
     s.matches("\"%.io\"") or
     s.matches("\"%.edu\"") or
-    s.matches("\"%.gov\""))
+    s.matches("\"%.gov\"")
+  )
 }
 
 predicate useOfHardCodedAddressOrIP(Expr use) {
-  hardCodedAddressOrIP(use) or
-  exists(Expr def, Expr src, Variable v
-  | useOfHardCodedAddressOrIP(src) and
+  hardCodedAddressOrIP(use)
+  or
+  exists(Expr def, Expr src, Variable v |
+    useOfHardCodedAddressOrIP(src) and
     exprDefinition(v, def, src) and
-    definitionUsePair(v, def, use))
+    definitionUsePair(v, def, use)
+  )
 }
 
-/*
- * Find IfStmts that have a hard-coded IP or web address in
+/**
+ * Find `IfStmt`s that have a hard-coded IP or web address in
  * their condition. If the condition also depends on an
  * untrusted input then it might be vulnerable to a spoofing
  * attack.
  */
-predicate hardCodedAddressInCondition(Expr source, Expr condition) {
-  // One of the sub-expressions of the condition is tainted.
-  exists(Expr taintedExpr
-  | taintedExpr.getParent+() = condition
-  | tainted(source, taintedExpr)) and
-
+predicate hardCodedAddressInCondition(Expr subexpression, Expr condition) {
+  subexpression = condition.getAChild+() and
   // One of the sub-expressions of the condition is a hard-coded
   // IP or web-address.
-  exists(Expr use
-  | use.getParent+() = condition
-  | useOfHardCodedAddressOrIP(use)) and
-
+  exists(Expr use | use = condition.getAChild+() | useOfHardCodedAddressOrIP(use)) and
   condition = any(IfStmt ifStmt).getCondition()
 }
 
-from Expr source, Expr condition
-where hardCodedAddressInCondition(source, condition)
-select
-  condition,
-  "Untrusted input $@ might be vulnerable to a spoofing attack.",
-  source, source.toString()
+class Configuration extends TaintTrackingConfiguration {
+  override predicate isSink(Element sink) { hardCodedAddressInCondition(sink, _) }
+}
+
+from Expr subexpression, Expr source, Expr condition, PathNode sourceNode, PathNode sinkNode
+where
+  hardCodedAddressInCondition(subexpression, condition) and
+  taintedWithPath(source, subexpression, sourceNode, sinkNode)
+select condition, sourceNode, sinkNode,
+  "Untrusted input $@ might be vulnerable to a spoofing attack.", source, source.toString()

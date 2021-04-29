@@ -56,7 +56,7 @@ module Closure {
     ClosureNamespaceRef::Range {
     DefaultNamespaceRef() { this = DataFlow::globalVarRef("goog").getAMethodCall() }
 
-    override string getClosureNamespace() { result = getArgument(0).asExpr().getStringValue() }
+    override string getClosureNamespace() { result = getArgument(0).getStringValue() }
   }
 
   /**
@@ -115,18 +115,25 @@ module Closure {
     override DefaultClosureModuleDeclaration range;
   }
 
+  private GlobalVariable googVariable() { variables(result, "goog", any(GlobalScope sc)) }
+
+  pragma[nomagic]
+  private MethodCallExpr googModuleDeclExpr() {
+    result.getReceiver() = googVariable().getAnAccess() and
+    result.getMethodName() = ["module", "declareModuleId"]
+  }
+
+  pragma[nomagic]
+  private MethodCallExpr googModuleDeclExprInContainer(StmtContainer container) {
+    result = googModuleDeclExpr() and
+    container = result.getContainer()
+  }
+
   /**
    * A module using the Closure module system, declared using `goog.module()` or `goog.declareModuleId()`.
    */
   class ClosureModule extends Module {
-    ClosureModule() {
-      // Use AST-based predicate to cut recursive dependencies.
-      exists(MethodCallExpr call |
-        getAStmt().(ExprStmt).getExpr() = call and
-        call.getReceiver().(GlobalVarAccess).getName() = "goog" and
-        (call.getMethodName() = "module" or call.getMethodName() = "declareModuleId")
-      )
-    }
+    ClosureModule() { exists(googModuleDeclExprInContainer(this)) }
 
     /**
      * Gets the call to `goog.module` or `goog.declareModuleId` in this module.
@@ -158,9 +165,9 @@ module Closure {
       result = getScope().getVariable("exports")
     }
 
-    override predicate exports(string name, ASTNode export) {
+    override DataFlow::Node getAnExportedValue(string name) {
       exists(DataFlow::PropWrite write, Expr base |
-        write.getAstNode() = export and
+        result = write.getRhs() and
         write.writes(base.flow(), name, _) and
         (
           base = getExportsVariable().getAReference()
@@ -212,45 +219,34 @@ module Closure {
       or
       name = namespace
     )
+    or
+    name = "goog" // The closure libraries themselves use the "goog" namespace
+  }
+
+  /**
+   * Holds if a prefix of `name` is a closure namespace.
+   */
+  bindingset[name]
+  private predicate hasClosureNamespacePrefix(string name) {
+    isClosureNamespace(name.substring(0, name.indexOf(".")))
+    or
+    isClosureNamespace(name)
   }
 
   /**
    * Gets the closure namespace path addressed by the given data flow node, if any.
    */
   string getClosureNamespaceFromSourceNode(DataFlow::SourceNode node) {
-    isClosureNamespace(result) and
-    node = DataFlow::globalVarRef(result)
-    or
-    exists(DataFlow::SourceNode base, string basePath, string prop |
-      basePath = getClosureNamespaceFromSourceNode(base) and
-      node = base.getAPropertyRead(prop) and
-      result = basePath + "." + prop and
-      // ensure finiteness
-      (
-        isClosureNamespace(basePath)
-        or
-        // direct access, no indirection
-        node.(DataFlow::PropRead).getBase() = base
-      )
-    )
-    or
-    // Associate an access path with the immediate RHS of a store on a closure namespace.
-    // This is to support patterns like:
-    // foo.bar = { baz() {} }
-    exists(DataFlow::PropWrite write |
-      node = write.getRhs() and
-      result = getWrittenClosureNamespace(write)
-    )
-    or
-    result = node.(ClosureNamespaceAccess).getClosureNamespace()
+    node = AccessPath::getAReferenceOrAssignmentTo(result) and
+    hasClosureNamespacePrefix(result)
   }
 
   /**
    * Gets the closure namespace path written to by the given property write, if any.
    */
   string getWrittenClosureNamespace(DataFlow::PropWrite node) {
-    result = getClosureNamespaceFromSourceNode(node.getBase().getALocalSource()) + "." +
-        node.getPropertyName()
+    node.getRhs() = AccessPath::getAnAssignmentTo(result) and
+    hasClosureNamespacePrefix(result)
   }
 
   /**
@@ -258,5 +254,29 @@ module Closure {
    */
   DataFlow::SourceNode moduleImport(string moduleName) {
     getClosureNamespaceFromSourceNode(result) = moduleName
+  }
+
+  /**
+   * A call to `goog.bind`, as a partial function invocation.
+   */
+  private class BindCall extends DataFlow::PartialInvokeNode::Range, DataFlow::CallNode {
+    BindCall() { this = moduleImport("goog.bind").getACall() }
+
+    override predicate isPartialArgument(DataFlow::Node callback, DataFlow::Node argument, int index) {
+      index >= 0 and
+      callback = getArgument(0) and
+      argument = getArgument(index + 2)
+    }
+
+    override DataFlow::SourceNode getBoundFunction(DataFlow::Node callback, int boundArgs) {
+      boundArgs = getNumArgument() - 2 and
+      callback = getArgument(0) and
+      result = this
+    }
+
+    override DataFlow::Node getBoundReceiver(DataFlow::Node callback) {
+      callback = getArgument(0) and
+      result = getArgument(1)
+    }
   }
 }

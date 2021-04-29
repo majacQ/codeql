@@ -1,28 +1,32 @@
 import cpp
 
 /**
- * Returns the size of the pointed-to type, counting void types as size 1.  
+ * Returns the size of the pointed-to type, counting void types as size 1.
  */
-int getPointedSize(Type t)
-{
+int getPointedSize(Type t) {
   result = t.getUnspecifiedType().(PointerType).getBaseType().getSize().maximum(1)
 }
 
 /**
  * An operation that reads data from or writes data to a buffer.
- * 
+ *
  * See the BufferWrite class for an explanation of how BufferAccess and
  * BufferWrite differ.
  */
 abstract class BufferAccess extends Expr {
   abstract string getName();
+
+  /**
+   * Gets the expression that denotes the buffer, along with a textual label
+   * for it and an access type.
+   *
+   * accessType:
+   * - 1 = buffer range [0, getSize) is accessed entirely.
+   * - 2 = buffer range [0, getSize) may be accessed partially or entirely.
+   * - 3 = buffer is accessed at offset getSize - 1.
+   */
   abstract Expr getBuffer(string bufferDesc, int accessType);
-    /*
-     * accessType:
-     *  1 = buffer range [0, getSize) is accessed entirely 
-     *  2 = buffer range [0, getSize) may be accessed partially or entirely
-     *  3 = buffer is accessed at offset getSize - 1
-     */
+
   abstract int getSize();
 }
 
@@ -38,35 +42,29 @@ abstract class BufferAccess extends Expr {
  */
 class MemcpyBA extends BufferAccess {
   MemcpyBA() {
-    this.(FunctionCall).getTarget().getName() = "memcpy" or
-    this.(FunctionCall).getTarget().getName() = "wmemcpy" or
-    this.(FunctionCall).getTarget().getName() = "memmove" or
-    this.(FunctionCall).getTarget().getName() = "wmemmove" or
-    this.(FunctionCall).getTarget().getName() = "mempcpy" or
-    this.(FunctionCall).getTarget().getName() = "wmempcpy" or
-    this.(FunctionCall).getTarget().getName() = "RtlCopyMemoryNonTemporal"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
+    this.(FunctionCall).getTarget().getName() =
+      [
+        "memcpy", "wmemcpy", "memmove", "wmemmove", "mempcpy", "wmempcpy",
+        "RtlCopyMemoryNonTemporal"
+      ]
   }
 
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
+
   override Expr getBuffer(string bufferDesc, int accessType) {
-    (
-      result = this.(FunctionCall).getArgument(0) and
-      bufferDesc = "destination buffer" and
-      accessType = 1
-    ) or (
-      result = this.(FunctionCall).getArgument(1) and
-      bufferDesc = "source buffer" and
-      accessType = 1
-    )
+    result = this.(FunctionCall).getArgument(0) and
+    bufferDesc = "destination buffer" and
+    accessType = 1
+    or
+    result = this.(FunctionCall).getArgument(1) and
+    bufferDesc = "source buffer" and
+    accessType = 1
   }
 
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -75,30 +73,24 @@ class MemcpyBA extends BufferAccess {
  *  bcopy(src, dest, num)
  */
 class BCopyBA extends BufferAccess {
-  BCopyBA() {
-    this.(FunctionCall).getTarget().getName() = "bcopy"
-  }
+  BCopyBA() { this.(FunctionCall).getTarget().getName() = "bcopy" }
 
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
-    (
-      result = this.(FunctionCall).getArgument(0) and
-      bufferDesc = "source buffer" and
-      accessType = 1
-    ) or (
-      result = this.(FunctionCall).getArgument(1) and
-      bufferDesc = "destination buffer" and
-      accessType = 1
-    )
+    result = this.(FunctionCall).getArgument(0) and
+    bufferDesc = "source buffer" and
+    accessType = 1
+    or
+    result = this.(FunctionCall).getArgument(1) and
+    bufferDesc = "destination buffer" and
+    accessType = 1
   }
 
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -107,30 +99,24 @@ class BCopyBA extends BufferAccess {
  *  strncpy(dest, src, num)
  */
 class StrncpyBA extends BufferAccess {
-  StrncpyBA() {
-    this.(FunctionCall).getTarget().getName() = "strncpy"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  StrncpyBA() { this.(FunctionCall).getTarget().getName() = "strncpy" }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
-    (
-      result = this.(FunctionCall).getArgument(0) and
-      bufferDesc = "destination buffer" and
-      accessType = 2
-    ) or (
-      result = this.(FunctionCall).getArgument(1) and
-      bufferDesc = "source buffer" and
-      accessType = 2
-    )
+    result = this.(FunctionCall).getArgument(0) and
+    bufferDesc = "destination buffer" and
+    accessType = 2
+    or
+    result = this.(FunctionCall).getArgument(1) and
+    bufferDesc = "source buffer" and
+    accessType = 2
   }
 
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -139,30 +125,24 @@ class StrncpyBA extends BufferAccess {
  *  memccpy(dest, src, c, n)
  */
 class MemccpyBA extends BufferAccess {
-  MemccpyBA() {
-    this.(FunctionCall).getTarget().getName() = "memccpy"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  MemccpyBA() { this.(FunctionCall).getTarget().getName() = "memccpy" }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
-    (
-      result = this.(FunctionCall).getArgument(0) and
-      bufferDesc = "destination buffer" and
-      accessType = 2
-    ) or (
-      result = this.(FunctionCall).getArgument(1) and
-      bufferDesc = "source buffer" and
-      accessType = 2
-    )
+    result = this.(FunctionCall).getArgument(0) and
+    bufferDesc = "destination buffer" and
+    accessType = 2
+    or
+    result = this.(FunctionCall).getArgument(1) and
+    bufferDesc = "source buffer" and
+    accessType = 2
   }
 
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(3).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -175,32 +155,25 @@ class MemccpyBA extends BufferAccess {
  */
 class MemcmpBA extends BufferAccess {
   MemcmpBA() {
-    this.(FunctionCall).getTarget().getName() = "memcmp" or
-    this.(FunctionCall).getTarget().getName() = "wmemcmp" or
-    this.(FunctionCall).getTarget().getName() = "_memicmp" or
-    this.(FunctionCall).getTarget().getName() = "_memicmp_l"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
+    this.(FunctionCall).getTarget().getName() = ["memcmp", "wmemcmp", "_memicmp", "_memicmp_l"]
   }
 
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
+
   override Expr getBuffer(string bufferDesc, int accessType) {
-    (
-      result = this.(FunctionCall).getArgument(0) and
-      bufferDesc = "first buffer" and
-      accessType = 2
-    ) or (
-      result = this.(FunctionCall).getArgument(1) and
-      bufferDesc = "second buffer" and
-      accessType = 2
-    )
+    result = this.(FunctionCall).getArgument(0) and
+    bufferDesc = "first buffer" and
+    accessType = 2
+    or
+    result = this.(FunctionCall).getArgument(1) and
+    bufferDesc = "second buffer" and
+    accessType = 2
   }
 
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -210,31 +183,24 @@ class MemcmpBA extends BufferAccess {
  *  _swab(src, dest, num)
  */
 class SwabBA extends BufferAccess {
-  SwabBA() {
-    this.(FunctionCall).getTarget().getName() = "swab" or
-    this.(FunctionCall).getTarget().getName() = "_swab"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  SwabBA() { this.(FunctionCall).getTarget().getName() = ["swab", "_swab"] }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
-    (
-      result = this.(FunctionCall).getArgument(0) and
-      bufferDesc = "source buffer" and
-      accessType = 1
-    ) or (
-      result = this.(FunctionCall).getArgument(1) and
-      bufferDesc = "destination buffer" and
-      accessType = 1
-    )
+    result = this.(FunctionCall).getArgument(0) and
+    bufferDesc = "source buffer" and
+    accessType = 1
+    or
+    result = this.(FunctionCall).getArgument(1) and
+    bufferDesc = "destination buffer" and
+    accessType = 1
   }
 
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -244,14 +210,9 @@ class SwabBA extends BufferAccess {
  *  wmemset(dest, value, num)
  */
 class MemsetBA extends BufferAccess {
-  MemsetBA() {
-    this.(FunctionCall).getTarget().getName() = "memset" or
-    this.(FunctionCall).getTarget().getName() = "wmemset"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  MemsetBA() { this.(FunctionCall).getTarget().getName() = ["memset", "wmemset"] }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
     result = this.(FunctionCall).getArgument(0) and
@@ -262,7 +223,7 @@ class MemsetBA extends BufferAccess {
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -271,13 +232,9 @@ class MemsetBA extends BufferAccess {
  *  RtlSecureZeroMemory(ptr, cnt)
  */
 class ZeroMemoryBA extends BufferAccess {
-  ZeroMemoryBA() {
-    this.(FunctionCall).getTarget().getName() = "RtlSecureZeroMemory"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  ZeroMemoryBA() { this.(FunctionCall).getTarget().getName() = "RtlSecureZeroMemory" }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
     result = this.(FunctionCall).getArgument(0) and
@@ -285,9 +242,7 @@ class ZeroMemoryBA extends BufferAccess {
     accessType = 1
   }
 
-  override int getSize() {
-    result = this.(FunctionCall).getArgument(1).getValue().toInt()
-  }
+  override int getSize() { result = this.(FunctionCall).getArgument(1).getValue().toInt() }
 }
 
 /**
@@ -296,14 +251,9 @@ class ZeroMemoryBA extends BufferAccess {
  *  wmemchr(buffer, value, num)
  */
 class MemchrBA extends BufferAccess {
-  MemchrBA() {
-    this.(FunctionCall).getTarget().getName() = "memchr" or
-    this.(FunctionCall).getTarget().getName() = "wmemchr"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  MemchrBA() { this.(FunctionCall).getTarget().getName() = ["memchr", "wmemchr"] }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
     result = this.(FunctionCall).getArgument(0) and
@@ -314,7 +264,7 @@ class MemchrBA extends BufferAccess {
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(2).getValue().toInt() *
-      getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
+        getPointedSize(this.(FunctionCall).getTarget().getParameter(0).getType())
   }
 }
 
@@ -323,13 +273,9 @@ class MemchrBA extends BufferAccess {
  *  fread(buffer, size, number, file)
  */
 class FreadBA extends BufferAccess {
-  FreadBA() {
-    this.(FunctionCall).getTarget().getName() = "fread"
-  }
-  
-  override string getName() {
-    result = this.(FunctionCall).getTarget().getName()
-  }
+  FreadBA() { this.(FunctionCall).getTarget().getName() = "fread" }
+
+  override string getName() { result = this.(FunctionCall).getTarget().getName() }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
     result = this.(FunctionCall).getArgument(0) and
@@ -340,7 +286,7 @@ class FreadBA extends BufferAccess {
   override int getSize() {
     result =
       this.(FunctionCall).getArgument(1).getValue().toInt() *
-      this.(FunctionCall).getArgument(2).getValue().toInt()
+        this.(FunctionCall).getArgument(2).getValue().toInt()
   }
 }
 
@@ -352,11 +298,8 @@ class FreadBA extends BufferAccess {
  */
 class ArrayExprBA extends BufferAccess {
   ArrayExprBA() {
-    exists(this.(ArrayExpr).getArrayOffset().getValue().toInt())
-    and
-    not exists(AddressOfExpr aoe | aoe.getAChild() = this)
-    and
-
+    exists(this.(ArrayExpr).getArrayOffset().getValue().toInt()) and
+    not exists(AddressOfExpr aoe | aoe.getAChild() = this) and
     // exclude accesses in macro implementation of `strcmp`,
     // which are carefully controlled but can look dangerous.
     not exists(Macro m |
@@ -365,9 +308,7 @@ class ArrayExprBA extends BufferAccess {
     )
   }
 
-  override string getName() {
-    result = "array indexing"
-  }
+  override string getName() { result = "array indexing" }
 
   override Expr getBuffer(string bufferDesc, int accessType) {
     result = this.(ArrayExpr).getArrayBase() and
@@ -380,6 +321,6 @@ class ArrayExprBA extends BufferAccess {
     // access
     result =
       (1 + this.(ArrayExpr).getArrayOffset().getValue().toInt()) *
-      this.(ArrayExpr).getType().getSize()
+        this.(ArrayExpr).getType().getSize()
   }
 }

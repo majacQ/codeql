@@ -1,76 +1,97 @@
 ﻿using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.IO;
 using System.Linq;
-using System.Text;
+using Semmle.Util;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class Compilation : FreshEntity
+    internal class Compilation : FreshEntity
     {
+        private readonly string cwd;
+        private readonly string[] args;
+
         public Compilation(Context cx, string cwd, string[] args) : base(cx)
+        {
+            this.cwd = cwd;
+            this.args = args;
+            TryPopulate();
+        }
+
+        protected override void Populate(TextWriter trapFile)
         {
             Extraction.Entities.Assembly.CreateOutputAssembly(cx);
 
-            cx.Emit(Tuples.compilations(this, Extraction.Entities.File.PathAsDatabaseString(cwd)));
+            trapFile.compilations(this, FileUtils.ConvertToUnix(cwd));
 
             // Arguments
-            int index = 0;
-            foreach(var arg in args)
+            var index = 0;
+            foreach (var arg in args)
             {
-                cx.Emit(Tuples.compilation_args(this, index++, arg));
+                trapFile.compilation_args(this, index++, arg);
             }
 
             // Files
             index = 0;
-            foreach(var file in cx.Compilation.SyntaxTrees.Select(tree => Extraction.Entities.File.Create(cx, tree.FilePath)))
+            foreach (var file in cx.Compilation.SyntaxTrees.Select(tree => Extraction.Entities.File.Create(cx, tree.FilePath)))
             {
-                cx.Emit(Tuples.compilation_compiling_files(this, index++, file));
+                trapFile.compilation_compiling_files(this, index++, file);
             }
 
             // References
             index = 0;
-            foreach(var file in cx.Compilation.References.OfType<PortableExecutableReference>().Select(r => Extraction.Entities.File.Create(cx, r.FilePath)))
+            foreach (var file in cx.Compilation.References.OfType<PortableExecutableReference>().Select(r => Extraction.Entities.File.Create(cx, r.FilePath)))
             {
-                cx.Emit(Tuples.compilation_referencing_files(this, index++, file));
+                trapFile.compilation_referencing_files(this, index++, file);
             }
 
             // Diagnostics
             index = 0;
-            foreach(var diag in cx.Compilation.GetDiagnostics().Select(d => new Diagnostic(cx, d)))
+            foreach (var diag in cx.Compilation.GetDiagnostics().Select(d => new Diagnostic(cx, d)))
             {
-                cx.Emit(Tuples.diagnostic_for(diag, this, 0, index++));
+                trapFile.diagnostic_for(diag, this, 0, index++);
             }
         }
 
         public void PopulatePerformance(PerformanceMetrics p)
         {
-            int index = 0;
-            foreach(float metric in p.Metrics)
+            var trapFile = cx.TrapWriter.Writer;
+            var index = 0;
+            foreach (var metric in p.Metrics)
             {
-                cx.Emit(Tuples.compilation_time(this, -1, index++, metric));
+                trapFile.compilation_time(this, -1, index++, metric);
             }
-            cx.Emit(Tuples.compilation_finished(this, (float)p.Total.Cpu.TotalSeconds, (float)p.Total.Elapsed.TotalSeconds));
+            trapFile.compilation_finished(this, (float)p.Total.Cpu.TotalSeconds, (float)p.Total.Elapsed.TotalSeconds);
         }
 
         public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.NoLabel;
     }
 
-    class Diagnostic : FreshEntity
+    internal class Diagnostic : FreshEntity
     {
         public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.NoLabel;
 
+        private readonly Microsoft.CodeAnalysis.Diagnostic diagnostic;
+
         public Diagnostic(Context cx, Microsoft.CodeAnalysis.Diagnostic diag) : base(cx)
         {
-            cx.Emit(Tuples.diagnostics(this, (int)diag.Severity, diag.Id, diag.Descriptor.Title.ToString(),
-                diag.GetMessage(), Extraction.Entities.Location.Create(cx, diag.Location)));
+            diagnostic = diag;
+            TryPopulate();
+        }
+
+        protected override void Populate(TextWriter trapFile)
+        {
+            trapFile.diagnostics(this, (int)diagnostic.Severity, diagnostic.Id, diagnostic.Descriptor.Title.ToString(),
+                diagnostic.GetMessage(), Extraction.Entities.Location.Create(cx, diagnostic.Location));
         }
     }
 
     public struct Timings
     {
-        public TimeSpan Elapsed, Cpu, User;
+        public TimeSpan Elapsed { get; set; }
+        public TimeSpan Cpu { get; set; }
+        public TimeSpan User { get; set; }
     }
 
     /// <summary>
@@ -78,8 +99,10 @@ namespace Semmle.Extraction.CSharp.Entities
     /// </summary>
     public struct PerformanceMetrics
     {
-        public Timings Frontend, Extractor, Total;
-        public long PeakWorkingSet;
+        public Timings Frontend { get; set; }
+        public Timings Extractor { get; set; }
+        public Timings Total { get; set; }
+        public long PeakWorkingSet { get; set; }
 
         /// <summary>
         /// These are in database order (0 indexed)

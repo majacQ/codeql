@@ -12,18 +12,16 @@
  */
 
 import cpp
+import semmle.code.cpp.models.implementations.Strcpy
 import semmle.code.cpp.dataflow.DataFlow
 
-predicate isStringComparisonFunction(string functionName) {
-  functionName = "strcpy" or
-  functionName = "wcscpy" or
-  functionName = "_mbscpy" or
-  functionName = "strncpy" or
-  functionName = "_strncpy_l" or
-  functionName = "wcsncpy" or
-  functionName = "_wcsncpy_l" or
-  functionName = "_mbsncpy" or
-  functionName = "_mbsncpy_l"
+/**
+ * A string copy function that returns a string, rather than an error code (for
+ * example, `strcpy` returns a string, whereas `strcpy_s` returns an error
+ * code).
+ */
+class InterestingStrcpyFunction extends StrcpyFunction {
+  InterestingStrcpyFunction() { getType().getUnspecifiedType() instanceof PointerType }
 }
 
 predicate isBoolean(Expr e1) {
@@ -34,14 +32,14 @@ predicate isBoolean(Expr e1) {
 }
 
 predicate isStringCopyCastedAsBoolean(FunctionCall func, Expr expr1, string msg) {
-  DataFlow::localFlow(DataFlow::exprNode(func), DataFlow::exprNode(expr1)) and
+  DataFlow::localExprFlow(func, expr1) and
   isBoolean(expr1.getConversion*()) and
-  isStringComparisonFunction(func.getTarget().getName()) and
+  func.getTarget() instanceof InterestingStrcpyFunction and
   msg = "Return value of " + func.getTarget().getName() + " used as a Boolean."
 }
 
 predicate isStringCopyUsedInLogicalOperationOrCondition(FunctionCall func, Expr expr1, string msg) {
-  isStringComparisonFunction(func.getTarget().getName()) and
+  func.getTarget() instanceof InterestingStrcpyFunction and
   (
     (
       // it is being used in an equality or logical operation
@@ -74,17 +72,16 @@ predicate isStringCopyUsedInLogicalOperationOrCondition(FunctionCall func, Expr 
         func = ce.getCondition()
       )
     ) and
-    msg = "Return value of " + func.getTarget().getName() +
+    msg =
+      "Return value of " + func.getTarget().getName() +
         " used directly in a conditional expression."
   )
 }
 
 from FunctionCall func, Expr expr1, string msg
 where
-  (
-    isStringCopyCastedAsBoolean(func, expr1, msg) and
-    not isStringCopyUsedInLogicalOperationOrCondition(func, _, _)
-  )
+  isStringCopyCastedAsBoolean(func, expr1, msg) and
+  not isStringCopyUsedInLogicalOperationOrCondition(func, _, _)
   or
   isStringCopyUsedInLogicalOperationOrCondition(func, expr1, msg)
 select expr1, msg

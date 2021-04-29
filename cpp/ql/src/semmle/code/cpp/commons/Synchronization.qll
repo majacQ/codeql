@@ -2,6 +2,7 @@
  * Utilities for analyzing synchronization primitives, such
  * as mutexes and semaphores.
  */
+
 import cpp
 
 /**
@@ -18,13 +19,12 @@ abstract class MutexType extends Type {
   /**
    * Holds if `fc` is a call that tries to lock mutex `arg`
    * of this type, but may return without success.
-   */ 
+   */
   abstract predicate trylockAccess(FunctionCall fc, Expr arg);
 
   /**
-   * Holds if `fc` is a call that unlocks mutex `arg`
-   * of this type.
-   */ 
+   * Holds if `fc` is a call that unlocks mutex `arg` of this type.
+   */
   abstract predicate unlockAccess(FunctionCall fc, Expr arg);
 
   /**
@@ -37,8 +37,7 @@ abstract class MutexType extends Type {
   }
 
   /**
-   * Holds if `fc` is a call that locks or tries to lock any
-   * mutex of this type.
+   * Gets a call that locks or tries to lock any mutex of this type.
    */
   FunctionCall getLockAccess() {
     result = getMustlockAccess() or
@@ -46,84 +45,70 @@ abstract class MutexType extends Type {
   }
 
   /**
-   * Holds if `fc` is a call that always locks any mutex of this type. 
+   * Gets a call that always locks any mutex of this type.
    */
-  FunctionCall getMustlockAccess() {
-    this.mustlockAccess(result, _)
-  }
+  FunctionCall getMustlockAccess() { this.mustlockAccess(result, _) }
 
   /**
-   * Holds if `fc` is a call that tries to lock any mutex of this type,
-   * by may return without success. 
+   * Gets a call that tries to lock any mutex of this type,
+   * by may return without success.
    */
-  FunctionCall getTrylockAccess() {
-    this.trylockAccess(result, _)
-  }
+  FunctionCall getTrylockAccess() { this.trylockAccess(result, _) }
 
   /**
-   * Holds if `fc` is a call that unlocks any mutex of this type. 
+   * Gets a call that unlocks any mutex of this type.
    */
-  FunctionCall getUnlockAccess() {
-    this.unlockAccess(result, _)
-  }
+  FunctionCall getUnlockAccess() { this.unlockAccess(result, _) }
 
   /**
-   * DEPRECATED: use mustlockAccess(fc, arg) instead
+   * DEPRECATED: use mustlockAccess(fc, arg) instead.
    */
-  deprecated Function getMustlockFunction() {
-    result = getMustlockAccess().getTarget()
-  }
+  deprecated Function getMustlockFunction() { result = getMustlockAccess().getTarget() }
 
   /**
-   * DEPRECATED: use trylockAccess(fc, arg) instead
+   * DEPRECATED: use trylockAccess(fc, arg) instead.
    */
-  deprecated Function getTrylockFunction() {
-    result = getTrylockAccess().getTarget()
-  }
+  deprecated Function getTrylockFunction() { result = getTrylockAccess().getTarget() }
 
   /**
-   * DEPRECATED: use lockAccess(fc, arg) instead
+   * DEPRECATED: use lockAccess(fc, arg) instead.
    */
-  deprecated Function getLockFunction() {
-    result = getLockAccess().getTarget()
-  }
+  deprecated Function getLockFunction() { result = getLockAccess().getTarget() }
 
   /**
-   * DEPRECATED: use unlockAccess(fc, arg) instead
+   * DEPRECATED: use unlockAccess(fc, arg) instead.
    */
-  deprecated Function getUnlockFunction() {
-    result = getUnlockAccess().getTarget()
-  }
+  deprecated Function getUnlockFunction() { result = getUnlockAccess().getTarget() }
 }
 
 /**
- * A function that looks like a lock function.
+ * Gets a function that looks like a lock function.
  */
 private Function mustlockCandidate() {
-  exists (string name
-  | name = result.getName()
-  | name = "lock" or
-    name.suffix(name.length() - 10) = "mutex_lock")
+  exists(string name | name = result.getName() |
+    name = "lock" or
+    name.suffix(name.length() - 10) = "mutex_lock"
+  )
 }
 
 /**
- * A function that looks like a try-lock function.
+ * Gets a function that looks like a try-lock function.
  */
 private Function trylockCandidate() {
-  exists (string name
-  | name = result.getName()
-  | name = "try_lock" or
-    name.suffix(name.length() - 13) = "mutex_trylock")
+  exists(string name | name = result.getName() |
+    name = "try_lock" or
+    name.suffix(name.length() - 13) = "mutex_trylock"
+  )
 }
 
 /**
- * A function that looks like an unlock function.
+ * Gets a function that looks like an unlock function.
  */
 private Function unlockCandidate() {
-  exists (string name
-  | name = result.getName()
-  | name = "unlock" or
-    name.suffix(name.length() - 12) = "mutex_unlock")
+  exists(string name | name = result.getName() |
+    name = "unlock" or
+    name.suffix(name.length() - 12) = "mutex_unlock"
+  )
 }
 
 /**
@@ -141,14 +126,13 @@ private Class lockArgTypeCandidate(Function fcn) {
 /**
  * A class or struct type that has both a lock and an unlock function
  * candidate, and is therefore a mutex.
- * 
+ *
  * This excludes types like `std::weak_ptr` which has a lock
  * method, but not an unlock method, and is not a mutex.)
  */
 class DefaultMutexType extends MutexType {
   DefaultMutexType() {
-    this = lockArgTypeCandidate(mustlockCandidate())
-    and
+    this = lockArgTypeCandidate(mustlockCandidate()) and
     this = lockArgTypeCandidate(unlockCandidate())
   }
 
@@ -156,17 +140,17 @@ class DefaultMutexType extends MutexType {
     exists(int n |
       arg = fc.getArgument(n) and
       fc.getTarget().getParameter(n).getType().stripType() = this
-    ) or (
-      fc.getTarget().getDeclaringType() = this and
-      arg = fc.getQualifier()
-    ) or (
-      // if we're calling our own method with an implicit `this`,
-      // let `arg` be the function call, since we don't really have
-      // anything else to use.
-      fc.getTarget().getDeclaringType() = this and
-      not exists(fc.getQualifier()) and
-      arg = fc
     )
+    or
+    fc.getTarget().getDeclaringType() = this and
+    arg = fc.getQualifier()
+    or
+    // if we're calling our own method with an implicit `this`,
+    // let `arg` be the function call, since we don't really have
+    // anything else to use.
+    fc.getTarget().getDeclaringType() = this and
+    not exists(fc.getQualifier()) and
+    arg = fc
   }
 
   override predicate mustlockAccess(FunctionCall fc, Expr arg) {
@@ -185,7 +169,10 @@ class DefaultMutexType extends MutexType {
   }
 }
 
-/** Get the mutex argument of a call to lock or unlock. */
+/**
+ * Holds if `arg` is the mutex argument of a call to lock or unlock and
+ * `argType` is the type of the mutex.
+ */
 private predicate lockArg(Expr arg, MutexType argType, FunctionCall call) {
   argType = arg.getUnderlyingType().stripType() and
   (
@@ -198,18 +185,31 @@ private predicate lockArg(Expr arg, MutexType argType, FunctionCall call) {
   //       `MutexType.mustlockAccess`.
 }
 
+/**
+ * Holds if `call` is a call that locks or tries to lock its argument `arg`.
+ */
 predicate lockCall(Expr arg, FunctionCall call) {
   exists(MutexType t | lockArg(arg, t, call) and call = t.getLockAccess())
 }
 
+/**
+ * Holds if `call` is a call that always locks its argument `arg`.
+ */
 predicate mustlockCall(Expr arg, FunctionCall call) {
   exists(MutexType t | lockArg(arg, t, call) and call = t.getMustlockAccess())
 }
 
+/**
+ * Holds if `call` is a call that tries to lock its argument `arg`, but may
+ * return without success.
+ */
 predicate trylockCall(Expr arg, FunctionCall call) {
   exists(MutexType t | lockArg(arg, t, call) and call = t.getTrylockAccess())
 }
 
+/**
+ * Holds if `call` is a call that unlocks its argument `arg`.
+ */
 predicate unlockCall(Expr arg, FunctionCall call) {
   exists(MutexType t | lockArg(arg, t, call) and call = t.getUnlockAccess())
 }

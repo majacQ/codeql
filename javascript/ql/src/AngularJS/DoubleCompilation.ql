@@ -7,6 +7,7 @@
  * @id js/angular/double-compilation
  * @tags reliability
  *       frameworks/angularjs
+ *       security
  * @precision very-high
  */
 
@@ -15,7 +16,8 @@ import javascript
 from AngularJS::ServiceReference compile, SimpleParameter elem, CallExpr c
 where
   compile.getName() = "$compile" and
-  elem = any(AngularJS::CustomDirective d)
+  elem =
+    any(AngularJS::CustomDirective d)
         .getALinkFunction()
         .(AngularJS::LinkFunction)
         .getElementParameter() and

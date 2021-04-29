@@ -62,7 +62,7 @@ predicate nonEscapingCall(Call c) {
 predicate mayEscape(LocalVariable v) {
   exists(Callable c, Expr e, Expr succ | c = getACapturingCallableAncestor(v) |
     e = getADelegateExpr(c) and
-    DataFlow::localFlow(DataFlow::exprNode(e), DataFlow::exprNode(succ)) and
+    DataFlow::localExprFlow(e, succ) and
     not succ = any(DelegateCall dc).getDelegateExpr() and
     not succ = any(Cast cast).getExpr() and
     not succ = any(Call call | nonEscapingCall(call)).getAnArgument() and
@@ -82,9 +82,12 @@ class RelevantDefinition extends AssignableDefinition {
     // for now
     //or
     //this.(AssignableDefinitions::OutRefDefinition).getTargetAccess().isOutArgument()
-    this.(AssignableDefinitions::LocalVariableDefinition).getDeclaration() = any(LocalVariableDeclExpr lvde |
-        lvde = any(SpecificCatchClause scc).getVariableDeclExpr() or
-        lvde = any(ForeachStmt fs).getVariableDeclExpr()
+    this.(AssignableDefinitions::LocalVariableDefinition).getDeclaration() =
+      any(LocalVariableDeclExpr lvde |
+        lvde = any(SpecificCatchClause scc).getVariableDeclExpr()
+        or
+        lvde = any(ForeachStmt fs).getVariableDeclExpr() and
+        not lvde.getName() = "_"
       )
     or
     this instanceof AssignableDefinitions::PatternDefinition
@@ -111,7 +114,7 @@ class RelevantDefinition extends AssignableDefinition {
    */
   private predicate isDefaultLikeInitializer() {
     this.isInitializer() and
-    exists(Expr e | e = this.getSource() |
+    exists(Expr e | e = this.getSource().stripCasts() |
       exists(string val | val = e.getValue() |
         val = "0" or
         val = "-1" or
@@ -121,7 +124,8 @@ class RelevantDefinition extends AssignableDefinition {
       or
       e instanceof NullLiteral
       or
-      e = any(Field f |
+      e =
+        any(Field f |
           f.isStatic() and
           (f.isReadOnly() or f.isConst())
         ).getAnAccess()

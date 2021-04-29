@@ -113,6 +113,7 @@ class ControlFlowNode extends Top, @exprparent {
     result = succ(this, NormalCompletion())
   }
 
+  /** Gets the basic block that contains this node. */
   BasicBlock getBasicBlock() { result.getANode() = this }
 }
 
@@ -289,8 +290,6 @@ private module ControlFlowGraphImpl {
       logexpr.(UnaryExpr).getExpr() = b and inBooleanContext(logexpr)
     )
     or
-    exists(ParExpr parexpr | parexpr.getExpr() = b and inBooleanContext(parexpr))
-    or
     exists(ConditionalExpr condexpr |
       condexpr.getCondition() = b
       or
@@ -339,7 +338,7 @@ private module ControlFlowGraphImpl {
 
   /** Holds if a call to `m` indicates that `m` is expected to return. */
   private predicate expectedReturn(EffectivelyNonVirtualMethod m) {
-    exists(Stmt s, Block b |
+    exists(Stmt s, BlockStmt b |
       m.getAnAccess().getEnclosingStmt() = s and
       b.getAStmt() = s and
       not b.getLastStmt() = s
@@ -353,7 +352,7 @@ private module ControlFlowGraphImpl {
     result instanceof MethodExit
     or
     not result.isOverridable() and
-    exists(Block body |
+    exists(BlockStmt body |
       body = result.getBody() and
       not exists(ReturnStmt ret | ret.getEnclosingCallable() = result)
     |
@@ -389,7 +388,7 @@ private module ControlFlowGraphImpl {
     or
     result.(ExprStmt).getExpr() = nonReturningMethodAccess()
     or
-    result.(Block).getLastStmt() = nonReturningStmt()
+    result.(BlockStmt).getLastStmt() = nonReturningStmt()
     or
     exists(IfStmt ifstmt | ifstmt = result |
       ifstmt.getThen() = nonReturningStmt() and
@@ -406,7 +405,7 @@ private module ControlFlowGraphImpl {
    * Expressions and statements with CFG edges in post-order AST traversal.
    *
    * This includes most expressions, except those that initiate or propagate branching control
-   * flow (`LogicExpr`, `ConditionalExpr`), and parentheses, which aren't in the CFG.
+   * flow (`LogicExpr`, `ConditionalExpr`).
    * Only a few statements are included; those with specific side-effects
    * occurring after the evaluation of their children, that is, `Call`, `ReturnStmt`,
    * and `ThrowStmt`. CFG nodes without child nodes in the CFG that may complete
@@ -430,9 +429,10 @@ private module ControlFlowGraphImpl {
       or
       this instanceof CastExpr
       or
-      this instanceof InstanceOfExpr
+      this instanceof InstanceOfExpr and not this.(InstanceOfExpr).isPattern()
       or
-      this instanceof LocalVariableDeclExpr
+      this instanceof LocalVariableDeclExpr and
+      not this = any(InstanceOfExpr ioe).getLocalVariableDeclExpr()
       or
       this instanceof RValue
       or
@@ -450,7 +450,7 @@ private module ControlFlowGraphImpl {
       or
       this instanceof SuperAccess
       or
-      this.(Block).getNumStmt() = 0
+      this.(BlockStmt).getNumStmt() = 0
       or
       this instanceof SwitchCase and not this.(SwitchCase).isRule()
       or
@@ -574,7 +574,7 @@ private module ControlFlowGraphImpl {
     or
     result = first(n.(PostOrderNode).firstChild())
     or
-    result = first(n.(ParExpr).getExpr())
+    result = first(n.(InstanceOfExpr).getExpr())
     or
     result = first(n.(SynchronizedStmt).getExpr())
     or
@@ -582,6 +582,8 @@ private module ControlFlowGraphImpl {
     n instanceof Stmt and
     not n instanceof PostOrderNode and
     not n instanceof SynchronizedStmt
+    or
+    result = n and n instanceof SwitchExpr
   }
 
   /**
@@ -708,8 +710,11 @@ private module ControlFlowGraphImpl {
       last(condexpr.getTrueExpr(), last, completion)
     )
     or
-    // Parentheses are skipped in the CFG.
-    last(n.(ParExpr).getExpr(), last, completion)
+    exists(InstanceOfExpr ioe | ioe.isPattern() and ioe = n |
+      last = n and completion = basicBooleanCompletion(false)
+      or
+      last = ioe.getLocalVariableDeclExpr() and completion = basicBooleanCompletion(true)
+    )
     or
     // The last node of a node executed in post-order is the node itself.
     n.(PostOrderNode).mayCompleteNormally() and last = n and completion = NormalCompletion()
@@ -718,7 +723,7 @@ private module ControlFlowGraphImpl {
     or
     // The last statement in a block is any statement that does not complete normally,
     // or the last statement.
-    exists(Block blk | blk = n |
+    exists(BlockStmt blk | blk = n |
       last(blk.getAStmt(), last, completion) and completion != NormalCompletion()
       or
       last(blk.getStmt(blk.getNumStmt() - 1), last, completion)
@@ -804,23 +809,23 @@ private module ControlFlowGraphImpl {
     or
     // handle `switch` expression
     exists(SwitchExpr switch | switch = n |
-      // value `break` terminates the `switch`
-      last(switch.getAStmt(), last, ValueBreakCompletion(completion))
+      // `yield` terminates the `switch`
+      last(switch.getAStmt(), last, YieldCompletion(completion))
       or
       // any other abnormal completion is propagated
       last(switch.getAStmt(), last, completion) and
-      not completion instanceof ValueBreakCompletion and
+      not completion instanceof YieldCompletion and
       completion != NormalCompletion()
     )
     or
     // the last node in a case rule is the last node in the right-hand side
     last(n.(SwitchCase).getRuleStatement(), last, completion)
     or
-    // ...and if the rhs is an expression we wrap the completion as a value break
+    // ...and if the rhs is an expression we wrap the completion as a yield
     exists(Completion caseCompletion |
       last(n.(SwitchCase).getRuleExpression(), last, caseCompletion) and
       if caseCompletion instanceof NormalOrBooleanCompletion
-      then completion = ValueBreakCompletion(caseCompletion)
+      then completion = YieldCompletion(caseCompletion)
       else completion = caseCompletion
     )
     or
@@ -833,18 +838,18 @@ private module ControlFlowGraphImpl {
     // `throw` statements or throwing calls give rise to ` Throw` completion
     exists(ThrowableType tt | mayThrow(n, tt) | last = n and completion = ThrowCompletion(tt))
     or
-    // `break` statements without value give rise to a `Break` completion
-    exists(BreakStmt break | break = n and last = n and not break.hasValue() |
+    // `break` statements give rise to a `Break` completion
+    exists(BreakStmt break | break = n and last = n |
       completion = labelledBreakCompletion(MkLabel(break.getLabel()))
       or
       not exists(break.getLabel()) and completion = anonymousBreakCompletion()
     )
     or
-    // value break statements get their completion wrapped as a value break
+    // yield statements get their completion wrapped as a yield
     exists(Completion caseCompletion |
-      last(n.(BreakStmt).getValue(), last, caseCompletion) and
+      last(n.(YieldStmt).getValue(), last, caseCompletion) and
       if caseCompletion instanceof NormalOrBooleanCompletion
-      then completion = ValueBreakCompletion(caseCompletion)
+      then completion = YieldCompletion(caseCompletion)
       else completion = caseCompletion
     )
     or
@@ -920,6 +925,14 @@ private module ControlFlowGraphImpl {
       result = first(e.getFalseExpr())
     )
     or
+    exists(InstanceOfExpr ioe | ioe.isPattern() |
+      last(ioe.getExpr(), n, completion) and completion = NormalCompletion() and result = ioe
+      or
+      n = ioe and
+      result = ioe.getLocalVariableDeclExpr() and
+      completion = basicBooleanCompletion(true)
+    )
+    or
     // In other expressions control flows from left to right and ends in the node itself.
     exists(PostOrderNode p, int i |
       last(p.getChildNode(i), n, completion) and completion = NormalCompletion()
@@ -930,9 +943,9 @@ private module ControlFlowGraphImpl {
     )
     or
     // Statements within a block execute sequentially.
-    result = first(n.(Block).getStmt(0)) and completion = NormalCompletion()
+    result = first(n.(BlockStmt).getStmt(0)) and completion = NormalCompletion()
     or
-    exists(Block blk, int i |
+    exists(BlockStmt blk, int i |
       last(blk.getStmt(i), n, completion) and
       completion = NormalCompletion() and
       result = first(blk.getStmt(i + 1))
@@ -1112,9 +1125,9 @@ private module ControlFlowGraphImpl {
       n = case and result = first(case.getRuleStatement())
     )
     or
-    // Value break
-    exists(BreakStmt break | completion = NormalCompletion() |
-      n = break and result = first(break.getValue())
+    // Yield
+    exists(YieldStmt yield | completion = NormalCompletion() |
+      n = yield and result = first(yield.getValue())
     )
     or
     // Synchronized statements execute their expression _before_ synchronization, so the CFG reflects that.
@@ -1203,6 +1216,7 @@ private module ControlFlowGraphImpl {
     result = otherBranchSucc(n, branch)
   }
 }
+
 private import ControlFlowGraphImpl
 
 /** A control-flow node that branches based on a condition. */

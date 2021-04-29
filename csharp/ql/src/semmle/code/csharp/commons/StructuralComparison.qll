@@ -77,7 +77,7 @@ abstract class StructuralComparisonConfiguration extends string {
 
   private predicate sameByValue(Expr x, Expr y) { sameByValueAux(x, y, y.getValue()) }
 
-  pragma[noinline]
+  pragma[nomagic]
   private predicate sameByValueAux(Expr x, Expr y, string value) {
     candidateInternal(x, y) and
     value = x.getValue()
@@ -85,7 +85,8 @@ abstract class StructuralComparisonConfiguration extends string {
 
   private ControlFlowElement getRankedChild(ControlFlowElement cfe, int rnk, int i) {
     (candidateInternal(cfe, _) or candidateInternal(_, cfe)) and
-    i = rank[rnk](int j |
+    i =
+      rank[rnk](int j |
         exists(ControlFlowElement child | child = cfe.getChild(j) |
           not (j = -1 and cfe.(MemberAccess).targetIsThisInstance())
         )
@@ -202,7 +203,7 @@ module Internal {
 
     private predicate sameByValue(Expr x, Expr y) { sameByValueAux(x, y, y.getValue()) }
 
-    pragma[noinline]
+    pragma[nomagic]
     private predicate sameByValueAux(Expr x, Expr y, string value) {
       candidateInternal(x, y) and
       value = x.getValue()
@@ -210,7 +211,8 @@ module Internal {
 
     private ControlFlowElement getRankedChild(ControlFlowElement cfe, int rnk, int i) {
       (candidateInternal(cfe, _) or candidateInternal(_, cfe)) and
-      i = rank[rnk](int j |
+      i =
+        rank[rnk](int j |
           exists(ControlFlowElement child | child = cfe.getChild(j) |
             not (j = -1 and cfe.(MemberAccess).targetIsThisInstance())
           )

@@ -4,7 +4,7 @@
  * Provides classes implementing type inference across imports.
  */
 
-import javascript
+private import javascript
 private import AbstractValuesImpl
 private import semmle.javascript.dataflow.InferredTypes
 private import AbstractPropertiesImpl
@@ -12,7 +12,7 @@ private import AbstractPropertiesImpl
 /**
  * Flow analysis for ECMAScript 2015 imports as variable definitions.
  */
-private class AnalyzedImportSpecifier extends AnalyzedVarDef, @importspecifier {
+private class AnalyzedImportSpecifier extends AnalyzedVarDef, @import_specifier {
   ImportDeclaration id;
 
   AnalyzedImportSpecifier() { this = id.getASpecifier() and exists(id.resolveImportedPath()) }
@@ -65,7 +65,7 @@ private predicate mayDynamicallyComputeExports(Module m) {
   or
   // `m` re-exports all exports of some other module that dynamically computes its exports
   exists(BulkReExportDeclaration rexp | rexp = m.(ES2015Module).getAnExport() |
-    mayDynamicallyComputeExports(rexp.getImportedModule())
+    mayDynamicallyComputeExports(rexp.getReExportedModule())
   )
 }
 
@@ -79,7 +79,7 @@ private predicate relevantExport(ES2015Module m, string x) {
   )
   or
   exists(ReExportDeclaration rexp, string y |
-    rexp.getImportedModule() = m and
+    rexp.getReExportedModule() = m and
     reExportsAs(rexp, x, y)
   )
 }
@@ -110,9 +110,9 @@ private predicate incompleteExport(ES2015Module m, string y) {
       mayDependOnLookupPath(rexp.getImportedPath().getStringValue())
       or
       // unresolvable path
-      not exists(rexp.getImportedModule())
+      not exists(rexp.getReExportedModule())
       or
-      exists(Module n | n = rexp.getImportedModule() |
+      exists(Module n | n = rexp.getReExportedModule() |
         // re-export from CommonJS/AMD
         mayDynamicallyComputeExports(n)
         or
@@ -263,7 +263,8 @@ private class AnalyzedAmdImport extends AnalyzedPropertyRead, DataFlow::Node {
         requireCall = amd.getDefine().getARequireCall() and
         dep = requireCall.getAnArgument() and
         this = requireCall.flow()
-      ) |
+      )
+    |
       required = dep.(Import).getImportedModule()
     )
   }
@@ -277,7 +278,7 @@ private class AnalyzedAmdImport extends AnalyzedPropertyRead, DataFlow::Node {
 /**
  * Flow analysis for parameters corresponding to AMD imports.
  */
-private class AnalyzedAmdParameter extends AnalyzedVarDef, @vardecl {
+private class AnalyzedAmdParameter extends AnalyzedVarDef, @var_decl {
   AnalyzedAmdImport imp;
 
   AnalyzedAmdParameter() { imp = DataFlow::parameterNode(this) }
@@ -290,7 +291,6 @@ private class AnalyzedAmdParameter extends AnalyzedVarDef, @vardecl {
  */
 private class AnalyzedValueExport extends AnalyzedPropertyWrite, DataFlow::ValueNode {
   ExportDeclaration export;
-
   string name;
 
   AnalyzedValueExport() { this = export.getSourceNode(name) }
@@ -307,9 +307,7 @@ private class AnalyzedValueExport extends AnalyzedPropertyWrite, DataFlow::Value
  */
 private class AnalyzedVariableExport extends AnalyzedPropertyWrite, DataFlow::ValueNode {
   ExportDeclaration export;
-
   string name;
-
   AnalyzedVarDef varDef;
 
   AnalyzedVariableExport() {
@@ -320,7 +318,12 @@ private class AnalyzedVariableExport extends AnalyzedPropertyWrite, DataFlow::Va
   override predicate writes(AbstractValue baseVal, string propName, DataFlow::AnalyzedNode source) {
     baseVal = TAbstractExportsObject(export.getEnclosingModule()) and
     propName = name and
-    source = varDef.getSource().analyze()
+    (
+      source = varDef.getSource().analyze()
+      or
+      varDef.getTarget() instanceof DestructuringPattern and
+      source = export.getSourceNode(propName)
+    )
   }
 
   override predicate writesValue(AbstractValue baseVal, string propName, AbstractValue val) {
@@ -370,7 +373,6 @@ private class AnalyzedExportAssign extends AnalyzedPropertyWrite, DataFlow::Valu
  */
 private class AnalyzedClosureExportAssign extends AnalyzedPropertyWrite, DataFlow::ValueNode {
   override AssignExpr astNode;
-
   Closure::ClosureModule mod;
 
   AnalyzedClosureExportAssign() { astNode.getLhs() = mod.getExportsVariable().getAReference() }
@@ -394,18 +396,30 @@ private class AnalyzedClosureGlobalAccessPath extends AnalyzedNode, AnalyzedProp
     accessPath = Closure::getClosureNamespaceFromSourceNode(this)
   }
 
-  override AnalyzedNode globalFlowPred() {
-    exists(DataFlow::PropWrite write |
-      Closure::getWrittenClosureNamespace(write) = accessPath and
-      result = write.getRhs()
-    )
-  }
-
   override predicate reads(AbstractValue base, string propName) {
     exists(Closure::ClosureModule mod |
       mod.getClosureNamespace() = accessPath and
       base = TAbstractModuleObject(mod) and
       propName = "exports"
     )
+  }
+}
+
+/**
+ * A namespace export declaration analyzed as a property write.
+ */
+private class AnalyzedExportNamespaceSpecifier extends AnalyzedPropertyWrite, DataFlow::ValueNode {
+  override ExportNamespaceSpecifier astNode;
+  ReExportDeclaration decl;
+
+  AnalyzedExportNamespaceSpecifier() {
+    decl = astNode.getExportDeclaration() and
+    not decl.isTypeOnly()
+  }
+
+  override predicate writesValue(AbstractValue baseVal, string propName, AbstractValue value) {
+    baseVal = TAbstractExportsObject(getTopLevel()) and
+    propName = astNode.getExportedName() and
+    value = TAbstractExportsObject(decl.getReExportedModule())
   }
 }

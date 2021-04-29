@@ -1,12 +1,13 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.CSharp.Entities.Expressions;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class Using : Statement<UsingStatementSyntax>
+    internal class Using : Statement<UsingStatementSyntax>
     {
-        Using(Context cx, UsingStatementSyntax node, IStatementParentEntity parent, int child)
+        private Using(Context cx, UsingStatementSyntax node, IStatementParentEntity parent, int child)
             : base(cx, node, StmtKind.USING, parent, child) { }
 
         public static Using Create(Context cx, UsingStatementSyntax node, IStatementParentEntity parent, int child)
@@ -16,7 +17,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             if (Stmt.Declaration != null)
                 VariableDeclarations.Populate(cx, Stmt.Declaration, this, -1, childIncrement: -1);

@@ -15,8 +15,12 @@ import semmle.code.java.frameworks.ApacheHttp
 import semmle.code.java.frameworks.android.XmlParsing
 import semmle.code.java.frameworks.android.WebView
 import semmle.code.java.frameworks.JaxWS
+import semmle.code.java.frameworks.javase.WebSocket
+import semmle.code.java.frameworks.android.Android
 import semmle.code.java.frameworks.android.Intent
-import semmle.code.java.frameworks.SpringWeb
+import semmle.code.java.frameworks.spring.SpringWeb
+import semmle.code.java.frameworks.spring.SpringController
+import semmle.code.java.frameworks.spring.SpringWebClient
 import semmle.code.java.frameworks.Guice
 import semmle.code.java.frameworks.struts.StrutsActions
 import semmle.code.java.frameworks.Thrift
@@ -103,9 +107,39 @@ private class MessageBodyReaderParameterSource extends RemoteFlowSource {
   override string getSourceType() { result = "MessageBodyReader parameter" }
 }
 
+private class SpringMultipartRequestSource extends RemoteFlowSource {
+  SpringMultipartRequestSource() {
+    exists(MethodAccess ma, Method m |
+      ma = this.asExpr() and
+      m = ma.getMethod() and
+      m.getDeclaringType()
+          .getASourceSupertype*()
+          .hasQualifiedName("org.springframework.web.multipart", "MultipartRequest") and
+      m.getName().matches("get%")
+    )
+  }
+
+  override string getSourceType() { result = "Spring MultipartRequest getter" }
+}
+
+private class SpringMultipartFileSource extends RemoteFlowSource {
+  SpringMultipartFileSource() {
+    exists(MethodAccess ma, Method m |
+      ma = this.asExpr() and
+      m = ma.getMethod() and
+      m.getDeclaringType()
+          .getASourceSupertype*()
+          .hasQualifiedName("org.springframework.web.multipart", "MultipartFile") and
+      m.getName().matches("get%")
+    )
+  }
+
+  override string getSourceType() { result = "Spring MultipartFile getter" }
+}
+
 private class SpringServletInputParameterSource extends RemoteFlowSource {
   SpringServletInputParameterSource() {
-    this.asParameter().getAnAnnotation() instanceof SpringServletInputAnnotation
+    this.asParameter() = any(SpringRequestMappingParameter srmp | srmp.isTaintedInput())
   }
 
   override string getSourceType() { result = "Spring servlet input parameter" }
@@ -140,85 +174,47 @@ private class ThriftIfaceParameterSource extends RemoteFlowSource {
   override string getSourceType() { result = "Thrift Iface parameter" }
 }
 
+private class WebSocketMessageParameterSource extends RemoteFlowSource {
+  WebSocketMessageParameterSource() {
+    exists(WebsocketOnText t | t.getParameter(1) = this.asParameter())
+  }
+
+  override string getSourceType() { result = "Websocket onText parameter" }
+}
+
+private class BeanValidationSource extends RemoteFlowSource {
+  BeanValidationSource() {
+    exists(Method m, Parameter v |
+      this.asParameter() = v and
+      m.getParameter(0) = v and
+      m.getDeclaringType()
+          .getASourceSupertype+()
+          .hasQualifiedName("javax.validation", "ConstraintValidator") and
+      m.hasName("isValid") and
+      m.fromSource()
+    )
+  }
+
+  override string getSourceType() { result = "BeanValidation source" }
+}
+
 /** Class for `tainted` user input. */
 abstract class UserInput extends DataFlow::Node { }
 
 /**
- * DEPRECATED: Use `RemoteFlowSource` instead.
- *
  * Input that may be controlled by a remote user.
  */
-deprecated class RemoteUserInput extends UserInput {
+private class RemoteUserInput extends UserInput {
   RemoteUserInput() { this instanceof RemoteFlowSource }
-
-  /**
-   * DEPRECATED: Use a configuration with a defined sink instead.
-   *
-   * Holds if taint can flow from this `RemoteUserInput` to `sink`.
-   *
-   * In addition to the basic taint flow, this allows a path to end in a number
-   * of steps through instance fields.
-   */
-  deprecated predicate flowsTo(DataFlow::Node sink) { remoteUserInputFlow(this, sink) }
 }
 
-/**
- * Holds if taint can flow from `node1` to `node2` in either one local step or
- * through an instance field.
- */
-private predicate localInstanceFieldStep(DataFlow::Node node1, DataFlow::Node node2) {
-  TaintTracking::localTaintStep(node1, node2)
-  or
-  exists(InstanceField field |
-    node1.asExpr() = field.getAnAssignedValue()
-    or
-    exists(Assignment assign | assign.getRhs() = node1.asExpr() |
-      assign.getDest().(ArrayAccess).getArray() = field.getAnAccess()
-    )
-  |
-    node2.asExpr() = field.getAnAccess()
-  )
-}
-
-private module RemoteUserInputFlow {
-  private import semmle.code.java.dataflow.internal.DataFlowImplDepr
-  private import semmle.code.java.security.SecurityTests
-  private import semmle.code.java.security.Validation
-
-  deprecated class RemoteUserInputConfig extends Configuration {
-    RemoteUserInputConfig() { this = "FlowSources.qll:RemoteUserInputConfig" }
-
-    override predicate isSource(DataFlow::Node source) { source instanceof RemoteUserInput }
-
-    override predicate isSink(DataFlow::Node sink) { any() }
-
-    override int fieldFlowBranchLimit() { result = 0 }
-
-    override predicate isBarrier(DataFlow::Node node) {
-      // Ignore paths through test code.
-      node.getEnclosingCallable().getDeclaringType() instanceof NonSecurityTestClass or
-      exists(ValidatedVariable var | node.asExpr() = var.getAnAccess())
-    }
-
-    override predicate isAdditionalFlowStep(DataFlow::Node node1, DataFlow::Node node2) {
-      TaintTracking::localAdditionalTaintStep(node1, node2)
-    }
-  }
-}
-
-cached
-deprecated private predicate remoteUserInputFlow(RemoteUserInput src, DataFlow::Node sink) {
-  any(RemoteUserInputFlow::RemoteUserInputConfig config).hasFlow(src, sink)
-  or
-  exists(DataFlow::Node mid |
-    remoteUserInputFlow(src, mid) and
-    localInstanceFieldStep(mid, sink)
-  )
-}
-
-/** Input that may be controlled by a local user. */
+/** A node with input that may be controlled by a local user. */
 abstract class LocalUserInput extends UserInput { }
 
+/**
+ * A node with input from the local environment, such as files, standard in,
+ * environment variables, and main method parameters.
+ */
 class EnvInput extends LocalUserInput {
   EnvInput() {
     // Parameters to a main method.
@@ -236,14 +232,14 @@ class EnvInput extends LocalUserInput {
     exists(Field f | this.asExpr() = f.getAnAccess() | f instanceof SystemIn)
     or
     // Access to files.
-    this
-        .asExpr()
+    this.asExpr()
         .(ConstructorCall)
         .getConstructedType()
         .hasQualifiedName("java.io", "FileInputStream")
   }
 }
 
+/** A node with input from a database. */
 class DatabaseInput extends LocalUserInput {
   DatabaseInput() { this.asExpr().(MethodAccess).getMethod() instanceof ResultSetGetStringMethod }
 }
@@ -261,6 +257,8 @@ private class RemoteTaintedMethod extends Method {
     this instanceof HttpServletRequestGetRequestURIMethod or
     this instanceof HttpServletRequestGetRequestURLMethod or
     this instanceof HttpServletRequestGetRemoteUserMethod or
+    this instanceof SpringWebRequestGetMethod or
+    this instanceof SpringRestTemplateResponseEntityMethod or
     this instanceof ServletRequestGetBodyMethod or
     this instanceof CookieGetValueMethod or
     this instanceof CookieGetNameMethod or
@@ -278,6 +276,22 @@ private class RemoteTaintedMethod extends Method {
   }
 }
 
+private class SpringWebRequestGetMethod extends Method {
+  SpringWebRequestGetMethod() {
+    exists(SpringWebRequest swr | this = swr.getAMethod() |
+      this.hasName("getDescription") or
+      this.hasName("getHeader") or
+      this.hasName("getHeaderNames") or
+      this.hasName("getHeaderValues") or
+      this.hasName("getParameter") or
+      this.hasName("getParameterMap") or
+      this.hasName("getParameterNames") or
+      this.hasName("getParameterValues")
+      // TODO consider getRemoteUser
+    )
+  }
+}
+
 private class EnvTaintedMethod extends Method {
   EnvTaintedMethod() {
     this instanceof MethodSystemGetenv or
@@ -286,10 +300,12 @@ private class EnvTaintedMethod extends Method {
   }
 }
 
+/** The type `java.net.InetAddress`. */
 class TypeInetAddr extends RefType {
   TypeInetAddr() { this.getQualifiedName() = "java.net.InetAddress" }
 }
 
+/** A reverse DNS method. */
 class ReverseDNSMethod extends Method {
   ReverseDNSMethod() {
     this.getDeclaringType() instanceof TypeInetAddr and
@@ -302,15 +318,26 @@ class ReverseDNSMethod extends Method {
 
 /** Android `Intent` that may have come from a hostile application. */
 class AndroidIntentInput extends DataFlow::Node {
+  Type receiverType;
+
   AndroidIntentInput() {
     exists(MethodAccess ma, AndroidGetIntentMethod m |
       ma.getMethod().overrides*(m) and
-      this.asExpr() = ma
+      this.asExpr() = ma and
+      receiverType = ma.getReceiverType()
     )
     or
     exists(Method m, AndroidReceiveIntentMethod rI |
       m.overrides*(rI) and
-      this.asParameter() = m.getParameter(1)
+      this.asParameter() = m.getParameter(1) and
+      receiverType = m.getDeclaringType()
     )
   }
+}
+
+/** Exported Android `Intent` that may have come from a hostile application. */
+class ExportedAndroidIntentInput extends RemoteFlowSource, AndroidIntentInput {
+  ExportedAndroidIntentInput() { receiverType.(ExportableAndroidComponent).isExported() }
+
+  override string getSourceType() { result = "Exported Android intent source" }
 }

@@ -6,6 +6,7 @@ import com.semmle.js.ast.INode;
 import com.semmle.js.ast.Identifier;
 import com.semmle.js.ast.Literal;
 import com.semmle.js.ast.MemberExpression;
+import com.semmle.js.ast.TemplateElement;
 import com.semmle.js.extractor.ASTExtractor.IdContext;
 import com.semmle.ts.ast.ArrayTypeExpr;
 import com.semmle.ts.ast.ConditionalTypeExpr;
@@ -16,16 +17,17 @@ import com.semmle.ts.ast.IndexedAccessTypeExpr;
 import com.semmle.ts.ast.InferTypeExpr;
 import com.semmle.ts.ast.InterfaceTypeExpr;
 import com.semmle.ts.ast.IntersectionTypeExpr;
-import com.semmle.ts.ast.IsTypeExpr;
-import com.semmle.ts.ast.UnaryTypeExpr;
 import com.semmle.ts.ast.KeywordTypeExpr;
 import com.semmle.ts.ast.MappedTypeExpr;
 import com.semmle.ts.ast.OptionalTypeExpr;
 import com.semmle.ts.ast.ParenthesizedTypeExpr;
+import com.semmle.ts.ast.PredicateTypeExpr;
 import com.semmle.ts.ast.RestTypeExpr;
+import com.semmle.ts.ast.TemplateLiteralTypeExpr;
 import com.semmle.ts.ast.TupleTypeExpr;
 import com.semmle.ts.ast.TypeParameter;
 import com.semmle.ts.ast.TypeofTypeExpr;
+import com.semmle.ts.ast.UnaryTypeExpr;
 import com.semmle.ts.ast.UnionTypeExpr;
 import com.semmle.util.exception.CatastrophicError;
 
@@ -67,6 +69,7 @@ public class TypeExprKinds {
   private static final int restTypeExpr = 34;
   private static final int bigintLiteralTypeExpr = 35;
   private static final int readonlyTypeExpr = 36;
+  private static final int templateLiteralTypeExpr = 37;
 
   public static int getTypeExprKind(final INode type, final IdContext idcontext) {
     Integer kind =
@@ -129,8 +132,10 @@ public class TypeExprKinds {
               @Override
               public Integer visit(UnaryTypeExpr nd, Void c) {
                 switch (nd.getKind()) {
-                  case Keyof: return keyofTypeExpr;
-                  case Readonly: return readonlyTypeExpr;
+                  case Keyof:
+                    return keyofTypeExpr;
+                  case Readonly:
+                    return readonlyTypeExpr;
                 }
                 throw new CatastrophicError("Unhandled UnaryTypeExpr kind: " + nd.getKind());
               }
@@ -157,7 +162,7 @@ public class TypeExprKinds {
               }
 
               @Override
-              public Integer visit(IsTypeExpr nd, Void c) {
+              public Integer visit(PredicateTypeExpr nd, Void c) {
                 return isTypeExpr;
               }
 
@@ -238,6 +243,16 @@ public class TypeExprKinds {
               @Override
               public Integer visit(RestTypeExpr nd, Void c) {
                 return restTypeExpr;
+              }
+
+              @Override
+              public Integer visit(TemplateLiteralTypeExpr nd, Void c) {
+                return templateLiteralTypeExpr;
+              }
+
+              @Override
+              public Integer visit(TemplateElement nd, Void c) {
+                return stringLiteralTypeExpr;
               }
             },
             null);

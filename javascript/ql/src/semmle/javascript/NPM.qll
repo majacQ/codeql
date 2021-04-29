@@ -8,7 +8,7 @@ private import NodeModuleResolutionImpl
 /** A `package.json` configuration object. */
 class PackageJSON extends JSONObject {
   PackageJSON() {
-    getFile().getBaseName() = "package.json" and
+    getJsonFile().getBaseName() = "package.json" and
     isTopLevel()
   }
 
@@ -190,7 +190,7 @@ class BugTrackerInfo extends JSONValue {
   }
 
   /** Gets the bug tracker URL. */
-  string getURL() {
+  string getUrl() {
     result = this.(JSONObject).getPropStringValue("url") or
     result = this.(JSONString).getValue()
   }
@@ -233,7 +233,7 @@ class ContributorInfo extends JSONValue {
   }
 
   /** Gets the contributor's homepage URL. */
-  string getURL() {
+  string getUrl() {
     result = this.(JSONObject).getPropStringValue("url") or
     result = parseInfo(3)
   }
@@ -249,7 +249,7 @@ class RepositoryInfo extends JSONObject {
   string getType() { result = getPropStringValue("type") }
 
   /** Gets the repository URL. */
-  string getURL() { result = getPropStringValue("url") }
+  string getUrl() { result = getPropStringValue("url") }
 }
 
 /**
@@ -274,7 +274,7 @@ class NPMPackage extends @folder {
   /** The `package.json` file of this package. */
   PackageJSON pkg;
 
-  NPMPackage() { pkg.getFile().getParentContainer() = this }
+  NPMPackage() { pkg.getJsonFile().getParentContainer() = this }
 
   /** Gets a textual representation of this package. */
   string toString() { result = this.(Folder).toString() }

@@ -3,13 +3,14 @@ using Semmle.Util.Logging;
 using System;
 using System.IO;
 using Semmle.Util;
+using System.Text.RegularExpressions;
 
 namespace Semmle.Extraction.Tests
 {
     public class OptionsTests
     {
-        CSharp.Options options;
-        CSharp.Standalone.Options standaloneOptions;
+        private CSharp.Options? options;
+        private CSharp.Standalone.Options? standaloneOptions;
 
         public OptionsTests()
         {
@@ -20,7 +21,7 @@ namespace Semmle.Extraction.Tests
         [Fact]
         public void DefaultOptions()
         {
-            options = CSharp.Options.CreateWithEnvironment(new string[] { });
+            options = CSharp.Options.CreateWithEnvironment(Array.Empty<string>());
             Assert.True(options.Cache);
             Assert.False(options.CIL);
             Assert.Null(options.Framework);
@@ -140,7 +141,7 @@ namespace Semmle.Extraction.Tests
         [Fact]
         public void StandaloneDefaults()
         {
-            standaloneOptions = CSharp.Standalone.Options.Create(new string[] { });
+            standaloneOptions = CSharp.Standalone.Options.Create(Array.Empty<string>());
             Assert.Equal(0, standaloneOptions.DllDirs.Count);
             Assert.True(standaloneOptions.UseNuGet);
             Assert.True(standaloneOptions.UseMscorlib);
@@ -183,26 +184,25 @@ namespace Semmle.Extraction.Tests
         public void Fast()
         {
             Environment.SetEnvironmentVariable("LGTM_INDEX_EXTRACTOR", "--fast");
-            options = CSharp.Options.CreateWithEnvironment(new string[] {});
+            options = CSharp.Options.CreateWithEnvironment(Array.Empty<string>());
             Assert.True(options.Fast);
         }
 
         [Fact]
         public void ArchiveArguments()
         {
-            var file1 = Path.GetTempFileName();
-            var file2 = Path.GetTempFileName();
+            using var sw = new StringWriter();
+            var file = Path.GetTempFileName();
 
             try
             {
-                File.AppendAllText(file1, "Test");
-                new string[] { "/noconfig", "@" + file1 }.ArchiveCommandLine(file2);
-                Assert.Equal("Test", File.ReadAllText(file2));
+                File.AppendAllText(file, "Test");
+                new string[] { "/noconfig", "@" + file }.WriteCommandLine(sw);
+                Assert.Equal("Test", Regex.Replace(sw.ToString(), @"\t|\n|\r", ""));
             }
             finally
             {
-                File.Delete(file1);
-                File.Delete(file2);
+                File.Delete(file);
             }
         }
     }

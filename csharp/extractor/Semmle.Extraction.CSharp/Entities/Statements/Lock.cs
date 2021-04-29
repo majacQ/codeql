@@ -1,11 +1,12 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class Lock : Statement<LockStatementSyntax>
+    internal class Lock : Statement<LockStatementSyntax>
     {
-        Lock(Context cx, LockStatementSyntax @lock, IStatementParentEntity parent, int child)
+        private Lock(Context cx, LockStatementSyntax @lock, IStatementParentEntity parent, int child)
             : base(cx, @lock, StmtKind.LOCK, parent, child) { }
 
         public static Lock Create(Context cx, LockStatementSyntax node, IStatementParentEntity parent, int child)
@@ -15,7 +16,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             Expression.Create(cx, Stmt.Expression, this, 0);
             Statement.Create(cx, Stmt.Statement, this, 1);

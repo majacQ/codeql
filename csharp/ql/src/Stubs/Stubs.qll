@@ -5,7 +5,7 @@
  * This will generate stubs for all the required dependencies as well.
  *
  * Use
- * ```
+ * ```ql
  * select generatedCode()
  * ```
  * to retrieve the generated C# code.
@@ -74,7 +74,8 @@ abstract private class GeneratedType extends ValueOrRefType, GeneratedElement {
   }
 
   private string stubComment() {
-    result = "// Generated from `" + this.getQualifiedName() + "` in `" +
+    result =
+      "// Generated from `" + this.getQualifiedName() + "` in `" +
         min(this.getLocation().toString()) + "`\n"
   }
 
@@ -87,7 +88,8 @@ abstract private class GeneratedType extends ValueOrRefType, GeneratedElement {
     if this.isDuplicate()
     then result = ""
     else
-      result = this.stubComment() + this.stubAttributes() + this.stubAbstractModifier() +
+      result =
+        this.stubComment() + this.stubAttributes() + this.stubAbstractModifier() +
           this.stubStaticModifier() + this.stubAccessibilityModifier() + this.stubKeyword() + " " +
           this.getUndecoratedName() + stubGenericArguments(this) + stubBaseTypesString() +
           stubTypeParametersConstraints(this) + "\n{\n" + stubMembers() + "}\n\n"
@@ -105,7 +107,8 @@ abstract private class GeneratedType extends ValueOrRefType, GeneratedElement {
     else
       if exists(getAnInterestingBaseType())
       then
-        result = " : " +
+        result =
+          " : " +
             concat(int i, ValueOrRefType t |
               t = this.getAnInterestingBaseType() and
               (if t instanceof Class then i = 0 else i = 1)
@@ -147,16 +150,18 @@ private class IndirectType extends GeneratedType {
     or
     this.(UnboundGenericType).getAConstructedGeneric().getASubType() instanceof GeneratedType
     or
-    exists(GeneratedType t | this = getAContainedType(t.getAGeneratedType()).getSourceDeclaration())
+    exists(GeneratedType t |
+      this = getAContainedType(t.getAGeneratedType()).getUnboundDeclaration()
+    )
     or
     exists(GeneratedDeclaration decl |
-      decl.(Member).getDeclaringType().getSourceDeclaration() = this
+      decl.(Member).getDeclaringType().getUnboundDeclaration() = this
     )
   }
 }
 
 private class RootGeneratedType extends GeneratedType {
-  RootGeneratedType() { this = any(GeneratedDeclaration decl).getSourceDeclaration() }
+  RootGeneratedType() { this = any(GeneratedDeclaration decl).getUnboundDeclaration() }
 }
 
 private Type getAContainedType(Type t) {
@@ -166,7 +171,7 @@ private Type getAContainedType(Type t) {
 }
 
 private class RootGeneratedMember extends GeneratedMember {
-  RootGeneratedMember() { this = any(GeneratedDeclaration d).getSourceDeclaration() }
+  RootGeneratedMember() { this = any(GeneratedDeclaration d).getUnboundDeclaration() }
 }
 
 private predicate declarationExists(Virtualizable m) {
@@ -211,11 +216,8 @@ private class GeneratedNamespace extends Namespace, GeneratedElement {
   pragma[nomagic]
   final GeneratedNamespace getChildNamespace(int n) {
     result.getParentNamespace() = this and
-    result.getName() = rank[n + 1](GeneratedNamespace g |
-        g.getParentNamespace() = this
-      |
-        g.getName()
-      )
+    result.getName() =
+      rank[n + 1](GeneratedNamespace g | g.getParentNamespace() = this | g.getName())
   }
 
   final int getChildNamespaceCount() {
@@ -228,9 +230,8 @@ private class GeneratedNamespace extends Namespace, GeneratedElement {
   }
 
   private string getTypeStubs() {
-    result = concat(string s |
-        s = any(GeneratedType gt | gt.getDeclaringNamespace() = this).getStub()
-      )
+    result =
+      concat(string s | s = any(GeneratedType gt | gt.getDeclaringNamespace() = this).getStub())
   }
 }
 
@@ -343,7 +344,8 @@ private string stubClassName(Type t) {
                       else
                         if t instanceof TupleType
                         then
-                          result = "(" +
+                          result =
+                            "(" +
                               concat(int i, Type element |
                                 element = t.(TupleType).getElementType(i)
                               |
@@ -352,7 +354,8 @@ private string stubClassName(Type t) {
                         else
                           if t instanceof ValueOrRefType
                           then
-                            result = stubQualifiedNamePrefix(t) + t.getUndecoratedName() +
+                            result =
+                              stubQualifiedNamePrefix(t) + t.getUndecoratedName() +
                                 stubGenericArguments(t)
                           else result = "<error>"
 }
@@ -361,7 +364,8 @@ language[monotonicAggregates]
 private string stubGenericArguments(ValueOrRefType t) {
   if t instanceof UnboundGenericType
   then
-    result = "<" +
+    result =
+      "<" +
         concat(int n |
           exists(t.(UnboundGenericType).getTypeParameter(n))
         |
@@ -370,7 +374,8 @@ private string stubGenericArguments(ValueOrRefType t) {
   else
     if t instanceof ConstructedType
     then
-      result = "<" +
+      result =
+        "<" +
           concat(int n |
             exists(t.(ConstructedType).getTypeArgument(n))
           |
@@ -382,7 +387,8 @@ private string stubGenericArguments(ValueOrRefType t) {
 private string stubGenericMethodParams(Method m) {
   if m instanceof UnboundGenericMethod
   then
-    result = "<" +
+    result =
+      "<" +
         concat(int n, TypeParameter param |
           param = m.(UnboundGenericMethod).getTypeParameter(n)
         |
@@ -409,15 +415,16 @@ private string stubConstraints(TypeParameterConstraints tpc) {
 
 private string stubTypeParameterConstraints(TypeParameter tp) {
   exists(TypeParameterConstraints tpc | tpc = tp.getConstraints() |
-    result = " where " + tp.getName() + ": " +
-        strictconcat(string s | s = stubConstraints(tpc) | s, ", ")
+    result =
+      " where " + tp.getName() + ": " + strictconcat(string s | s = stubConstraints(tpc) | s, ", ")
   )
 }
 
 private string stubTypeParametersConstraints(Declaration d) {
   if d instanceof UnboundGeneric
   then
-    result = concat(TypeParameter tp |
+    result =
+      concat(TypeParameter tp |
         tp = d.(UnboundGeneric).getATypeParameter()
       |
         stubTypeParameterConstraints(tp), " "
@@ -515,7 +522,8 @@ bindingset[s]
 private string escapeIfKeyword(string s) { if isKeyword(s) then result = "@" + s else result = s }
 
 private string stubParameters(Parameterizable p) {
-  result = concat(int i, Parameter param |
+  result =
+    concat(int i, Parameter param |
       param = p.getParameter(i) and not param.getType() instanceof ArglistType
     |
       stubParameterModifiers(param) + stubClassName(param.getType()) + " " +
@@ -557,7 +565,8 @@ private string stubExplicitImplementation(Member c) {
 
 private string stubMember(Member m) {
   exists(Method c | m = c and not m.getDeclaringType() instanceof Enum |
-    result = "    " + stubModifiers(c) + stubClassName(c.getReturnType()) + " " +
+    result =
+      "    " + stubModifiers(c) + stubClassName(c.getReturnType()) + " " +
         stubExplicitImplementation(c) + c.getName() + stubGenericMethodParams(c) + "(" +
         stubParameters(c) + ")" + stubTypeParametersConstraints(c) + stubImplementation(c) + ";\n"
   )
@@ -565,36 +574,40 @@ private string stubMember(Member m) {
   exists(Operator op |
     m = op and not m.getDeclaringType() instanceof Enum and not op instanceof ConversionOperator
   |
-    result = "    " + stubModifiers(op) + stubClassName(op.getReturnType()) + " operator " +
-        op.getName() + "(" + stubParameters(op) + ") => throw null;\n"
+    result =
+      "    " + stubModifiers(op) + stubClassName(op.getReturnType()) + " operator " + op.getName() +
+        "(" + stubParameters(op) + ") => throw null;\n"
   )
   or
   exists(ConversionOperator op | m = op |
-    result = "    " + stubModifiers(op) + stubExplicit(op) + "operator " +
+    result =
+      "    " + stubModifiers(op) + stubExplicit(op) + "operator " +
         stubClassName(op.getReturnType()) + "(" + stubParameters(op) + ") => throw null;\n"
   )
   or
   result = "    " + m.(EnumConstant).getName() + ",\n"
   or
   exists(Property p | m = p |
-    result = "    " + stubModifiers(m) + stubClassName(p.getType()) + " " +
-        stubExplicitImplementation(p) + p.getName() + " { " + stubGetter(p) + stubSetter(p) + "}\n"
+    result =
+      "    " + stubModifiers(m) + stubClassName(p.getType()) + " " + stubExplicitImplementation(p) +
+        p.getName() + " { " + stubGetter(p) + stubSetter(p) + "}\n"
   )
   or
   exists(Constructor c | m = c and not c.getDeclaringType() instanceof Enum |
-    result = "    " + stubModifiers(m) + c.getName() + "(" + stubParameters(c) +
-        ") => throw null;\n"
+    result =
+      "    " + stubModifiers(m) + c.getName() + "(" + stubParameters(c) + ") => throw null;\n"
   )
   or
   exists(Indexer i | m = i |
-    result = "    " + stubModifiers(m) + stubClassName(i.getType()) + " this[" + stubParameters(i) +
-        "] { " + stubGetter(i) + stubSetter(i) + "}\n"
+    result =
+      "    " + stubModifiers(m) + stubClassName(i.getType()) + " this[" + stubParameters(i) + "] { "
+        + stubGetter(i) + stubSetter(i) + "}\n"
   )
   or
   exists(Field f, string impl | f = m and not f instanceof EnumConstant |
     (if f.isConst() then impl = " = throw null" else impl = "") and
-    result = "    " + stubModifiers(m) + stubClassName(f.getType()) + " " + f.getName() + impl +
-        ";\n"
+    result =
+      "    " + stubModifiers(m) + stubClassName(f.getType()) + " " + f.getName() + impl + ";\n"
   )
 }
 
@@ -623,9 +636,11 @@ private string stubSetter(DeclarationWithGetSetAccessors p) {
 }
 
 private string stubSemmleExtractorOptions() {
-  result = concat(string s |
+  result =
+    concat(string s |
       exists(CommentLine comment |
-        s = "// original-extractor-options:" +
+        s =
+          "// original-extractor-options:" +
             comment.getText().regexpCapture("\\w*semmle-extractor-options:(.*)", 1) + "\n"
       )
     )
@@ -633,6 +648,7 @@ private string stubSemmleExtractorOptions() {
 
 /** Gets the generated C# code. */
 string generatedCode() {
-  result = "// This file contains auto-generated code.\n" + stubSemmleExtractorOptions() + "\n" +
+  result =
+    "// This file contains auto-generated code.\n" + stubSemmleExtractorOptions() + "\n" +
       any(GeneratedNamespace ns | ns.isGlobalNamespace()).getStubs()
 }

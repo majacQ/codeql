@@ -23,14 +23,33 @@ DataFlow::SourceNode angular() {
   result = DataFlow::moduleImport("angular")
 }
 
-pragma[noopt]
+/**
+ * Holds if `tl` appears to be a top-level using the AngularJS library.
+ *
+ * Should not depend on the `SourceNode` class.
+ */
+pragma[nomagic]
+private predicate isAngularTopLevel(TopLevel tl) {
+  exists(Import imprt |
+    imprt.getTopLevel() = tl and
+    imprt.getImportedPath().getValue() = "angular"
+  )
+  or
+  exists(GlobalVarAccess global |
+    global.getName() = "angular" and
+    global.getTopLevel() = tl
+  )
+}
+
+/**
+ * Holds if `s` is a string in a top-level using the AngularJS library.
+ *
+ * Should not depend on the `SourceNode` class.
+ */
+pragma[nomagic]
 private predicate isAngularString(Expr s) {
-  exists(DataFlow::SourceNode angular, StmtContainer sc, TopLevel tl |
-    angular = angular() and
-    sc = angular.getContainer() and
-    tl = sc.getTopLevel() and
-    tl = s.getTopLevel()
-  |
+  isAngularTopLevel(s.getTopLevel()) and
+  (
     s instanceof StringLiteral or
     s instanceof TemplateLiteral
   )
@@ -132,7 +151,6 @@ DataFlow::CallNode moduleRef(AngularModule m) {
 class ModuleApiCall extends DataFlow::CallNode {
   /** The module on which the method is called. */
   AngularModule mod;
-
   /** The name of the called method. */
   string methodName;
 
@@ -146,7 +164,6 @@ class ModuleApiCall extends DataFlow::CallNode {
 
 class ModuleApiCallDependencyInjection extends DependencyInjection {
   ModuleApiCall call;
-
   string methodName;
 
   ModuleApiCallDependencyInjection() {
@@ -444,6 +461,7 @@ class ComponentDirective extends CustomDirective, MkCustomComponent {
 
   override DataFlow::Node getDefinition() { result = comp }
 
+  pragma[nomagic]
   override DataFlow::ValueNode getMemberInit(string name) {
     comp.getConfig().hasPropertyWrite(name, result)
   }
@@ -633,11 +651,11 @@ private class RouteParamSource extends RemoteFlowSource {
  * AngularJS expose a jQuery-like interface through `angular.html(..)`.
  * The interface may be backed by an actual jQuery implementation.
  */
-private class JQLiteObject extends JQueryObject {
+private class JQLiteObject extends JQuery::ObjectSource::Range {
   JQLiteObject() {
-    this = angular().getAMemberCall("element").asExpr()
+    this = angular().getAMemberCall("element")
     or
-    exists(SimpleParameter param |
+    exists(Parameter param | this = DataFlow::parameterNode(param) |
       // element parameters to user-functions invoked by AngularJS
       param = any(LinkFunction link).getElementParameter()
       or
@@ -654,15 +672,13 @@ private class JQLiteObject extends JQueryObject {
           param = f.getAstNode().(Function).getParameter(i)
         )
       )
-    |
-      this = param.getAnInitialUse()
     )
     or
     exists(ServiceReference element |
       element.getName() = "$rootElement" or
       element.getName() = "$document"
     |
-      this = element.getAnAccess()
+      this = element.getAReference()
     )
   }
 }
@@ -711,33 +727,35 @@ private class AngularMethodCall extends AngularJSCall {
 }
 
 /**
- * A call to a method on a builtin service.
+ * A call to a builtin service or one of its methods.
  */
-private class ServiceMethodCall extends AngularJSCall {
-  MethodCallExpr mce;
+private class BuiltinServiceCall extends AngularJSCall {
+  CallExpr call;
 
-  ServiceMethodCall() {
+  BuiltinServiceCall() {
     exists(BuiltinServiceReference service |
-      service.getAMethodCall(_) = this and
-      mce = this
+      service.getAMethodCall(_) = this or
+      service.getACall() = this
+    |
+      call = this
     )
   }
 
   override predicate interpretsArgumentAsHtml(Expr e) {
     exists(ServiceReference service, string methodName |
       service.getName() = "$sce" and
-      mce = service.getAMethodCall(methodName)
+      call = service.getAMethodCall(methodName)
     |
       // specialized call
       (methodName = "trustAsHtml" or methodName = "trustAsCss") and
-      e = mce.getArgument(0)
+      e = call.getArgument(0)
       or
       // generic call with enum argument
       methodName = "trustAs" and
       exists(DataFlow::PropRead prn |
-        prn.asExpr() = mce.getArgument(0) and
+        prn.asExpr() = call.getArgument(0) and
         (prn = service.getAPropertyAccess("HTML") or prn = service.getAPropertyAccess("CSS")) and
-        e = mce.getArgument(1)
+        e = call.getArgument(1)
       )
     )
   }
@@ -745,16 +763,16 @@ private class ServiceMethodCall extends AngularJSCall {
   override predicate storesArgumentGlobally(Expr e) {
     exists(ServiceReference service, string serviceName, string methodName |
       service.getName() = serviceName and
-      mce = service.getAMethodCall(methodName)
+      call = service.getAMethodCall(methodName)
     |
       // AngularJS caches (only available during runtime, so similar to sessionStorage)
       (serviceName = "$cacheFactory" or serviceName = "$templateCache") and
       methodName = "put" and
-      e = mce.getArgument(1)
+      e = call.getArgument(1)
       or
       serviceName = "$cookies" and
       (methodName = "put" or methodName = "putObject") and
-      e = mce.getArgument(1)
+      e = call.getArgument(1)
     )
   }
 
@@ -768,7 +786,8 @@ private class ServiceMethodCall extends AngularJSCall {
       methodName = "$watchCollection" or
       methodName = "$watchGroup"
     |
-      e = scope.getAMethodCall(methodName).getArgument(0)
+      call = scope.getAMethodCall(methodName) and
+      e = call.getArgument(0)
     )
     or
     exists(ServiceReference service |
@@ -776,15 +795,16 @@ private class ServiceMethodCall extends AngularJSCall {
       service.getName() = "$parse" or
       service.getName() = "$interpolate"
     |
-      e = service.getACall().getArgument(0)
+      call = service.getACall() and
+      e = call.getArgument(0)
     )
     or
-    exists(ServiceReference service, CallExpr filter, CallExpr filterInvocation |
+    exists(ServiceReference service, CallExpr filterInvocation |
       // `$filter('orderBy')(collection, expression)`
       service.getName() = "$filter" and
-      filter = service.getACall() and
-      filter.getArgument(0).mayHaveStringValue("orderBy") and
-      filterInvocation.getCallee() = filter and
+      call = service.getACall() and
+      call.getArgument(0).mayHaveStringValue("orderBy") and
+      filterInvocation.getCallee() = call and
       e = filterInvocation.getArgument(1)
     )
   }
@@ -799,27 +819,27 @@ class LinkFunction extends Function {
   /**
    * Gets the scope parameter of this function.
    */
-  SimpleParameter getScopeParameter() { result = getParameter(0) }
+  Parameter getScopeParameter() { result = getParameter(0) }
 
   /**
    * Gets the element parameter of this function (contains a jqLite-wrapped DOM element).
    */
-  SimpleParameter getElementParameter() { result = getParameter(1) }
+  Parameter getElementParameter() { result = getParameter(1) }
 
   /**
    * Gets the attributes parameter of this function.
    */
-  SimpleParameter getAttributesParameter() { result = getParameter(2) }
+  Parameter getAttributesParameter() { result = getParameter(2) }
 
   /**
    * Gets the controller parameter of this function.
    */
-  SimpleParameter getControllerParameter() { result = getParameter(3) }
+  Parameter getControllerParameter() { result = getParameter(3) }
 
   /**
    * Gets the transclude-function parameter of this function.
    */
-  SimpleParameter getTranscludeFnParameter() { result = getParameter(4) }
+  Parameter getTranscludeFnParameter() { result = getParameter(4) }
 }
 
 /**
@@ -832,7 +852,8 @@ private newtype TAngularScope =
   } or
   MkIsolateScope(CustomDirective dir) { dir.hasIsolateScope() } or
   MkElementScope(DOM::ElementDefinition elem) {
-    any(DirectiveInstance d | not d.(CustomDirective).hasIsolateScope()).getAMatchingElement() = elem
+    any(DirectiveInstance d | not d.(CustomDirective).hasIsolateScope()).getAMatchingElement() =
+      elem
   }
 
 /**
@@ -847,7 +868,7 @@ class AngularScope extends TAngularScope {
    */
   Expr getAnAccess() {
     exists(CustomDirective d | this = d.getAScope() |
-      exists(SimpleParameter p |
+      exists(Parameter p |
         p = d.getController().getDependencyParameter("$scope") or
         p = d.getALinkFunction().getParameter(0)
       |
@@ -863,7 +884,7 @@ class AngularScope extends TAngularScope {
       d.hasIsolateScope() and result = d.getMember("scope").asExpr()
     )
     or
-    exists(DirectiveController c, DOM::ElementDefinition elem, SimpleParameter p |
+    exists(DirectiveController c, DOM::ElementDefinition elem, Parameter p |
       c.boundTo(elem) and
       this.mayApplyTo(elem) and
       p = c.getFactoryFunction().getDependencyParameter("$scope") and
@@ -1060,21 +1081,45 @@ private class RouteInstantiatedController extends Controller {
 /**
  * Dataflow for the arguments of AngularJS dependency-injected functions.
  */
-private class DependencyInjectedArgumentInitializer extends DataFlow::AnalyzedValueNode {
+private class DependencyInjectedArgumentInitializer extends DataFlow::AnalyzedNode {
   DataFlow::AnalyzedNode service;
 
   DependencyInjectedArgumentInitializer() {
     exists(
-      AngularJS::InjectableFunction f, SimpleParameter param, AngularJS::CustomServiceDefinition def
+      AngularJS::InjectableFunction f, Parameter param, AngularJS::CustomServiceDefinition def
     |
-      astNode = param.getAnInitialUse() and
+      this = DataFlow::parameterNode(param) and
       def.getServiceReference() = f.getAResolvedDependency(param) and
       service = def.getAService()
     )
   }
 
   override AbstractValue getAValue() {
-    result = DataFlow::AnalyzedValueNode.super.getAValue() or
+    result = DataFlow::AnalyzedNode.super.getAValue() or
     result = service.getALocalValue()
+  }
+}
+
+/**
+ * A call to `angular.bind`, as a partial function invocation.
+ */
+private class BindCall extends DataFlow::PartialInvokeNode::Range, DataFlow::CallNode {
+  BindCall() { this = angular().getAMemberCall("bind") }
+
+  override predicate isPartialArgument(DataFlow::Node callback, DataFlow::Node argument, int index) {
+    index >= 0 and
+    callback = getArgument(1) and
+    argument = getArgument(index + 2)
+  }
+
+  override DataFlow::SourceNode getBoundFunction(DataFlow::Node callback, int boundArgs) {
+    callback = getArgument(1) and
+    boundArgs = getNumArgument() - 2 and
+    result = this
+  }
+
+  override DataFlow::Node getBoundReceiver(DataFlow::Node callback) {
+    callback = getArgument(1) and
+    result = getArgument(0)
   }
 }

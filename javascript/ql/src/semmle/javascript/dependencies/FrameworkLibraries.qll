@@ -145,8 +145,9 @@ abstract class FrameworkLibraryWithGenericURL extends FrameworkLibraryWithURLReg
   override string getAURLRegex() {
     exists(string id | id = getId() or id = getAnAlias() |
       result = ".*(?:^|/)" + id + "-(" + semverRegex() + ")" + variantRegex() + "\\.js" or
-      result = ".*/(?:\\w+@)?(" + semverRegex() + ")/(?:(?:dist|js|" + id + ")/)?" + id +
-          variantRegex() + "\\.js"
+      result =
+        ".*/(?:\\w+@)?(" + semverRegex() + ")/(?:(?:dist|js|" + id + ")/)?" + id + variantRegex() +
+          "\\.js"
     )
   }
 }
@@ -158,7 +159,8 @@ abstract class FrameworkLibraryWithGenericURL extends FrameworkLibraryWithURLReg
  * We ignore these when identifying frameworks.
  */
 private string variantRegex() {
-  result = "([.-](slim|min|debug|dbg|umd|dev|all|testing|polyfills|" +
+  result =
+    "([.-](slim|min|debug|dbg|umd|dev|all|testing|polyfills|" +
       "core|compat|more|modern|sandbox|rtl|with-addons|legacy))*"
 }
 
@@ -235,8 +237,8 @@ private predicate jQueryMarkerComment(Comment c, TopLevel tl, string version) {
   tl = c.getTopLevel() and
   exists(string txt | txt = c.getText() |
     // more recent versions use this format
-    version = txt
-          .regexpCapture("(?s).*jQuery (?:JavaScript Library )?v(" + versionRegex() + ").*", 1)
+    version =
+      txt.regexpCapture("(?s).*jQuery (?:JavaScript Library )?v(" + versionRegex() + ").*", 1)
     or
     // earlier versions used this format
     version = txt.regexpCapture("(?s).*jQuery (" + versionRegex() + ") - New Wave Javascript.*", 1)
@@ -390,7 +392,7 @@ private predicate mooToolsObject(ObjectExpr oe, TopLevel tl, string version) {
   |
     d.getBase() instanceof ThisExpr and
     d.getPropertyName() = "MooTools" and
-    version = oe.getPropertyByName("version").getInit().(ConstantString).getStringValue()
+    version = oe.getPropertyByName("version").getInit().getStringValue()
   )
 }
 
@@ -429,7 +431,7 @@ private class Prototype extends FrameworkLibraryWithGenericURL {
 private predicate prototypeObject(ObjectExpr oe, TopLevel tl, string version) {
   exists(VariableDeclarator vd | tl = vd.getTopLevel() and oe = vd.getInit() |
     vd.getBindingPattern().(Identifier).getName() = "Prototype" and
-    version = oe.getPropertyByName("Version").getInit().(ConstantString).getStringValue()
+    version = oe.getPropertyByName("Version").getInit().getStringValue()
   )
 }
 
@@ -468,7 +470,7 @@ private class Scriptaculous extends FrameworkLibraryWithGenericURL {
 private predicate scriptaculousObject(ObjectExpr oe, TopLevel tl, string version) {
   exists(VariableDeclarator vd | tl = vd.getTopLevel() and oe = vd.getInit() |
     vd.getBindingPattern().(Identifier).getName() = "Scriptaculous" and
-    version = oe.getPropertyByName("Version").getInit().(ConstantString).getStringValue()
+    version = oe.getPropertyByName("Version").getInit().getStringValue()
   )
 }
 
@@ -502,7 +504,8 @@ private class Lodash extends FrameworkLibraryWithGenericURL, FrameworkLibraryWit
   Lodash() { this = "lodash" }
 
   override string getAMarkerCommentRegex() {
-    result = "(?s).* (?:lod|Lo-D)ash (<VERSION>)" + "(?: \\(Custom Build\\))? " +
+    result =
+      "(?s).* (?:lod|Lo-D)ash (<VERSION>)" + "(?: \\(Custom Build\\))? " +
         "<https?://lodash.com/>.*"
   }
 
@@ -842,8 +845,8 @@ private class ApplicationInsightsInstance extends FrameworkLibraryInstance {
   string version;
 
   ApplicationInsightsInstance() {
-    version = this
-          .(TopLevel)
+    version =
+      this.(TopLevel)
           .getFile()
           .getAbsolutePath()
           .regexpCapture(any(ApplicationInsights t).getAURLRegex(), 1)
@@ -887,8 +890,7 @@ private class TwitterTextClassic extends FrameworkLibraryWithURLRegex {
  */
 private class TwitterTextClassicInstance extends FrameworkLibraryInstance {
   TwitterTextClassicInstance() {
-    this
-        .(TopLevel)
+    this.(TopLevel)
         .getFile()
         .getAbsolutePath()
         .regexpMatch(any(TwitterTextClassic t).getAURLRegex())

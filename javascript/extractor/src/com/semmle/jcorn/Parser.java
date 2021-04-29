@@ -5,6 +5,7 @@ import static com.semmle.jcorn.Whitespace.lineBreak;
 
 import com.semmle.jcorn.Identifiers.Dialect;
 import com.semmle.jcorn.Options.AllowReserved;
+import com.semmle.jcorn.TokenType.Properties;
 import com.semmle.js.ast.ArrayExpression;
 import com.semmle.js.ast.ArrayPattern;
 import com.semmle.js.ast.ArrowFunctionExpression;
@@ -44,6 +45,7 @@ import com.semmle.js.ast.INode;
 import com.semmle.js.ast.IPattern;
 import com.semmle.js.ast.Identifier;
 import com.semmle.js.ast.IfStatement;
+import com.semmle.js.ast.FieldDefinition;
 import com.semmle.js.ast.ImportDeclaration;
 import com.semmle.js.ast.ImportDefaultSpecifier;
 import com.semmle.js.ast.ImportNamespaceSpecifier;
@@ -124,6 +126,7 @@ public class Parser {
   private boolean inModule;
   protected boolean inFunction;
   protected boolean inGenerator;
+  protected boolean inClass;
   protected boolean inAsync;
   protected boolean inTemplateElement;
   protected int pos;
@@ -141,6 +144,11 @@ public class Parser {
   protected int potentialArrowAt;
   private Stack<LabelInfo> labels;
   protected int yieldPos, awaitPos;
+
+  /**
+   * Set to true by {@link ESNextParser#readInt} if the parsed integer contains an underscore.
+   */
+  protected boolean seenUnderscoreNumericSeparator = false;
 
   /**
    * For readability purposes, we pass this instead of false as the argument to the
@@ -240,8 +248,8 @@ public class Parser {
     // Used to signify the start of a potential arrow function
     this.potentialArrowAt = -1;
 
-    // Flags to track whether we are in a function, a generator, an async function.
-    this.inFunction = this.inGenerator = this.inAsync = false;
+    // Flags to track whether we are in a function, a generator, an async function, a class.
+    this.inFunction = this.inGenerator = this.inAsync = this.inClass = false;
     // Positions to delayed-check that yield/await does not exist in default parameters.
     this.yieldPos = this.awaitPos = 0;
     // Labels in scope.
@@ -523,9 +531,14 @@ public class Parser {
     int next2 = charAt(this.pos + 2);
     if (this.options.esnext()) {
       if (next == '.' && !('0' <= next2 && next2 <= '9')) // '?.', but not '?.X' where X is a digit
-      return this.finishOp(TokenType.questiondot, 2);
-      if (next == '?') // '??'
-      return this.finishOp(TokenType.questionquestion, 2);
+        return this.finishOp(TokenType.questiondot, 2);
+      if (next == '?') { // '??'
+        if (next2 == '=') { // ??=
+          return this.finishOp(TokenType.assign, 3);
+        }
+        return this.finishOp(TokenType.questionquestion, 2);
+      }
+      
     }
     return this.finishOp(TokenType.question, 1);
   }
@@ -558,8 +571,11 @@ public class Parser {
 
   private Token readToken_pipe_amp(int code) { // '|&'
     int next = charAt(this.pos + 1);
-    if (next == code)
+    int next2 = charAt(this.pos + 2);
+    if (next == code) { // && ||
+      if (next2 == 61) return this.finishOp(TokenType.assign, 3); // &&= ||=
       return this.finishOp(code == 124 ? TokenType.logicalOR : TokenType.logicalAND, 2);
+    }
     if (next == 61) return this.finishOp(TokenType.assign, 2);
     return this.finishOp(code == 124 ? TokenType.bitwiseOR : TokenType.bitwiseAND, 1);
   }
@@ -651,6 +667,9 @@ public class Parser {
       case 58:
         ++this.pos;
         return this.finishToken(TokenType.colon);
+      case 35:
+        ++this.pos;
+        return this.finishToken(TokenType.pound);
       case 63:
         return this.readToken_question();
 
@@ -698,8 +717,8 @@ public class Parser {
       case 42: // '%*'
         return this.readToken_mult_modulo_exp(code);
 
-      case 124:
-      case 38: // '|&'
+      case 124: // '|'
+      case 38: // '&'
         return this.readToken_pipe_amp(code);
 
       case 94: // '^'
@@ -841,6 +860,10 @@ public class Parser {
     }
 
     String str = inputSubstring(start, this.pos);
+    if (seenUnderscoreNumericSeparator) {
+      str = str.replace("_", "");
+      seenUnderscoreNumericSeparator = false;
+    }
     Number val = null;
     if (isFloat) val = parseFloat(str);
     else if (!octal || str.length() == 1) val = parseInt(str, 10);
@@ -1460,7 +1483,7 @@ public class Parser {
     int startPos = this.start;
     Position startLoc = this.startLoc;
     Expression expr;
-    if (this.inAsync && this.isContextual("await")) {
+    if ((this.inAsync || options.esnext() && !this.inFunction) && this.isContextual("await")) {
       expr = this.parseAwait();
       sawUnary = true;
     } else if (this.type.isPrefix) {
@@ -1520,10 +1543,6 @@ public class Parser {
     }
   }
 
-  protected boolean isOnOptionalChain(boolean optional, Expression base) {
-    return optional || base instanceof Chainable && ((Chainable) base).isOnOptionalChain();
-  }
-
   /**
    * Parse a single subscript {@code s}; if more subscripts could follow, return {@code Pair.make(s,
    * true}, otherwise return {@code Pair.make(s, false)}.
@@ -1544,7 +1563,7 @@ public class Parser {
               this.parseExpression(false, null),
               true,
               optional,
-              isOnOptionalChain(optional, base));
+              Chainable.isOnOptionalChain(optional, base));
       this.expect(TokenType.bracketR);
       return Pair.make(this.finishNode(node), true);
     } else if (!noCalls && this.eat(TokenType.parenL)) {
@@ -1572,10 +1591,10 @@ public class Parser {
               new ArrayList<>(),
               exprList,
               optional,
-              isOnOptionalChain(optional, base));
+              Chainable.isOnOptionalChain(optional, base));
       return Pair.make(this.finishNode(node), true);
     } else if (this.type == TokenType.backQuote) {
-      if (isOnOptionalChain(optional, base)) {
+      if (Chainable.isOnOptionalChain(optional, base)) {
         this.raise(base, "An optional chain may not be used in a tagged template expression.");
       }
       TaggedTemplateExpression node =
@@ -1590,7 +1609,7 @@ public class Parser {
               this.parseIdent(true),
               false,
               optional,
-              isOnOptionalChain(optional, base));
+              Chainable.isOnOptionalChain(optional, base));
       return Pair.make(this.finishNode(node), true);
     } else {
       return Pair.make(base, false);
@@ -1832,7 +1851,7 @@ public class Parser {
     Expression callee =
         this.parseSubscripts(this.parseExprAtom(null), innerStartPos, innerStartLoc, true);
 
-    if (isOnOptionalChain(false, callee))
+    if (Chainable.isOnOptionalChain(false, callee))
       this.raise(callee, "An optional chain may not be used in a `new` expression.");
 
     return parseNewArguments(startLoc, callee);
@@ -1944,6 +1963,7 @@ public class Parser {
     this.parsePropertyName(pi);
     if (!isPattern && this.options.ecmaVersion() >= 8 && !isGenerator && this.isAsyncProp(pi)) {
       pi.isAsync = true;
+      pi.isGenerator = this.eat(TokenType.star);
       this.parsePropertyName(pi);
     } else {
       pi.isAsync = false;
@@ -1964,6 +1984,7 @@ public class Parser {
             || this.type == TokenType.num
             || this.type == TokenType.string
             || this.type == TokenType.bracketL
+            || this.type == TokenType.star
             || this.type.keyword != null)
         && !this.canInsertSemicolon();
   }
@@ -2193,6 +2214,7 @@ public class Parser {
   // identifiers.
   protected Identifier parseIdent(boolean liberal) {
     Position startLoc = this.startLoc;
+    boolean isPrivateField = liberal && this.eat(TokenType.pound);
     if (liberal && this.options.allowReserved() == AllowReserved.NEVER) liberal = false;
     String name = null;
     if (this.type == TokenType.name) {
@@ -2201,9 +2223,9 @@ public class Parser {
           && (this.options.ecmaVersion() >= 6
               || inputSubstring(this.start, this.end).indexOf("\\") == -1))
         this.raiseRecoverable(this.start, "The keyword '" + this.value + "' is reserved");
-      if (this.inGenerator && this.value.equals("yield"))
+      if (!isPrivateField && this.inGenerator && this.value.equals("yield"))
         this.raiseRecoverable(this.start, "Can not use 'yield' as identifier inside a generator");
-      if (this.inAsync && this.value.equals("await"))
+      if (!isPrivateField && this.inAsync && this.value.equals("await"))
         this.raiseRecoverable(
             this.start, "Can not use 'await' as identifier inside an async function");
       name = String.valueOf(this.value);
@@ -2215,6 +2237,12 @@ public class Parser {
       this.unexpected();
     }
     this.next();
+    if (isPrivateField) {
+      if (!this.inClass) {
+        this.raiseRecoverable(this.start, "Cannot use private fields outside a class");
+      }
+      name = "#" + name;
+    }
     Identifier node = new Identifier(new SourceLocation(startLoc), name);
     return this.finishNode(node);
   }
@@ -2312,7 +2340,7 @@ public class Parser {
       }
 
       if (node instanceof MemberExpression) {
-        if (isOnOptionalChain(false, (MemberExpression) node))
+        if (Chainable.isOnOptionalChain(false, (MemberExpression) node))
           this.raise(node, "Invalid left-hand side in assignment");
         if (!isBinding) return node;
       }
@@ -3129,6 +3157,8 @@ public class Parser {
   // Parse a class declaration or literal (depending on the
   // `isStatement` parameter).
   protected Node parseClass(Position startLoc, boolean isStatement) {
+    boolean oldInClass = this.inClass;
+    this.inClass = true;
     SourceLocation loc = new SourceLocation(startLoc);
     this.next();
     Identifier id = this.parseClassId(isStatement);
@@ -3147,6 +3177,8 @@ public class Parser {
     Node node;
     if (isStatement) node = new ClassDeclaration(loc, id, superClass, classBody);
     else node = new ClassExpression(loc, id, superClass, classBody);
+
+    this.inClass = oldInClass;
     return this.finishNode(node);
   }
 
@@ -3166,6 +3198,7 @@ public class Parser {
     }
     if (this.options.ecmaVersion() >= 8 && !isGenerator && this.isAsyncProp(pi)) {
       pi.isAsync = true;
+      pi.isGenerator = this.eat(TokenType.star);
       this.parsePropertyName(pi);
     }
     return parseClassPropertyBody(pi, hadConstructor, isStatic);
@@ -3221,6 +3254,9 @@ public class Parser {
       }
       if (pi.kind.equals("set") && node.getValue().hasRest())
         this.raiseRecoverable(params.get(params.size() - 1), "Setter cannot use rest params");
+    }
+    if (pi.key instanceof Identifier && ((Identifier)pi.key).getName().startsWith("#")) {
+      raiseRecoverable(pi.key, "Only fields, not methods, can be declared private.");
     }
     return node;
   }

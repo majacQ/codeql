@@ -1,14 +1,15 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    class TypeAccess : Expression<ExpressionSyntax>
+    internal class TypeAccess : Expression<ExpressionSyntax>
     {
-        TypeAccess(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.TYPE_ACCESS)) { }
+        private TypeAccess(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.TYPE_ACCESS)) { }
 
-        protected override void Populate()
+        protected override void PopulateExpression(TextWriter trapFile)
         {
             switch (Syntax.Kind())
             {
@@ -33,6 +34,20 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
         }
 
         public static Expression Create(ExpressionNodeInfo info) => new TypeAccess(info).TryPopulate();
+
+        public static Expression CreateGenerated(Context cx, IExpressionParentEntity parent, int childIndex, Microsoft.CodeAnalysis.ITypeSymbol type, Extraction.Entities.Location location)
+        {
+            var typeAccessInfo = new ExpressionInfo(
+                cx,
+                new AnnotatedType(Entities.Type.Create(cx, type), Microsoft.CodeAnalysis.NullableAnnotation.None),
+                location,
+                ExprKind.TYPE_ACCESS,
+                parent,
+                childIndex,
+                true,
+                null);
+
+            return new Expression(typeAccessInfo);
+        }
     }
 }
-

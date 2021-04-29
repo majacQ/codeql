@@ -13,29 +13,10 @@
  */
 
 import python
-import semmle.python.security.Paths
+import semmle.python.security.dataflow.ReflectedXSS
+import DataFlow::PathGraph
 
-/* Sources */
-import semmle.python.web.HttpRequest
-
-/* Sinks */
-
-import semmle.python.web.HttpResponse
-
-/* Flow */
-import semmle.python.security.strings.Untrusted
-
-
-class ReflectedXssConfiguration extends TaintTracking::Configuration {
-
-    ReflectedXssConfiguration() { this = "Reflected XSS configuration" }
-
-    override predicate isSource(TaintTracking::Source source) { source instanceof HttpRequestTaintSource }
-
-    override predicate isSink(TaintTracking::Sink sink) { sink instanceof HttpResponseTaintSink }
-
-}
-
-from ReflectedXssConfiguration config, TaintedPathSource src, TaintedPathSink sink
-where config.hasFlowPath(src, sink)
-select sink.getSink(), src, sink, "Cross-site scripting vulnerability due to $@.", src.getSource(), "user-provided value"
+from ReflectedXssConfiguration config, DataFlow::PathNode source, DataFlow::PathNode sink
+where config.hasFlowPath(source, sink)
+select sink.getNode(), source, sink, "Cross-site scripting vulnerability due to $@.",
+  source.getNode(), "a user-provided value"

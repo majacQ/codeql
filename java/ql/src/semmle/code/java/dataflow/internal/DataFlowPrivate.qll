@@ -1,6 +1,8 @@
 private import java
 private import DataFlowUtil
+private import DataFlowImplCommon
 private import DataFlowDispatch
+private import semmle.code.java.controlflow.Guards
 private import semmle.code.java.dataflow.SSA
 private import semmle.code.java.dataflow.TypeFlow
 
@@ -98,8 +100,8 @@ private predicate variableCaptureStep(Node node1, ExprNode node2) {
     not exists(captured.getAUse()) and
     exists(SsaVariable capturedDef | capturedDef = captured.getAnUltimateDefinition() |
       capturedDef.(SsaImplicitInit).isParameterDefinition(node1.asParameter()) or
-      capturedDef.(SsaExplicitUpdate).getDefiningExpr().(VariableAssign).getSource() = node1
-            .asExpr() or
+      capturedDef.(SsaExplicitUpdate).getDefiningExpr().(VariableAssign).getSource() =
+        node1.asExpr() or
       capturedDef.(SsaExplicitUpdate).getDefiningExpr().(AssignOp) = node1.asExpr()
     )
   )
@@ -111,28 +113,20 @@ private predicate variableCaptureStep(Node node1, ExprNode node2) {
  */
 predicate jumpStep(Node node1, Node node2) {
   staticFieldStep(node1, node2) or
-  variableCaptureStep(node1, node2)
+  variableCaptureStep(node1, node2) or
+  variableCaptureStep(node1.(PostUpdateNode).getPreUpdateNode(), node2)
 }
 
 /**
  * Holds if `fa` is an access to an instance field that occurs as the
  * destination of an assignment of the value `src`.
  */
-predicate instanceFieldAssign(Expr src, FieldAccess fa) {
+private predicate instanceFieldAssign(Expr src, FieldAccess fa) {
   exists(AssignExpr a |
     a.getSource() = src and
     a.getDest() = fa and
     fa.getField() instanceof InstanceField
   )
-}
-
-/**
- * Gets an upper bound on the type of `f`.
- */
-private Type getFieldTypeBound(Field f) {
-  fieldTypeFlow(f, result, _)
-  or
-  not fieldTypeFlow(f, _, _) and result = f.getType()
 }
 
 private newtype TContent =
@@ -151,12 +145,6 @@ class Content extends TContent {
   predicate hasLocationInfo(string path, int sl, int sc, int el, int ec) {
     path = "" and sl = 0 and sc = 0 and el = 0 and ec = 0
   }
-
-  /** Gets the type of the object containing this content. */
-  abstract RefType getContainerType();
-
-  /** Gets the type of this content. */
-  abstract Type getType();
 }
 
 private class FieldContent extends Content, TFieldContent {
@@ -171,26 +159,14 @@ private class FieldContent extends Content, TFieldContent {
   override predicate hasLocationInfo(string path, int sl, int sc, int el, int ec) {
     f.getLocation().hasLocationInfo(path, sl, sc, el, ec)
   }
-
-  override RefType getContainerType() { result = f.getDeclaringType() }
-
-  override Type getType() { result = getFieldTypeBound(f) }
 }
 
 private class CollectionContent extends Content, TCollectionContent {
   override string toString() { result = "collection" }
-
-  override RefType getContainerType() { none() }
-
-  override Type getType() { none() }
 }
 
 private class ArrayContent extends Content, TArrayContent {
   override string toString() { result = "array" }
-
-  override RefType getContainerType() { none() }
-
-  override Type getType() { none() }
 }
 
 /**
@@ -217,6 +193,27 @@ predicate readStep(Node node1, Content f, Node node2) {
     fr.getField() = f.(FieldContent).getField() and
     fr = node2.asExpr()
   )
+  or
+  exists(Record r, Method getter, Field recf, MethodAccess get |
+    getter.getDeclaringType() = r and
+    recf.getDeclaringType() = r and
+    getter.getNumberOfParameters() = 0 and
+    getter.getName() = recf.getName() and
+    not exists(getter.getBody()) and
+    recf = f.(FieldContent).getField() and
+    get.getMethod() = getter and
+    node1.asExpr() = get.getQualifier() and
+    node2.asExpr() = get
+  )
+}
+
+/**
+ * Holds if values stored inside content `c` are cleared at node `n`. For example,
+ * any value stored inside `f` is cleared at the pre-update node associated with `x`
+ * in `x.f = newValue`.
+ */
+predicate clearsContent(Node n, Content c) {
+  n = any(PostUpdateNode pun | storeStep(_, c, pun)).getPreUpdateNode()
 }
 
 /**
@@ -224,7 +221,7 @@ predicate readStep(Node node1, Content f, Node node2) {
  * possible flow. A single type is used for all numeric types to account for
  * numeric conversions, and otherwise the erasure is used.
  */
-RefType getErasedRepr(Type t) {
+private DataFlowType getErasedRepr(Type t) {
   exists(Type e | e = t.getErasure() |
     if e instanceof NumericOrCharType
     then result.(BoxedType).getPrimitiveType().getName() = "double"
@@ -233,7 +230,12 @@ RefType getErasedRepr(Type t) {
       then result.(BoxedType).getPrimitiveType().getName() = "boolean"
       else result = e
   )
+  or
+  t instanceof NullType and result instanceof TypeObject
 }
+
+pragma[noinline]
+DataFlowType getNodeType(Node n) { result = getErasedRepr(n.getTypeBound()) }
 
 /** Gets a string representation of a type returned by `getErasedRepr`. */
 string ppReprType(Type t) {
@@ -277,9 +279,62 @@ class DataFlowExpr = Expr;
 
 class DataFlowType = RefType;
 
-class DataFlowLocation = Location;
-
 class DataFlowCall extends Call {
   /** Gets the data flow node corresponding to this call. */
   ExprNode getNode() { result.getExpr() = this }
 }
+
+/** Holds if `e` is an expression that always has the same Boolean value `val`. */
+private predicate constantBooleanExpr(Expr e, boolean val) {
+  e.(CompileTimeConstantExpr).getBooleanValue() = val
+  or
+  exists(SsaExplicitUpdate v, Expr src |
+    e = v.getAUse() and
+    src = v.getDefiningExpr().(VariableAssign).getSource() and
+    constantBooleanExpr(src, val)
+  )
+}
+
+/** An argument that always has the same Boolean value. */
+private class ConstantBooleanArgumentNode extends ArgumentNode, ExprNode {
+  ConstantBooleanArgumentNode() { constantBooleanExpr(this.getExpr(), _) }
+
+  /** Gets the Boolean value of this expression. */
+  boolean getBooleanValue() { constantBooleanExpr(this.getExpr(), result) }
+}
+
+/**
+ * Holds if the node `n` is unreachable when the call context is `call`.
+ */
+cached
+predicate isUnreachableInCall(Node n, DataFlowCall call) {
+  exists(
+    ExplicitParameterNode paramNode, ConstantBooleanArgumentNode arg, SsaImplicitInit param,
+    Guard guard
+  |
+    // get constant bool argument and parameter for this call
+    viableParamArg(call, paramNode, arg) and
+    // get the ssa variable definition for this parameter
+    param.isParameterDefinition(paramNode.getParameter()) and
+    // which is used in a guard
+    param.getAUse() = guard and
+    // which controls `n` with the opposite value of `arg`
+    guard.controls(n.asExpr().getBasicBlock(), arg.getBooleanValue().booleanNot())
+  )
+}
+
+int accessPathLimit() { result = 5 }
+
+/**
+ * Holds if `n` does not require a `PostUpdateNode` as it either cannot be
+ * modified or its modification cannot be observed, for example if it is a
+ * freshly created object that is not saved in a variable.
+ *
+ * This predicate is only used for consistency checks.
+ */
+predicate isImmutableOrUnobservable(Node n) {
+  n.getType() instanceof ImmutableType or n instanceof ImplicitVarargsArray
+}
+
+/** Holds if `n` should be hidden from path explanations. */
+predicate nodeIsHidden(Node n) { none() }

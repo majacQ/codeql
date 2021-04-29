@@ -1,15 +1,16 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    class PointerMemberAccess : Expression<MemberAccessExpressionSyntax>
+    internal class PointerMemberAccess : Expression<MemberAccessExpressionSyntax>
     {
-        PointerMemberAccess(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.POINTER_INDIRECTION)) { }
+        private PointerMemberAccess(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.POINTER_INDIRECTION)) { }
 
         public static Expression Create(ExpressionNodeInfo info) => new PointerMemberAccess(info).TryPopulate();
 
-        protected override void Populate()
+        protected override void PopulateExpression(TextWriter trapFile)
         {
             Create(cx, Syntax.Expression, this, 0);
 

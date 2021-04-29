@@ -12,7 +12,7 @@ namespace Semmle.Extraction
         public InternalError(ISymbol symbol, string msg)
         {
             Text = msg;
-            EntityText = symbol.ToString();
+            EntityText = symbol.ToString() ?? "";
             Location = symbol.Locations.FirstOrDefault();
         }
 
@@ -30,9 +30,9 @@ namespace Semmle.Extraction
             Location = null;
         }
 
-        public Location Location { get; }
-        public string Text;
-        public string EntityText;
+        public Location? Location { get; }
+        public string Text { get; }
+        public string EntityText { get; }
 
         public override string Message => Text;
     }

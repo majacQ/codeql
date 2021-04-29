@@ -11,7 +11,6 @@ private import IntegerGuards
 /** Gets an expression that is always `null`. */
 Expr alwaysNullExpr() {
   result instanceof NullLiteral or
-  result.(ParExpr).getExpr() = alwaysNullExpr() or
   result.(CastExpr).getExpr() = alwaysNullExpr()
 }
 
@@ -22,6 +21,21 @@ Expr enumConstEquality(Expr e, boolean polarity, EnumConstant c) {
     eqtest.hasOperands(e, c.getAnAccess()) and
     polarity = eqtest.polarity()
   )
+}
+
+/** Gets an instanceof expression of `v` with type `type` */
+InstanceOfExpr instanceofExpr(SsaVariable v, Type type) {
+  result.getTypeName().getType() = type and
+  result.getExpr() = v.getAUse()
+}
+
+/**
+ * Gets an expression of the form `v1 == v2` or `v1 != v2`.
+ * The predicate is symmetric in `v1` and `v2`.
+ */
+EqualityTest varEqualityTestExpr(SsaVariable v1, SsaVariable v2, boolean isEqualExpr) {
+  result.hasOperands(v1.getAUse(), v2.getAUse()) and
+  isEqualExpr = result.polarity()
 }
 
 /** Gets an expression that is provably not `null`. */
@@ -45,8 +59,6 @@ Expr clearlyNotNullExpr(Expr reason) {
     reason = result
   )
   or
-  result.(ParExpr).getExpr() = clearlyNotNullExpr(reason)
-  or
   result.(CastExpr).getExpr() = clearlyNotNullExpr(reason)
   or
   result.(AssignExpr).getSource() = clearlyNotNullExpr(reason)
@@ -67,6 +79,11 @@ Expr clearlyNotNullExpr(Expr reason) {
   )
   or
   exists(SsaVariable v | clearlyNotNull(v, reason) and result = v.getAUse())
+  or
+  exists(Method m | m = result.(MethodAccess).getMethod() and reason = result |
+    m.getDeclaringType().hasQualifiedName("com.google.common.base", "Strings") and
+    m.hasName("nullToEmpty")
+  )
 }
 
 /** Holds if `v` is an SSA variable that is provably not `null`. */
@@ -85,6 +102,12 @@ predicate clearlyNotNull(SsaVariable v, Expr reason) {
   exists(SsaVariable captured |
     v.(SsaImplicitInit).captures(captured) and
     clearlyNotNull(captured, reason)
+  )
+  or
+  exists(Field f |
+    v.getSourceVariable().getVariable() = f and
+    f.isFinal() and
+    f.getInitializer() = clearlyNotNullExpr(reason)
   )
 }
 
@@ -118,6 +141,19 @@ predicate nullCheckMethod(Method m, boolean branch, boolean isnull) {
   or
   m.getDeclaringType().hasQualifiedName("org.apache.commons.lang3", "StringUtils") and
   m.hasName("isBlank") and
+  branch = false and
+  isnull = false
+  or
+  (
+    m.getDeclaringType().hasQualifiedName("org.apache.commons.collections4", "CollectionUtils") or
+    m.getDeclaringType().hasQualifiedName("org.apache.commons.collections", "CollectionUtils")
+  ) and
+  m.hasName("isNotEmpty") and
+  branch = true and
+  isnull = false
+  or
+  m.getDeclaringType().hasQualifiedName("com.google.common.base", "Strings") and
+  m.hasName("isNullOrEmpty") and
   branch = false and
   isnull = false
 }

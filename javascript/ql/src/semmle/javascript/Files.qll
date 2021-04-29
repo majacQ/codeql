@@ -74,9 +74,7 @@ abstract class Container extends @container {
    * <tr><td>"//FileServer/"</td><td>""</td></tr>
    * </table>
    */
-  string getBaseName() {
-    result = getAbsolutePath().regexpCapture(".*/(([^/]*?)(\\.([^.]*))?)", 1)
-  }
+  string getBaseName() { result = getAbsolutePath().regexpCapture(".*/(([^/]*?)(\\.([^.]*))?)", 1) }
 
   /**
    * Gets the extension of this container, that is, the suffix of its base name
@@ -101,7 +99,9 @@ abstract class Container extends @container {
    * <tr><td>"/tmp/x.tar.gz"</td><td>"gz"</td></tr>
    * </table>
    */
-  string getExtension() { result = getAbsolutePath().regexpCapture(".*/(([^/]*?)(\\.([^.]*))?)", 4) }
+  string getExtension() {
+    result = getAbsolutePath().regexpCapture(".*/(([^/]*?)(\\.([^.]*))?)", 4)
+  }
 
   /**
    * Gets the stem of this container, that is, the prefix of its base name up to
@@ -183,11 +183,8 @@ class Folder extends Container, @folder {
    * HTML files will not be found by this method.
    */
   File getJavaScriptFile(string stem) {
-    result = min(int p, string ext |
-        p = getFileExtensionPriority(ext)
-      |
-        getFile(stem, ext) order by p
-      )
+    result =
+      min(int p, string ext | p = getFileExtensionPriority(ext) | getFile(stem, ext) order by p)
   }
 
   /** Gets a subfolder contained in this folder. */
@@ -198,19 +195,24 @@ class Folder extends Container, @folder {
 }
 
 /** A file. */
-class File extends Container, @file, Locatable {
-  override Location getLocation() { hasLocation(this, result) }
+class File extends Container, @file {
+  /**
+   * Gets the location of this file.
+   *
+   * Note that files have special locations starting and ending at line zero, column zero.
+   */
+  Location getLocation() { hasLocation(this, result) }
 
   override string getAbsolutePath() { files(this, result, _, _, _) }
 
   /** Gets the number of lines in this file. */
-  int getNumberOfLines() { numlines(this, result, _, _) }
+  int getNumberOfLines() { result = sum(int loc | numlines(this, loc, _, _) | loc) }
 
   /** Gets the number of lines containing code in this file. */
-  int getNumberOfLinesOfCode() { numlines(this, _, result, _) }
+  int getNumberOfLinesOfCode() { result = sum(int loc | numlines(this, _, loc, _) | loc) }
 
   /** Gets the number of lines containing comments in this file. */
-  int getNumberOfLinesOfComments() { numlines(this, _, _, result) }
+  int getNumberOfLinesOfComments() { result = sum(int loc | numlines(this, _, _, loc) | loc) }
 
   /** Gets a toplevel piece of JavaScript code in this file. */
   TopLevel getATopLevel() { result.getFile() = this }

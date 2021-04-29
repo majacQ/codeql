@@ -1,15 +1,24 @@
+/**
+ * Provides a class to model C/C++ block statements, enclosed by `{` and `}`.
+ */
+
 import semmle.code.cpp.Element
 import semmle.code.cpp.stmts.Stmt
 
 /**
- * A C/C++ block statement. 
+ * A C/C++ block statement.
  *
- * For example,
+ * For example, the block from `{` to `}` in the following code:
  * ```
- * { int a; int b = 1; a = b; }
+ * {
+ *   int a;
+ *   int b = 1;
+ *   a = b;
+ * }
  * ```
  */
-class Block extends Stmt, @stmt_block {
+class BlockStmt extends Stmt, @stmt_block {
+  override string getAPrimaryQlClass() { result = "BlockStmt" }
 
   /**
    * Gets a child declaration of this block.
@@ -20,9 +29,7 @@ class Block extends Stmt, @stmt_block {
    * ```
    * it would have 2 results, for the declarations of `a` and `b`.
    */
-  Declaration getADeclaration() {
-    result = this.getAStmt().(DeclStmt).getADeclaration()
-  }
+  Declaration getADeclaration() { result = this.getAStmt().(DeclStmt).getADeclaration() }
 
   /**
    * Gets a body statement of this block.
@@ -46,7 +53,7 @@ class Block extends Stmt, @stmt_block {
    * `getStmt(2)`'s result is the expression statement `a = b`.
    */
   Stmt getStmt(int n) { result = this.getChild(n) }
-  
+
   /**
    * Gets the last body statement of this block.
    *
@@ -56,7 +63,7 @@ class Block extends Stmt, @stmt_block {
    * ```
    * the result is the expression statement `a = b`.
    */
-  Stmt getLastStmt() { result = this.getStmt(this.getNumStmt()-1) }
+  Stmt getLastStmt() { result = this.getStmt(this.getNumStmt() - 1) }
 
   /**
    * Gets the last body statement of this block. If this last statement
@@ -69,11 +76,9 @@ class Block extends Stmt, @stmt_block {
    * the result is the expression statement `a = b`.
    */
   Stmt getLastStmtIn() {
-    if getLastStmt() instanceof Block then (
-      result = getLastStmt().(Block).getLastStmtIn()
-    ) else (
-      result = getLastStmt()
-    )
+    if getLastStmt() instanceof BlockStmt
+    then result = getLastStmt().(BlockStmt).getLastStmtIn()
+    else result = getLastStmt()
   }
 
   /**
@@ -86,15 +91,15 @@ class Block extends Stmt, @stmt_block {
    * the result is 3.
    */
   int getNumStmt() { result = count(this.getAStmt()) }
-  
+
   /**
    * Holds if the block has no statements.
-   * 
-   * For example, the block 
+   *
+   * For example, the block
    * ```
    * { }
    * ```
-   * is empty, as is the block 
+   * is empty, as is the block
    * ```
    * {
    *   // a comment
@@ -117,12 +122,13 @@ class Block extends Stmt, @stmt_block {
 
   override string toString() { result = "{ ... }" }
 
-  override predicate mayBeImpure() {
-    this.getAStmt().mayBeImpure()
-  }
+  override predicate mayBeImpure() { this.getAStmt().mayBeImpure() }
 
-  override predicate mayBeGloballyImpure() {
-    this.getAStmt().mayBeGloballyImpure()
-  }
-
+  override predicate mayBeGloballyImpure() { this.getAStmt().mayBeGloballyImpure() }
 }
+
+/**
+ * DEPRECATED: This is now called `BlockStmt` to avoid confusion with
+ * `BasicBlock`.
+ */
+deprecated class Block = BlockStmt;

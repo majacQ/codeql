@@ -12,24 +12,24 @@ private predicate isEscape(DataFlow::Node escape, string cause) {
   or
   escape = any(DataFlow::FunctionNode fun).getAReturn() and cause = "return"
   or
+  escape = any(YieldExpr yield).getOperand().flow() and cause = "yield"
+  or
   escape = any(ThrowStmt t).getExpr().flow() and cause = "throw"
   or
-  escape = any(DataFlow::GlobalVariable v).getAnAssignedExpr().flow() and cause = "global"
+  escape = any(GlobalVariable v).getAnAssignedExpr().flow() and cause = "global"
   or
   escape = any(DataFlow::PropWrite write).getRhs() and cause = "heap"
   or
   escape = any(ExportDeclaration e).getSourceNode(_) and cause = "export"
   or
-  exists (WithStmt with, Assignment assign |
+  exists(WithStmt with, Assignment assign |
     with.mayAffect(assign.getLhs()) and
     assign.getRhs().flow() = escape and
     cause = "heap"
   )
 }
 
-private DataFlow::Node getAnEscape() {
-  isEscape(result, _)
-}
+private DataFlow::Node getAnEscape() { isEscape(result, _) }
 
 /**
  * Holds if `n` can flow to a `this`-variable.
@@ -67,14 +67,31 @@ class LocalObject extends DataFlow::SourceNode {
     not exposedAsReceiver(this)
   }
 
+  pragma[nomagic]
   predicate hasOwnProperty(string name) {
     // the property is defined in the initializer,
     any(DataFlow::PropWrite write).writes(this, name, _) and
     // and it is never deleted
-    not exists(DeleteExpr del, DataFlow::PropRef ref |
+    not hasDeleteWithName(name) and
+    // and there is no deleted property with computed name
+    not hasDeleteWithComputedProperty()
+  }
+
+  pragma[noinline]
+  private predicate hasDeleteWithName(string name) {
+    exists(DeleteExpr del, DataFlow::PropRef ref |
       del.getOperand().flow() = ref and
       flowsTo(ref.getBase()) and
-      (ref.getPropertyName() = name or not exists(ref.getPropertyName()))
+      ref.getPropertyName() = name
+    )
+  }
+
+  pragma[noinline]
+  private predicate hasDeleteWithComputedProperty() {
+    exists(DeleteExpr del, DataFlow::PropRef ref |
+      del.getOperand().flow() = ref and
+      flowsTo(ref.getBase()) and
+      not exists(ref.getPropertyName())
     )
   }
 }

@@ -15,14 +15,10 @@
  */
 
 import python
-import semmle.python.security.Paths
+import semmle.python.security.dataflow.CommandInjection
+import DataFlow::PathGraph
 
-/* Sources */
-import semmle.python.web.HttpRequest
-
-/* Sinks */
-import semmle.python.security.injection.Command
-
-from TaintedPathSource src, TaintedPathSink sink
-where src.flowsTo(sink)
-select sink.getSink(), src, sink, "This command depends on $@.", src.getSource(), "a user-provided value"
+from CommandInjectionConfiguration config, DataFlow::PathNode source, DataFlow::PathNode sink
+where config.hasFlowPath(source, sink)
+select sink.getNode(), source, sink, "This command depends on $@.", source.getNode(),
+  "a user-provided value"

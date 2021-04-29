@@ -1,4 +1,3 @@
-
 /**
  * Provides classes for working with [Koa](https://koajs.com) applications.
  */
@@ -10,9 +9,9 @@ module Koa {
   /**
    * An expression that creates a new Koa application.
    */
-  class AppDefinition extends HTTP::Servers::StandardServerDefinition, NewExpr {
+  class AppDefinition extends HTTP::Servers::StandardServerDefinition, InvokeExpr {
     AppDefinition() {
-      // `app = new Koa()`
+      // `app = new Koa()` / `app = Koa()`
       this = DataFlow::moduleImport("koa").getAnInvocation().asExpr()
     }
   }
@@ -48,7 +47,7 @@ module Koa {
     /**
      * Gets the parameter of the route handler that contains the context object.
      */
-    SimpleParameter getContextParameter() { result = function.getParameter(0) }
+    Parameter getContextParameter() { result = function.getParameter(0) }
 
     /**
      * Gets an expression that contains the "context" object of
@@ -91,17 +90,13 @@ module Koa {
      */
     RouteHandler getRouteHandler() { result = rh }
 
-    predicate flowsTo(DataFlow::Node nd) {
-      ref(DataFlow::TypeTracker::end()).flowsTo(nd)
-    }
+    predicate flowsTo(DataFlow::Node nd) { ref(DataFlow::TypeTracker::end()).flowsTo(nd) }
 
     private DataFlow::SourceNode ref(DataFlow::TypeTracker t) {
       t.start() and
       result = this
       or
-      exists(DataFlow::TypeTracker t2 |
-        result = ref(t2).track(t2, t)
-      )
+      exists(DataFlow::TypeTracker t2 | result = ref(t2).track(t2, t))
     }
   }
 
@@ -118,6 +113,26 @@ module Koa {
      * Gets the route handler that provides this response.
      */
     override RouteHandler getRouteHandler() { result = ctx.getRouteHandler() }
+  }
+
+  /**
+   * A Koa request source, accessed through the a request property of a
+   * generator route handler (deprecated in Koa 3).
+   */
+  private class GeneratorRequestSource extends HTTP::Servers::RequestSource {
+    RouteHandler rh;
+
+    GeneratorRequestSource() {
+      exists(DataFlow::FunctionNode fun | fun = rh |
+        fun.getFunction().isGenerator() and
+        fun.getReceiver().getAPropertyRead("request") = this
+      )
+    }
+
+    /**
+     * Gets the route handler that provides this response.
+     */
+    override RouteHandler getRouteHandler() { result = rh }
   }
 
   /**
@@ -168,7 +183,6 @@ module Koa {
    */
   private class RequestInputAccess extends HTTP::RequestInputAccess {
     RouteHandler rh;
-
     string kind;
 
     RequestInputAccess() {
@@ -284,9 +298,8 @@ module Koa {
 
     ResponseSendArgument() {
       exists(DataFlow::PropWrite pwn |
-        pwn
-            .writes(DataFlow::valueNode(rh.getAResponseOrContextExpr()), "body",
-              DataFlow::valueNode(this))
+        pwn.writes(DataFlow::valueNode(rh.getAResponseOrContextExpr()), "body",
+          DataFlow::valueNode(this))
       )
     }
 

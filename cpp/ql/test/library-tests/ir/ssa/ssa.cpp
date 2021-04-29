@@ -139,7 +139,7 @@ void MergeMustExactlyWithMustTotallyOverlap(bool c, Point p, int x1) {
   else {
     a = p;
   }
-  int x = a.x;  // Only one reaching def must exactly overlap, but we should still get a Phi for it.
+  int x = a.x;  // Only one (non-Chi) reaching def must exactly overlap, but we should still get a Phi for it.
 }
 
 void MergeMustExactlyWithMayPartiallyOverlap(bool c, Point p, int x1) {
@@ -190,3 +190,124 @@ static void AsmStmtWithOutputs(unsigned int& a, unsigned int& b, unsigned int& c
     : "c" (c), "d" (d)
     );
 }
+
+int strcmp(const char *, const char *);
+int strlen(const char *);
+int abs(int);
+
+int PureFunctions(char *str1, char *str2, int x) {
+  int ret = strcmp(str1, str2);
+  ret += strlen(str1);
+  ret += abs(x);
+  return ret;
+}
+
+void *memcpy(void *dst, void *src, int size);
+
+int ModeledCallTarget(int x) {
+  int y;
+  memcpy(&y, &x, sizeof(int));
+  return y;
+}
+
+void InitArray() {
+    char a_pad[32] = ""; 
+    char a_nopad[4] = "foo";
+    char a_infer[] = "blah";
+    char b[2];
+    char c[2] = {};
+    char d[2] = { 0 };
+    char e[2] = { 0, 1 };
+    char f[3] = { 0 };
+}
+
+extern void ExternalFunc();
+
+char StringLiteralAliasing() {
+  ExternalFunc();
+
+  const char* s = "Literal";
+  return s[2];  // Should be defined by `AliasedDefinition`, not `Chi` or `CallSideEffect`.
+}
+
+class Constructible {
+  public:
+    Constructible(int x) {};
+    void g() {}
+};
+
+void ExplicitConstructorCalls() {
+  Constructible c(1);
+  c.g();
+  c.g();
+  Constructible c2 = Constructible(2);
+  c2.g();
+}
+
+char *VoidStarIndirectParameters(char *src, int size) {
+  char *dst = new char[size];
+  *src = 'a';
+  memcpy(dst, src, size);
+  return dst;
+}
+
+char StringLiteralAliasing2(bool b) {
+  if (b) {
+    ExternalFunc();
+  }
+  else {
+    ExternalFunc();
+  }
+
+  const char* s = "Literal";
+  return s[2];
+}
+
+void *malloc(int size);
+
+void *MallocAliasing(void *s, int size) {
+  void *buf = malloc(size);
+  memcpy(buf, s, size);
+  return buf;
+}
+
+Point *pp;
+void EscapedButNotConflated(bool c, Point p, int x1) {
+  Point a = {};
+  pp = &a; // `a` escapes here and therefore belongs to the aliased vvar
+  if (c) {
+    a.x = x1;
+  }
+  int x = a.x; // The phi node here is not conflated
+}
+
+struct A {
+  int i;
+  A(int x) {}
+  A(A*) {}
+  A() {}
+};
+
+Point *NewAliasing(int x) {
+  Point* p = new Point;
+  Point* q = new Point;
+  int j = (new A(new A(x)))->i;
+  A* a = new A;
+  return p;
+}
+
+void unknownFunction(int argc, char **argv);
+
+int main(int argc, char **argv) {
+  unknownFunction(argc, argv);
+  unknownFunction(argc, argv);
+  return **argv; // Chi chain goes through side effects from unknownFunction
+}
+
+class ThisAliasTest {
+  int x, y;
+  
+  void setX(int arg) {
+    this->x = arg;
+  }
+};

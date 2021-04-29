@@ -13,8 +13,15 @@
 import python
 import IsComparisons
 
-from Compare comp, Cmpop op, ClassObject c, string alt
-where invalid_portable_is_comparison(comp, op, c) and
-not cpython_interned_constant(comp.getASubExpression()) and
-(op instanceof Is and alt = "==" or op instanceof IsNot and alt = "!=")
-select comp, "Values compared using '" + op.getSymbol() + "' when equivalence is not the same as identity. Use '" + alt + "' instead."
+from Compare comp, Cmpop op, ClassValue c, string alt
+where
+  invalid_portable_is_comparison(comp, op, c) and
+  not cpython_interned_constant(comp.getASubExpression()) and
+  (
+    op instanceof Is and alt = "=="
+    or
+    op instanceof IsNot and alt = "!="
+  )
+select comp,
+  "Values compared using '" + op.getSymbol() +
+    "' when equivalence is not the same as identity. Use '" + alt + "' instead."

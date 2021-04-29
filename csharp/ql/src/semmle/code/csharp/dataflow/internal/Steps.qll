@@ -52,7 +52,7 @@ module Steps {
   private predicate flowIn(Parameter p, Expr pred, AssignableRead succ) {
     exists(AssignableDefinitions::ImplicitParameterDefinition def, Call c | succ = getARead(def) |
       pred = getArgumentForOverridderParameter(c, p) and
-      p.getSourceDeclaration() = def.getParameter()
+      p.getUnboundDeclaration() = def.getParameter()
     )
   }
 
@@ -78,7 +78,7 @@ module Steps {
    * assumption. For example, there is flow from `0` on line 3 to `i` on line
    * 8 and from `1` on line 4 to `i` on line 12 in
    *
-   * ```
+   * ```csharp
    * public class C {
    *   public void A() {
    *     B(0);
@@ -106,7 +106,7 @@ module Steps {
    * 8 (but not from `1` on line 4 to `i` on line 12 because `C` is virtual)
    * in
    *
-   * ```
+   * ```csharp
    * public class C {
    *   public void A() {
    *     B(0);

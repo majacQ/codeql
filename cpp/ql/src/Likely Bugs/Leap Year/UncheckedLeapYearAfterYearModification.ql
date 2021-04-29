@@ -6,6 +6,7 @@
  * @id cpp/leap-year/unchecked-after-arithmetic-year-modification
  * @precision medium
  * @tags leap-year
+ *       correctness
  */
 
 import cpp
@@ -24,7 +25,7 @@ where
       exists(LeapYearFieldAccess yfacheck |
         yfacheck.getQualifier() = var.getAnAccess() and
         yfacheck.isUsedInCorrectLeapYearCheck() and
-        yfacheck = yfa.getASuccessor*()
+        yfacheck.getBasicBlock() = yfa.getBasicBlock().getASuccessor*()
       )
       or
       // If there is a data flow from the variable that was modified to a function that seems to check for leap year
@@ -50,8 +51,8 @@ where
         mfa.getQualifier() = var.getAnAccess() and
         mfa.isModified() and
         (
-          mfa = yfa.getASuccessor*() or
-          yfa = mfa.getASuccessor*()
+          mfa.getBasicBlock() = yfa.getBasicBlock().getASuccessor*() or
+          yfa.getBasicBlock() = mfa.getBasicBlock().getASuccessor+()
         ) and
         ae = mfa.getEnclosingElement() and
         ae.getAnOperand().getValue().toInt() = 1

@@ -14,27 +14,25 @@ import FilePermissions
 import semmle.code.cpp.commons.unix.Constants
 
 predicate worldWritableCreation(FileCreationExpr fc, int mode) {
-  mode = localUmask(fc).mask(fc.getMode())
-  and
+  mode = localUmask(fc).mask(fc.getMode()) and
   sets(mode, s_iwoth())
 }
 
 predicate setWorldWritable(FunctionCall fc, int mode) {
-  exists(string name | fc.getTarget().getName() = name |
-    name = "chmod" or
-    name = "fchmod" or
-    name = "_chmod" or
-    name = "_wchmod"
-  )
-  and
-  mode = fc.getArgument(1).getValue().toInt()
-  and
+  fc.getTarget().getName() = ["chmod", "fchmod", "_chmod", "_wchmod"] and
+  mode = fc.getArgument(1).getValue().toInt() and
   sets(mode, s_iwoth())
 }
 
 from Expr fc, int mode, string message
 where
-  worldWritableCreation(fc, mode) and message = "A file may be created here with mode "+octalFileMode(mode)+", which would make it world-writable."
+  worldWritableCreation(fc, mode) and
+  message =
+    "A file may be created here with mode " + octalFileMode(mode) +
+      ", which would make it world-writable."
   or
-  setWorldWritable(fc, mode) and message = "This sets a file's permissions to "+octalFileMode(mode)+", which would make it world-writable."
+  setWorldWritable(fc, mode) and
+  message =
+    "This sets a file's permissions to " + octalFileMode(mode) +
+      ", which would make it world-writable."
 select fc, message

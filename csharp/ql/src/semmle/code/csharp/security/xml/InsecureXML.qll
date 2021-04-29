@@ -17,11 +17,8 @@ module InsecureXML {
     // will not be present. In this case, we can revert back to the assembly version, which may not
     // contain full minor version information.
     exists(string assemblyVersion |
-      assemblyVersion = t
-            .getALocation()
-            .(Assembly)
-            .getVersion()
-            .regexpCapture("([0-9]+\\.[0-9]+).*", 1)
+      assemblyVersion =
+        t.getALocation().(Assembly).getVersion().regexpCapture("([0-9]+\\.[0-9]+).*", 1)
     |
       assemblyVersion.toFloat() < version.toFloat() and
       // This method is only accurate when we're looking at versions before 4.0.
@@ -87,8 +84,7 @@ module InsecureXML {
     or
     // values set on var that create is assigned to
     exists(Assignment propAssign |
-      DataFlow::localFlow(DataFlow::exprNode(create),
-        DataFlow::exprNode(propAssign.getLValue().(PropertyAccess).getQualifier())) and
+      DataFlow::localExprFlow(create, propAssign.getLValue().(PropertyAccess).getQualifier()) and
       propAssign.getLValue().(PropertyAccess).getTarget().hasName(prop) and
       result = propAssign.getRValue()
     )
@@ -146,6 +142,8 @@ module InsecureXML {
   }
 
   module XmlReader {
+    private import semmle.code.csharp.dataflow.DataFlow2
+
     class InsecureXmlReaderCreate extends InsecureXmlProcessing, MethodCall {
       InsecureXmlReaderCreate() { this.getTarget().hasQualifiedName("System.Xml.XmlReader.Create") }
 
@@ -188,7 +186,7 @@ module InsecureXML {
       }
     }
 
-    private class SettingsDataFlowConfig extends DataFlow::Configuration {
+    private class SettingsDataFlowConfig extends DataFlow2::Configuration {
       SettingsDataFlowConfig() { this = "SettingsDataFlowConfig" }
 
       override predicate isSource(DataFlow::Node source) {
@@ -251,9 +249,7 @@ module InsecureXML {
       }
 
       override predicate isUnsafe(string reason) {
-        exists(ObjectCreation creation |
-          DataFlow::localFlow(DataFlow::exprNode(creation), DataFlow::exprNode(this.getQualifier()))
-        |
+        exists(ObjectCreation creation | DataFlow::localExprFlow(creation, this.getQualifier()) |
           not exists(Expr xmlResolverVal |
             isSafeXmlResolver(xmlResolverVal) and
             xmlResolverVal = getAValueForProp(creation, "XmlResolver")

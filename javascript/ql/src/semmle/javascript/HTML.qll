@@ -11,7 +11,13 @@ module HTML {
   }
 
   /**
-   * An HTML element like `<a href="semmle.com">Semmle</a>`.
+   * An HTML element.
+   *
+   * Example:
+   *
+   * ```
+   * <a href="semmle.com">Semmle</a>
+   * ```
    */
   class Element extends Locatable, @xmlelement {
     Element() { exists(HtmlFile f | xmlElements(this, _, _, _, f)) }
@@ -74,13 +80,21 @@ module HTML {
     }
 
     override string toString() { result = "<" + getName() + ">...</>" }
+
+    override string getAPrimaryQlClass() { result = "HTML::Element" }
   }
 
   /**
    * An attribute of an HTML element.
    *
-   * For example, the element `<a href ="semmle.com" target=_blank>Semmle</a>`
-   * has two attributes: `href ="semmle.com"` and `target=_blank`.
+   * Examples:
+   *
+   * ```
+   * <a
+   *   href ="semmle.com"  <!-- an attribute -->
+   *   target=_blank       <!-- also an attribute -->
+   * >Semmle</a>
+   * ```
    */
   class Attribute extends Locatable, @xmlattribute {
     Attribute() { exists(HtmlFile f | xmlAttrs(this, _, _, _, _, f)) }
@@ -112,10 +126,48 @@ module HTML {
     string getValue() { xmlAttrs(this, _, _, result, _, _) }
 
     override string toString() { result = getName() + "=" + getValue() }
+
+    /**
+     * Gets the inline script of this attribute, if any.
+     */
+    CodeInAttribute getCodeInAttribute() {
+      exists(
+        string f, Location l1, int sl1, int sc1, int el1, int ec1, Location l2, int sl2, int sc2,
+        int el2, int ec2
+      |
+        l1 = getLocation() and
+        l2 = result.getLocation() and
+        l1.hasLocationInfo(f, sl1, sc1, el1, ec1) and
+        l2.hasLocationInfo(f, sl2, sc2, el2, ec2)
+      |
+        (
+          sl1 = sl2 and sc1 < sc2
+          or
+          sl1 < sl2
+        ) and
+        (
+          el1 = el2 and ec1 > ec2
+          or
+          el1 > el2
+        )
+      )
+    }
+
+    override string getAPrimaryQlClass() { result = "HTML::Attribute" }
   }
 
   /**
    * An HTML `<html>` element.
+   *
+   * Example:
+   *
+   * ```
+   * <html>
+   * <body>
+   * This is a test.
+   * </body>
+   * </html>
+   * ```
    */
   class DocumentElement extends Element {
     DocumentElement() { getName() = "html" }
@@ -123,6 +175,12 @@ module HTML {
 
   /**
    * An HTML `<script>` element.
+   *
+   * Example:
+   *
+   * ```
+   * <script src="https://code.jquery.com/jquery-3.4.1.js"></script>
+   * ```
    */
   class ScriptElement extends Element {
     ScriptElement() { getName() = "script" }
@@ -199,6 +257,8 @@ module HTML {
       result = getInlineScript() or
       result = resolveSource()
     }
+
+    override string getAPrimaryQlClass() { result = "HTML::ScriptElement" }
   }
 
   /**
@@ -222,7 +282,15 @@ module HTML {
   }
 
   /**
-   * An HTML text node like `<div>this-is-the-node</div>`.
+   * An HTML text node.
+   *
+   * Example:
+   *
+   * ```
+   * <div>
+   *   This text is represented as a text node.
+   * </div>
+   * ```
    *
    * Note that instances of this class are only available if extraction is done with `--html all` or `--experimental`.
    */
@@ -257,7 +325,13 @@ module HTML {
   }
 
   /**
-   * An HTML comment like <code>&lt;!&hyphen;&hyphen; this &hyphen;&hyphen;&gt;</code>.
+   * An HTML comment.
+   *
+   * Example:
+   *
+   * ```
+   * <!-- this is a comment -->
+   * ```
    */
   class CommentNode extends Locatable, @xmlcomment {
     CommentNode() { exists(HtmlFile f | xmlComments(this, _, _, f)) }

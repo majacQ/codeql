@@ -3,19 +3,37 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.CSharp.Entities;
 using Semmle.Extraction.Entities;
+using Semmle.Util;
 using Semmle.Util.Logging;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Populators
 {
     public class TypeContainerVisitor : CSharpSyntaxVisitor
     {
-        protected readonly Context cx;
-        protected readonly IEntity parent;
+        protected Context cx { get; }
+        protected IEntity parent { get; }
+        protected TextWriter trapFile { get; }
+        private readonly Lazy<Func<SyntaxNode, AttributeData>> attributeLookup;
 
-        public TypeContainerVisitor(Context cx, IEntity parent)
+        public TypeContainerVisitor(Context cx, TextWriter trapFile, IEntity parent)
         {
             this.cx = cx;
             this.parent = parent;
+            this.trapFile = trapFile;
+            attributeLookup = new Lazy<Func<SyntaxNode, AttributeData>>(() =>
+                {
+                    var dict = new Dictionary<SyntaxNode, AttributeData>();
+                    foreach (var attributeData in cx.Compilation.Assembly.GetAttributes().Concat(cx.Compilation.Assembly.Modules.SelectMany(m => m.GetAttributes())))
+                    {
+                        if (attributeData.ApplicationSyntaxReference?.GetSyntax() is SyntaxNode syntax)
+                            dict.Add(syntax, attributeData);
+                    }
+                    return dict.GetValueOrDefault;
+                });
         }
 
         public override void DefaultVisit(SyntaxNode node)
@@ -25,46 +43,50 @@ namespace Semmle.Extraction.CSharp.Populators
 
         public override void VisitDelegateDeclaration(DelegateDeclarationSyntax node)
         {
-            Entities.NamedType.Create(cx, cx.Model(node).GetDeclaredSymbol(node)).ExtractRecursive(parent);
+            Entities.NamedType.Create(cx, cx.GetModel(node).GetDeclaredSymbol(node)).ExtractRecursive(trapFile, parent);
         }
 
         public override void VisitClassDeclaration(ClassDeclarationSyntax classDecl)
         {
-            Entities.Type.Create(cx, cx.Model(classDecl).GetDeclaredSymbol(classDecl)).ExtractRecursive(parent);
+            Entities.Type.Create(cx, cx.GetModel(classDecl).GetDeclaredSymbol(classDecl)).ExtractRecursive(trapFile, parent);
         }
 
         public override void VisitStructDeclaration(StructDeclarationSyntax node)
         {
-            Entities.Type.Create(cx, cx.Model(node).GetDeclaredSymbol(node)).ExtractRecursive(parent);
+            Entities.Type.Create(cx, cx.GetModel(node).GetDeclaredSymbol(node)).ExtractRecursive(trapFile, parent);
         }
 
         public override void VisitEnumDeclaration(EnumDeclarationSyntax node)
         {
-            Entities.Type.Create(cx, cx.Model(node).GetDeclaredSymbol(node)).ExtractRecursive(parent);
+            Entities.Type.Create(cx, cx.GetModel(node).GetDeclaredSymbol(node)).ExtractRecursive(trapFile, parent);
         }
 
         public override void VisitInterfaceDeclaration(InterfaceDeclarationSyntax node)
         {
-            Entities.Type.Create(cx, cx.Model(node).GetDeclaredSymbol(node)).ExtractRecursive(parent);
+            Entities.Type.Create(cx, cx.GetModel(node).GetDeclaredSymbol(node)).ExtractRecursive(trapFile, parent);
         }
 
         public override void VisitAttributeList(AttributeListSyntax node)
         {
-            if (cx.Extractor.Standalone) return;
+            if (cx.Extractor.Standalone)
+                return;
 
             var outputAssembly = Assembly.CreateOutputAssembly(cx);
             foreach (var attribute in node.Attributes)
             {
-                var ae = new Attribute(cx, attribute, outputAssembly);
-                cx.BindComments(ae, attribute.GetLocation());
+                if (attributeLookup.Value(attribute) is AttributeData attributeData)
+                {
+                    var ae = Semmle.Extraction.CSharp.Entities.Attribute.Create(cx, attributeData, outputAssembly);
+                    cx.BindComments(ae, attribute.GetLocation());
+                }
             }
         }
     }
 
-    class TypeOrNamespaceVisitor : TypeContainerVisitor
+    internal class TypeOrNamespaceVisitor : TypeContainerVisitor
     {
-        public TypeOrNamespaceVisitor(Context cx, IEntity parent)
-            : base(cx, parent) { }
+        public TypeOrNamespaceVisitor(Context cx, TextWriter trapFile, IEntity parent)
+            : base(cx, trapFile, parent) { }
 
         public override void VisitUsingDirective(UsingDirectiveSyntax usingDirective)
         {
@@ -79,10 +101,10 @@ namespace Semmle.Extraction.CSharp.Populators
         }
     }
 
-    class CompilationUnitVisitor : TypeOrNamespaceVisitor
+    internal class CompilationUnitVisitor : TypeOrNamespaceVisitor
     {
         public CompilationUnitVisitor(Context cx)
-            : base(cx, null) { }
+            : base(cx, cx.TrapWriter.Writer, null) { }
 
         public override void VisitExternAliasDirective(ExternAliasDirectiveSyntax node)
         {
@@ -98,7 +120,7 @@ namespace Semmle.Extraction.CSharp.Populators
             }
 
             // Gather comments:
-            foreach (SyntaxTrivia trivia in compilationUnit.DescendantTrivia(compilationUnit.Span))
+            foreach (var trivia in compilationUnit.DescendantTrivia(compilationUnit.Span))
             {
                 CommentLine.Extract(cx, trivia);
             }
@@ -120,7 +142,7 @@ namespace Semmle.Extraction.CSharp.Populators
         public static void Extract(Context cx, SyntaxNode unit)
         {
             // Ensure that the file itself is populated in case the source file is totally empty
-            File.Create(cx, unit.SyntaxTree.FilePath);
+            Semmle.Extraction.Entities.File.Create(cx, unit.SyntaxTree.FilePath);
 
             ((CSharpSyntaxNode)unit).Accept(new CompilationUnitVisitor(cx));
         }

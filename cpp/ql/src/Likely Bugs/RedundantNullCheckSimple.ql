@@ -16,18 +16,20 @@
  * LGTM until its performance is well understood.
  */
 
+import cpp
 import semmle.code.cpp.ir.IR
 import semmle.code.cpp.ir.ValueNumbering
 
 class NullInstruction extends ConstantValueInstruction {
   NullInstruction() {
     this.getValue() = "0" and
-    this.getResultType().getUnspecifiedType() instanceof PointerType
+    this.getResultIRType() instanceof IRAddressType
   }
 }
 
 predicate explicitNullTestOfInstruction(Instruction checked, Instruction bool) {
-  bool = any(CompareInstruction cmp |
+  bool =
+    any(CompareInstruction cmp |
       exists(NullInstruction null |
         cmp.getLeft() = null and cmp.getRight() = checked
         or
@@ -39,16 +41,16 @@ predicate explicitNullTestOfInstruction(Instruction checked, Instruction bool) {
       )
     )
   or
-  bool = any(ConvertInstruction convert |
+  bool =
+    any(ConvertInstruction convert |
       checked = convert.getUnary() and
-      convert.getResultType() instanceof BoolType and
-      checked.getResultType() instanceof PointerType
+      convert.getResultIRType() instanceof IRBooleanType and
+      checked.getResultIRType() instanceof IRAddressType
     )
 }
 
 pragma[noinline]
-predicate candidateResult(LoadInstruction checked, ValueNumber value, IRBlock dominator)
-{
+predicate candidateResult(LoadInstruction checked, ValueNumber value, IRBlock dominator) {
   explicitNullTestOfInstruction(checked, _) and
   not checked.getAST().isInMacroExpansion() and
   value.getAnInstruction() = checked and

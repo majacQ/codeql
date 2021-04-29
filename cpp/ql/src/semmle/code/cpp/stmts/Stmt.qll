@@ -1,3 +1,7 @@
+/**
+ * Provides a hierarchy of classes for modeling C/C++ statements.
+ */
+
 import semmle.code.cpp.Element
 private import semmle.code.cpp.Enclosing
 private import semmle.code.cpp.internal.ResolveClass
@@ -6,11 +10,10 @@ private import semmle.code.cpp.internal.ResolveClass
  * A C/C++ statement.
  */
 class Stmt extends StmtParent, @stmt {
-
   /** Gets the `n`th child of this statement. */
   Element getChild(int n) {
-    stmtparents(unresolveElement(result),n,underlyingElement(this)) or
-    exprparents(unresolveElement(result),n,underlyingElement(this))
+    stmtparents(unresolveElement(result), n, underlyingElement(this)) or
+    exprparents(unresolveElement(result), n, underlyingElement(this))
   }
 
   /** Holds if `e` is the `n`th child of this statement. */
@@ -22,23 +25,22 @@ class Stmt extends StmtParent, @stmt {
   /**
    * Gets the nearest enclosing block of this statement in the source, if any.
    */
-  Block getEnclosingBlock() {
-    if getParentStmt() instanceof Block and
-       not (getParentStmt().(Block).getLocation() instanceof UnknownLocation)
-    then
-      result = getParentStmt()
-    else
-      result = getParentStmt().getEnclosingBlock()
+  BlockStmt getEnclosingBlock() {
+    if
+      getParentStmt() instanceof BlockStmt and
+      not getParentStmt().(BlockStmt).getLocation() instanceof UnknownLocation
+    then result = getParentStmt()
+    else result = getParentStmt().getEnclosingBlock()
   }
 
   /** Gets a child of this statement. */
-  Element getAChild() { exists (int n | result = this.getChild(n)) }
+  Element getAChild() { exists(int n | result = this.getChild(n)) }
 
   /** Gets the parent of this statement, if any. */
-  StmtParent getParent() { stmtparents(underlyingElement(this),_,unresolveElement(result)) }
+  StmtParent getParent() { stmtparents(underlyingElement(this), _, unresolveElement(result)) }
 
   /** Gets the parent statement of this statement, if any. */
-  Stmt getParentStmt() { stmtparents(underlyingElement(this),_,unresolveElement(result)) }
+  Stmt getParentStmt() { stmtparents(underlyingElement(this), _, unresolveElement(result)) }
 
   /** Gets a child statement of this statement. */
   Stmt getChildStmt() { result.getParentStmt() = this }
@@ -51,28 +53,26 @@ class Stmt extends StmtParent, @stmt {
    * to trace the flow of control instead.
    */
   Stmt getFollowingStmt() {
-    exists(Block b, int i | this   = b.getStmt(i) and
-                            result = b.getStmt(i+1))
+    exists(BlockStmt b, int i |
+      this = b.getStmt(i) and
+      result = b.getStmt(i + 1)
+    )
   }
 
-  override Location getLocation() { stmts(underlyingElement(this),_,result) }
+  override Location getLocation() { stmts(underlyingElement(this), _, result) }
 
   /**
    * Gets an int indicating the type of statement that this represents.
    *
    * DEPRECATED: use the subclasses of `Stmt` rather than relying on this predicate.
    */
-  deprecated int getKind() { stmts(underlyingElement(this),result,_) }
+  deprecated int getKind() { stmts(underlyingElement(this), result, _) }
 
   override string toString() { none() }
 
-  override Function getControlFlowScope() {
-    result = this.getEnclosingFunction()
-  }
+  override Function getControlFlowScope() { result = this.getEnclosingFunction() }
 
-  override Stmt getEnclosingStmt() {
-    result = this
-  }
+  override Stmt getEnclosingStmt() { result = this }
 
   /**
    * Holds if this statement is side-effect free (a conservative
@@ -87,16 +87,14 @@ class Stmt extends StmtParent, @stmt {
    * statement may be impure in the sense that its behavior is affected
    * by external factors, such as the contents of global variables.
    */
-  final predicate isPure() {
-    not this.mayBeImpure()
-  }
+  final predicate isPure() { not this.mayBeImpure() }
+
   /**
    * Holds if it is possible that this statement is impure. If we are not
    * sure, then it holds.
    */
-  predicate mayBeImpure() {
-    any()
-  }
+  predicate mayBeImpure() { any() }
+
   /**
    * Holds if it is possible that this statement is globally impure.
    *
@@ -107,17 +105,13 @@ class Stmt extends StmtParent, @stmt {
    * function as a whole will have no side-effects, even if it mutates
    * its own fresh stack variables.
    */
-  predicate mayBeGloballyImpure() {
-    any()
-  }
+  predicate mayBeGloballyImpure() { any() }
 
   /**
    * Gets an attribute of this statement, for example
    * `[[clang::fallthrough]]`.
    */
-  Attribute getAnAttribute() {
-    stmtattributes(underlyingElement(this), unresolveElement(result))
-  }
+  Attribute getAnAttribute() { stmtattributes(underlyingElement(this), unresolveElement(result)) }
 
   /**
    * Gets a macro invocation that generates this entire statement.
@@ -137,24 +131,20 @@ class Stmt extends StmtParent, @stmt {
    * Note that, unlike `isInMacroExpansion()` it is not necessary for
    * the macro to generate the terminating semi-colon.
    */
-  MacroInvocation getGeneratingMacro() {
-    result.getAnExpandedElement() = this
-  }
+  MacroInvocation getGeneratingMacro() { result.getAnExpandedElement() = this }
 
   /** Holds if this statement was generated by the compiler. */
-  predicate isCompilerGenerated() {
-    compgenerated(underlyingElement(this))
-  }
-
+  predicate isCompilerGenerated() { compgenerated(underlyingElement(this)) }
 }
+
+private class TStmtParent = @stmt or @expr;
 
 /**
  * An element that is the parent of a statement in the C/C++ AST.
  *
  * This is normally a statement, but may be a `StmtExpr`.
  */
-abstract class StmtParent extends ControlFlowNode {
-}
+class StmtParent extends ControlFlowNode, TStmtParent { }
 
 /**
  * A C/C++ 'expression' statement.
@@ -166,6 +156,7 @@ abstract class StmtParent extends ControlFlowNode {
  * is an assignment expression inside an 'expression' statement.
  */
 class ExprStmt extends Stmt, @stmt_expr {
+  override string getAPrimaryQlClass() { result = "ExprStmt" }
 
   /**
    * Gets the expression of this 'expression' statement.
@@ -181,9 +172,8 @@ class ExprStmt extends Stmt, @stmt_expr {
   override string toString() { result = "ExprStmt" }
 
   override predicate mayBeImpure() { this.getExpr().mayBeImpure() }
-  override predicate mayBeGloballyImpure() {
-    this.getExpr().mayBeGloballyImpure()
-  }
+
+  override predicate mayBeGloballyImpure() { this.getExpr().mayBeGloballyImpure() }
 
   override MacroInvocation getGeneratingMacro() {
     // We only need the expression to be in the macro, not the semicolon.
@@ -191,33 +181,44 @@ class ExprStmt extends Stmt, @stmt_expr {
   }
 }
 
+private class TControlStructure = TConditionalStmt or TLoop;
+
 /**
  * A C/C++ control structure, that is, either a conditional statement or
  * a loop.
  */
-abstract class ControlStructure extends Stmt {
+class ControlStructure extends Stmt, TControlStructure {
   /**
    * Gets the controlling expression of this control structure.
    *
    * This is the condition of 'if' statements and loops, and the
-   * switched expression for 'switch' statements. */
-  abstract Expr getControllingExpr();
+   * switched expression for 'switch' statements.
+   */
+  Expr getControllingExpr() { none() } // overridden by subclasses
 
   /** Gets a child declaration of this scope. */
   Declaration getADeclaration() { none() }
 }
 
+private class TConditionalStmt = @stmt_if or @stmt_constexpr_if or @stmt_switch;
+
 /**
  * A C/C++ conditional statement, that is, either an 'if' statement or a
  * 'switch' statement.
  */
-abstract class ConditionalStmt extends ControlStructure {
-}
+class ConditionalStmt extends ControlStructure, TConditionalStmt { }
 
 /**
- * A C/C++ 'if' statement.
+ * A C/C++ 'if' statement. For example, the `if` statement in the following
+ * code:
+ * ```
+ * if (x == 1) {
+ *   ...
+ * }
+ * ```
  */
 class IfStmt extends ConditionalStmt, @stmt_if {
+  override string getAPrimaryQlClass() { result = "IfStmt" }
 
   /**
    * Gets the condition expression of this 'if' statement.
@@ -239,7 +240,7 @@ class IfStmt extends ConditionalStmt, @stmt_if {
    * ```
    * if (b) { x = 1; }
    * ```
-   * the result is the `Block` `{ x = 1; }`.
+   * the result is the `BlockStmt` `{ x = 1; }`.
    */
   Stmt getThen() { if_then(underlyingElement(this), unresolveElement(result)) }
 
@@ -250,7 +251,7 @@ class IfStmt extends ConditionalStmt, @stmt_if {
    * ```
    * if (b) { x = 1; } else { x = 2; }
    * ```
-   * the result is the `Block` `{ x = 2; }`, and for
+   * the result is the `BlockStmt` `{ x = 2; }`, and for
    * ```
    * if (b) { x = 1; }
    * ```
@@ -279,6 +280,7 @@ class IfStmt extends ConditionalStmt, @stmt_if {
     this.getThen().mayBeImpure() or
     this.getElse().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getCondition().mayBeGloballyImpure() or
     this.getThen().mayBeGloballyImpure() or
@@ -293,27 +295,122 @@ class IfStmt extends ConditionalStmt, @stmt_if {
 }
 
 /**
+ * A C/C++ 'constexpr if' statement. For example, the `if constexpr` statement
+ * in the following code:
+ * ```
+ * if constexpr (x) {
+ *   ...
+ * }
+ * ```
+ */
+class ConstexprIfStmt extends ConditionalStmt, @stmt_constexpr_if {
+  override string getAPrimaryQlClass() { result = "ConstexprIfStmt" }
+
+  /**
+   * Gets the condition expression of this 'constexpr if' statement.
+   *
+   * For example, for
+   * ```
+   * if constexpr (b) { x = 1; }
+   * ```
+   * the result is `b`.
+   */
+  Expr getCondition() { result = this.getChild(0) }
+
+  override Expr getControllingExpr() { result = this.getCondition() }
+
+  /**
+   * Gets the 'then' statement of this 'constexpr if' statement.
+   *
+   * For example, for
+   * ```
+   * if constexpr (b) { x = 1; }
+   * ```
+   * the result is the `BlockStmt` `{ x = 1; }`.
+   */
+  Stmt getThen() { constexpr_if_then(underlyingElement(this), unresolveElement(result)) }
+
+  /**
+   * Gets the 'else' statement of this 'constexpr if' statement, if any.
+   *
+   * For example, for
+   * ```
+   * if constexpr (b) { x = 1; } else { x = 2; }
+   * ```
+   * the result is the `BlockStmt` `{ x = 2; }`, and for
+   * ```
+   * if constexpr (b) { x = 1; }
+   * ```
+   * there is no result.
+   */
+  Stmt getElse() { constexpr_if_else(underlyingElement(this), unresolveElement(result)) }
+
+  /**
+   * Holds if this 'constexpr if' statement has an 'else' statement.
+   *
+   * For example, this holds for
+   * ```
+   * if constexpr (b) { x = 1; } else { x = 2; }
+   * ```
+   * but not for
+   * ```
+   * if constexpr (b) { x = 1; }
+   * ```
+   */
+  predicate hasElse() { exists(Stmt s | this.getElse() = s) }
+
+  override string toString() { result = "if constexpr (...) ... " }
+
+  override predicate mayBeImpure() {
+    this.getCondition().mayBeImpure() or
+    this.getThen().mayBeImpure() or
+    this.getElse().mayBeImpure()
+  }
+
+  override predicate mayBeGloballyImpure() {
+    this.getCondition().mayBeGloballyImpure() or
+    this.getThen().mayBeGloballyImpure() or
+    this.getElse().mayBeGloballyImpure()
+  }
+
+  override MacroInvocation getGeneratingMacro() {
+    result.getAnExpandedElement() = this.getCondition() and
+    this.getThen().getGeneratingMacro() = result and
+    (this.hasElse() implies this.getElse().getGeneratingMacro() = result)
+  }
+}
+
+private class TLoop = @stmt_while or @stmt_end_test_while or @stmt_range_based_for or @stmt_for;
+
+/**
  * A C/C++ loop, that is, either a 'while' loop, a 'for' loop, or a
  * 'do' loop.
  */
-abstract class Loop extends ControlStructure {
+class Loop extends ControlStructure, TLoop {
   /** Gets the condition expression of this loop. */
-  abstract Expr getCondition();
+  Expr getCondition() { none() } // overridden in subclasses
+
   /** Gets the body statement of this loop. */
-  abstract Stmt getStmt();
+  Stmt getStmt() { none() } // overridden in subclasses
 }
 
 /**
  * A C/C++ 'while' statement.
  *
- * For example,
+ * For example, the `while` statement in the following code:
  * ```
- * while (b) { f(); }
+ * while (b) {
+ *   f();
+ * }
  * ```
  */
 class WhileStmt extends Loop, @stmt_while {
+  override string getAPrimaryQlClass() { result = "WhileStmt" }
+
   override Expr getCondition() { result = this.getChild(0) }
+
   override Expr getControllingExpr() { result = this.getCondition() }
+
   override Stmt getStmt() { while_body(underlyingElement(this), unresolveElement(result)) }
 
   override string toString() { result = "while (...) ..." }
@@ -322,6 +419,7 @@ class WhileStmt extends Loop, @stmt_while {
     this.getCondition().mayBeImpure() or
     this.getStmt().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getCondition().mayBeGloballyImpure() or
     this.getStmt().mayBeGloballyImpure()
@@ -340,20 +438,17 @@ class WhileStmt extends Loop, @stmt_while {
    * while(1) { ...; if(b) break; ...; }
    * ```
    */
-  predicate conditionAlwaysTrue() {
-    conditionAlwaysTrue(getCondition())
-  }
+  predicate conditionAlwaysTrue() { conditionAlwaysTrue(getCondition()) }
 
-  /** Holds if the loop condition is provably `false`.
+  /**
+   * Holds if the loop condition is provably `false`.
    *
    * For example, this holds for
    * ```
    * while(0) { ...; }
    * ```
    */
-  predicate conditionAlwaysFalse() {
-    conditionAlwaysFalse(getCondition())
-  }
+  predicate conditionAlwaysFalse() { conditionAlwaysFalse(getCondition()) }
 
   /**
    * Holds if the loop condition is provably `true` upon entry,
@@ -368,29 +463,31 @@ class WhileStmt extends Loop, @stmt_while {
    * `done = false`, but the condition may evaluate to `false` after
    * some iterations.
    */
-  predicate conditionAlwaysTrueUponEntry() {
-    loopConditionAlwaysTrueUponEntry(this, _)
-  }
+  predicate conditionAlwaysTrueUponEntry() { loopConditionAlwaysTrueUponEntry(this, _) }
 }
 
 /**
  * A C/C++ jump statement.
  */
-abstract class JumpStmt extends Stmt, @jump {
+class JumpStmt extends Stmt, @jump {
+  override string getAPrimaryQlClass() { result = "JumpStmt" }
 
   /** Gets the target of this jump statement. */
-  Stmt getTarget() { jumpinfo(underlyingElement(this),_,unresolveElement(result)) }
+  Stmt getTarget() { jumpinfo(underlyingElement(this), _, unresolveElement(result)) }
 }
 
 /**
  * A C/C++ 'goto' statement which jumps to a label.
  *
- * For example,
+ * For example, the `goto` statement in the following code:
  * ```
  * goto someLabel;
+ * ...
+ * somelabel:
  * ```
  */
 class GotoStmt extends JumpStmt, @stmt_goto {
+  override string getAPrimaryQlClass() { result = "GotoStmt" }
 
   /**
    * Gets the name of the label this 'goto' statement refers to.
@@ -401,10 +498,10 @@ class GotoStmt extends JumpStmt, @stmt_goto {
    * ```
    * the result is `"someLabel"`.
    */
-  string getName() { jumpinfo(underlyingElement(this),result,_) and result != "" }
+  string getName() { jumpinfo(underlyingElement(this), result, _) and result != "" }
 
   /** Holds if this 'goto' statement refers to a label. */
-  predicate hasName() { exists(string s | jumpinfo(underlyingElement(this),s,_) and s != "") }
+  predicate hasName() { exists(string s | jumpinfo(underlyingElement(this), s, _) and s != "") }
 
   override string toString() { result = "goto ..." }
 
@@ -430,10 +527,12 @@ class GotoStmt extends JumpStmt, @stmt_goto {
     exists(Loop l1, Loop l2 |
       this.getParentStmt+() = l1 and
       l1.getParentStmt+() = l2 and
-      l2.getParentStmt+() = this.getASuccessor().(Stmt).getParentStmt())
+      l2.getParentStmt+() = this.getASuccessor().(Stmt).getParentStmt()
+    )
   }
 
   override predicate mayBeImpure() { none() }
+
   override predicate mayBeGloballyImpure() { none() }
 }
 
@@ -441,13 +540,12 @@ class GotoStmt extends JumpStmt, @stmt_goto {
  * A 'goto' statement whose target is computed by a non-constant
  * expression (a non-standard extension to C/C++).
  *
- * For example,
+ * For example, the `goto` statement in the following code:
  * ```
  * goto *ptr;
  * ```
  */
 class ComputedGotoStmt extends Stmt, @stmt_assigned_goto {
-
   /**
    * Gets the expression used to compute the target of this 'goto'
    * statement.
@@ -463,9 +561,8 @@ class ComputedGotoStmt extends Stmt, @stmt_assigned_goto {
   override string toString() { result = "computed goto ..." }
 
   override predicate mayBeImpure() { this.getExpr().mayBeImpure() }
-  override predicate mayBeGloballyImpure() {
-    this.getExpr().mayBeGloballyImpure()
-  }
+
+  override predicate mayBeGloballyImpure() { this.getExpr().mayBeGloballyImpure() }
 
   override MacroInvocation getGeneratingMacro() {
     // We only need the expression to be in the macro, not the semicolon.
@@ -476,24 +573,27 @@ class ComputedGotoStmt extends Stmt, @stmt_assigned_goto {
 /**
  * A C/C++ 'continue' statement.
  *
- * For example,
+ * For example, the `continue` statement in the following code:
  * ```
- * continue;
+ * while (x) {
+ *   if (arr[x] < 0) continue;
+ *   ...
+ * }
  * ```
  */
 class ContinueStmt extends JumpStmt, @stmt_continue {
+  override string getAPrimaryQlClass() { result = "ContinueStmt" }
 
   override string toString() { result = "continue;" }
 
   override predicate mayBeImpure() { none() }
+
   override predicate mayBeGloballyImpure() { none() }
-  
+
   /**
    * Gets the loop that this continue statement will jump to the beginning of.
    */
-  Stmt getContinuable() {
-    result = getEnclosingContinuable(this)
-  }
+  Stmt getContinuable() { result = getEnclosingContinuable(this) }
 }
 
 private Stmt getEnclosingContinuable(Stmt s) {
@@ -505,28 +605,33 @@ private Stmt getEnclosingContinuable(Stmt s) {
 /**
  * A C/C++ 'break' statement.
  *
- * For example,
+ * For example, the `break` statement in the following code:
  * ```
- * break;
+ * while (x) {
+ *   if (arr[x] == 0) break;
+ *   ...
+ * }
  * ```
  */
 class BreakStmt extends JumpStmt, @stmt_break {
+  override string getAPrimaryQlClass() { result = "BreakStmt" }
 
   override string toString() { result = "break;" }
 
   override predicate mayBeImpure() { none() }
+
   override predicate mayBeGloballyImpure() { none() }
-  
+
   /**
    * Gets the loop or switch statement that this break statement will exit.
    */
-  Stmt getBreakable() {
-    result = getEnclosingBreakable(this)
-  }
+  Stmt getBreakable() { result = getEnclosingBreakable(this) }
 }
 
 private Stmt getEnclosingBreakable(Stmt s) {
-  if s.getParent().getEnclosingStmt() instanceof Loop or s.getParent().getEnclosingStmt() instanceof SwitchStmt
+  if
+    s.getParent().getEnclosingStmt() instanceof Loop or
+    s.getParent().getEnclosingStmt() instanceof SwitchStmt
   then result = s.getParent().getEnclosingStmt()
   else result = getEnclosingBreakable(s.getParent().getEnclosingStmt())
 }
@@ -534,15 +639,18 @@ private Stmt getEnclosingBreakable(Stmt s) {
 /**
  * A C/C++ 'label' statement.
  *
- * For example,
+ * For example, the `somelabel:` statement in the following code:
  * ```
- * someLabel:
+ * goto someLabel;
+ * ...
+ * somelabel:
  * ```
  */
 class LabelStmt extends Stmt, @stmt_label {
+  override string getAPrimaryQlClass() { result = "LabelStmt" }
 
   /** Gets the name of this 'label' statement. */
-  string getName() { jumpinfo(underlyingElement(this),result,_) and result != "" }
+  string getName() { jumpinfo(underlyingElement(this), result, _) and result != "" }
 
   /** Holds if this 'label' statement is named. */
   predicate isNamed() { exists(this.getName()) }
@@ -550,13 +658,75 @@ class LabelStmt extends Stmt, @stmt_label {
   override string toString() { result = "label ...:" }
 
   override predicate mayBeImpure() { none() }
+
   override predicate mayBeGloballyImpure() { none() }
+}
+
+/**
+ * A C/C++ `co_return` statement.
+ *
+ * For example:
+ * ```
+ * co_return 1+2;
+ * ```
+ * or
+ * ```
+ * co_return;
+ * ```
+ */
+class CoReturnStmt extends Stmt, @stmt_co_return {
+  override string getAPrimaryQlClass() { result = "CoReturnStmt" }
+
+  /**
+   * Gets the operand of this `co_return` statement.
+   *
+   * For example, for
+   * ```
+   * co_return 1+2;
+   * ```
+   * the operand is a function call `return_value(1+2)`, and for
+   * ```
+   * co_return;
+   * ```
+   * the operand is a function call `return_void()`.
+   */
+  FunctionCall getOperand() { result = this.getChild(0) }
+
+  /**
+   * Gets the expression of this `co_return` statement, if any.
+   *
+   * For example, for
+   * ```
+   * co_return 1+2;
+   * ```
+   * the result is `1+2`, and there is no result for
+   * ```
+   * co_return;
+   * ```
+   */
+  Expr getExpr() { result = this.getOperand().getArgument(0) }
+
+  /**
+   * Holds if this `co_return` statement has an expression.
+   *
+   * For example, this holds for
+   * ```
+   * co_return 1+2;
+   * ```
+   * but not for
+   * ```
+   * co_return;
+   * ```
+   */
+  predicate hasExpr() { exists(this.getExpr()) }
+
+  override string toString() { result = "co_return ..." }
 }
 
 /**
  * A C/C++ 'return' statement.
  *
- * For example,
+ * For example:
  * ```
  * return 1+2;
  * ```
@@ -566,6 +736,7 @@ class LabelStmt extends Stmt, @stmt_label {
  * ```
  */
 class ReturnStmt extends Stmt, @stmt_return {
+  override string getAPrimaryQlClass() { result = "ReturnStmt" }
 
   /**
    * Gets the expression of this 'return' statement.
@@ -597,18 +768,15 @@ class ReturnStmt extends Stmt, @stmt_return {
 
   override string toString() { result = "return ..." }
 
-  override predicate mayBeImpure() {
-    this.getExpr().mayBeImpure()
-  }
-  override predicate mayBeGloballyImpure() {
-    this.getExpr().mayBeGloballyImpure()
-  }
+  override predicate mayBeImpure() { this.getExpr().mayBeImpure() }
+
+  override predicate mayBeGloballyImpure() { this.getExpr().mayBeGloballyImpure() }
 }
 
 /**
  * A C/C++ 'do' statement.
  *
- * For example,
+ * For example, the `do` ... `while` in the following code:
  * ```
  * do {
  *     x = x + 1;
@@ -616,9 +784,12 @@ class ReturnStmt extends Stmt, @stmt_return {
  * ```
  */
 class DoStmt extends Loop, @stmt_end_test_while {
+  override string getAPrimaryQlClass() { result = "DoStmt" }
 
   override Expr getCondition() { result = this.getChild(0) }
+
   override Expr getControllingExpr() { result = this.getCondition() }
+
   override Stmt getStmt() { do_body(underlyingElement(this), unresolveElement(result)) }
 
   override string toString() { result = "do (...) ..." }
@@ -627,6 +798,7 @@ class DoStmt extends Loop, @stmt_end_test_while {
     this.getCondition().mayBeImpure() or
     this.getStmt().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getCondition().mayBeGloballyImpure() or
     this.getStmt().mayBeGloballyImpure()
@@ -661,6 +833,8 @@ class DoStmt extends Loop, @stmt_end_test_while {
  * where `begin_expr` and `end_expr` depend on the type of `xs`.
  */
 class RangeBasedForStmt extends Loop, @stmt_range_based_for {
+  override string getAPrimaryQlClass() { result = "RangeBasedForStmt" }
+
   /**
    * Gets the 'body' statement of this range-based 'for' statement.
    *
@@ -668,7 +842,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * ```
    * for (int x : xs) { y += x; }
    * ```
-   * the result is the `Block` `{ y += x; }`.
+   * the result is the `BlockStmt` `{ y += x; }`.
    */
   override Stmt getStmt() { result = this.getChild(5) }
 
@@ -697,9 +871,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
   Expr getRange() { result = getRangeVariable().getInitializer().getExpr() }
 
   /** Gets the compiler-generated `__range` variable after desugaring. */
-  LocalVariable getRangeVariable() {
-    result = getChild(0).(DeclStmt).getADeclaration()
-  }
+  LocalVariable getRangeVariable() { result = getChild(0).(DeclStmt).getADeclaration() }
 
   /**
    * Gets the compiler-generated `__begin != __end` which is the
@@ -708,6 +880,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
    * `operator!=`.
    */
   override Expr getCondition() { result = this.getChild(2) }
+
   override Expr getControllingExpr() { result = this.getCondition() }
 
   /**
@@ -718,14 +891,10 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
   DeclStmt getBeginEndDeclaration() { result = this.getChild(1) }
 
   /** Gets the compiler-generated `__begin` variable after desugaring. */
-  LocalVariable getBeginVariable() {
-    result = getBeginEndDeclaration().getDeclaration(0)
-  }
+  LocalVariable getBeginVariable() { result = getBeginEndDeclaration().getDeclaration(0) }
 
   /** Gets the compiler-generated `__end` variable after desugaring. */
-  LocalVariable getEndVariable() {
-    result = getBeginEndDeclaration().getDeclaration(1)
-  }
+  LocalVariable getEndVariable() { result = getBeginEndDeclaration().getDeclaration(1) }
 
   /**
    * Gets the compiler-generated `++__begin` which is the update
@@ -736,9 +905,7 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
   Expr getUpdate() { result = this.getChild(3) }
 
   /** Gets the compiler-generated `__begin` variable after desugaring. */
-  LocalVariable getAnIterationVariable() {
-    result = getBeginVariable()
-  }
+  LocalVariable getAnIterationVariable() { result = getBeginVariable() }
 }
 
 /**
@@ -747,12 +914,13 @@ class RangeBasedForStmt extends Loop, @stmt_range_based_for {
  * This only represents "traditional" 'for' statements and not C++11
  * range-based 'for' statements or Objective C 'for-in' statements.
  *
- * For example,
+ * For example, the `for` statement in:
  * ```
  * for (i = 0; i < 10; i++) { j++; }
  * ```
  */
 class ForStmt extends Loop, @stmt_for {
+  override string getAPrimaryQlClass() { result = "ForStmt" }
 
   /**
    * Gets the initialization statement of this 'for' statement.
@@ -785,6 +953,7 @@ class ForStmt extends Loop, @stmt_for {
    * ```
    */
   override Expr getCondition() { for_condition(underlyingElement(this), unresolveElement(result)) }
+
   override Expr getControllingExpr() { result = this.getCondition() }
 
   /**
@@ -824,11 +993,11 @@ class ForStmt extends Loop, @stmt_for {
   pragma[noopt]
   Variable getAnIterationVariable() {
     this instanceof ForStmt and
-
     // check that it is assigned to, incremented or decremented in the update
     exists(Expr updateOpRoot, Expr updateOp |
-           updateOpRoot = this.getUpdate() and
-           inForUpdate(updateOpRoot, updateOp) |
+      updateOpRoot = this.getUpdate() and
+      inForUpdate(updateOpRoot, updateOp)
+    |
       exists(CrementOperation op, VariableAccess va |
         op = updateOp and
         op instanceof CrementOperation and
@@ -837,10 +1006,8 @@ class ForStmt extends Loop, @stmt_for {
       )
       or
       updateOp = result.getAnAssignedValue()
-    )
-    and
-    result instanceof Variable
-    and
+    ) and
+    result instanceof Variable and
     // checked or used in the condition
     exists(Expr e, VariableAccess va |
       va = result.getAnAccess() and
@@ -873,6 +1040,7 @@ class ForStmt extends Loop, @stmt_for {
     this.getUpdate().mayBeImpure() or
     this.getStmt().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getInitialization().mayBeGloballyImpure() or
     this.getCondition().mayBeGloballyImpure() or
@@ -881,7 +1049,11 @@ class ForStmt extends Loop, @stmt_for {
   }
 
   override MacroInvocation getGeneratingMacro() {
-    (exists(this.getInitialization()) implies result = this.getInitialization().getGeneratingMacro()) and
+    (
+      exists(this.getInitialization())
+      implies
+      result = this.getInitialization().getGeneratingMacro()
+    ) and
     (exists(this.getCondition()) implies this.getCondition() = result.getAnExpandedElement()) and
     (exists(this.getUpdate()) implies this.getUpdate() = result.getAnExpandedElement()) and
     this.getStmt().getGeneratingMacro() = result
@@ -895,9 +1067,7 @@ class ForStmt extends Loop, @stmt_for {
    * for(x = 0; 1; ++x) { sum += x; }
    * ```
    */
-  predicate conditionAlwaysTrue() {
-    conditionAlwaysTrue(getCondition())
-  }
+  predicate conditionAlwaysTrue() { conditionAlwaysTrue(getCondition()) }
 
   /**
    * Holds if the loop condition is provably `false`.
@@ -907,9 +1077,7 @@ class ForStmt extends Loop, @stmt_for {
    * for(x = 0; 0; ++x) { sum += x; }
    * ```
    */
-  predicate conditionAlwaysFalse() {
-    conditionAlwaysFalse(getCondition())
-  }
+  predicate conditionAlwaysFalse() { conditionAlwaysFalse(getCondition()) }
 
   /**
    * Holds if the loop condition is provably `true` upon entry,
@@ -923,9 +1091,7 @@ class ForStmt extends Loop, @stmt_for {
    * `i = 0`, but the condition will evaluate to `false` after 10
    * iterations.
    */
-  predicate conditionAlwaysTrueUponEntry() {
-    loopConditionAlwaysTrueUponEntry(this, _)
-  }
+  predicate conditionAlwaysTrueUponEntry() { loopConditionAlwaysTrueUponEntry(this, _) }
 }
 
 /**
@@ -941,12 +1107,16 @@ class ForStmt extends Loop, @stmt_for {
  */
 pragma[noopt]
 private predicate inForCondition(Expr forCondition, Expr child) {
-   exists (ForStmt for | forCondition = for.getCondition() and
-                         child = forCondition and
-                         for instanceof ForStmt)
-   or
-   exists (Expr mid | inForCondition(forCondition, mid) and
-                      child.getParent() = mid)
+  exists(ForStmt for |
+    forCondition = for.getCondition() and
+    child = forCondition and
+    for instanceof ForStmt
+  )
+  or
+  exists(Expr mid |
+    inForCondition(forCondition, mid) and
+    child.getParent() = mid
+  )
 }
 
 /**
@@ -961,24 +1131,27 @@ private predicate inForCondition(Expr forCondition, Expr child) {
  */
 pragma[noopt]
 private predicate inForUpdate(Expr forUpdate, Expr child) {
-   exists (ForStmt for | forUpdate = for.getUpdate() and child = forUpdate)
-   or
-   exists (Expr mid | inForUpdate(forUpdate, mid) and child.getParent() = mid)
+  exists(ForStmt for | forUpdate = for.getUpdate() and child = forUpdate)
+  or
+  exists(Expr mid | inForUpdate(forUpdate, mid) and child.getParent() = mid)
 }
 
 /**
  * A C/C++ 'switch case' statement.
  *
- * For example,
+ * For example, the `case` and `default` statements in:
  * ```
+ * switch (i)
+ * {
  * case 5:
- * ```
- * or
- * ```
+ *   ...
  * default:
+ *   ...
+ * }
  * ```
  */
 class SwitchCase extends Stmt, @stmt_switch_case {
+  override string getAPrimaryQlClass() { result = "SwitchCase" }
 
   /**
    * Gets the expression of this 'switch case' statement (or the start of
@@ -1050,17 +1223,15 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * the `case 5:` has result 0, `case 6:` has result 1, and `default:`
    * has result 2.
    */
-  int getChildNum() {
-      switch_case(_, result, underlyingElement(this))
-   }
+  int getChildNum() { switch_case(_, result, underlyingElement(this)) }
 
   /**
    * DEPRECATED: use `SwitchCase.getAStmt` or `ControlFlowNode.getASuccessor`
-   * rather than this predicate. 
+   * rather than this predicate.
    *
-   * Gets the `Block` statement immediately following this 'switch case'
+   * Gets the `BlockStmt` statement immediately following this 'switch case'
    * statement, if any.
-   * 
+   *
    * For example, for
    * ```
    * switch (i) {
@@ -1079,11 +1250,12 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * the `case 7:` has result `{ x = 2; break; }`, `default:` has result
    * `{ x = 3; }`, and the others have no result.
    */
-  deprecated Block getLabelledStmt() {
-      exists(int i, Stmt parent |
-          this = parent.getChild(i) and
-          result = parent.getChild(i+1))
-   }
+  deprecated BlockStmt getLabelledStmt() {
+    exists(int i, Stmt parent |
+      this = parent.getChild(i) and
+      result = parent.getChild(i + 1)
+    )
+  }
 
   /**
    * Gets the next `SwitchCase` belonging to the same 'switch'
@@ -1108,8 +1280,8 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * which has result `default:`, which has no result.
    */
   SwitchCase getNextSwitchCase() {
-      result.getSwitchStmt() = this.getSwitchStmt() and
-      result.getChildNum() = this.getChildNum() + 1
+    result.getSwitchStmt() = this.getSwitchStmt() and
+    result.getChildNum() = this.getChildNum() + 1
   }
 
   /**
@@ -1134,9 +1306,7 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * the `default:` has result `case 7:`, which has result `case 6:`,
    * which has result `case 5:`, which has no result.
    */
-  SwitchCase getPreviousSwitchCase() {
-     result.getNextSwitchCase() = this
-  }
+  SwitchCase getPreviousSwitchCase() { result.getNextSwitchCase() = this }
 
   /**
    * Gets a statement belonging under this 'switch case' statement.
@@ -1161,15 +1331,17 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * `default:` has results `{ x = 3; }, `x = 4;` and `break;`.
    */
   Stmt getAStmt() {
-    exists(Block b, int i, int j |
-           b.getStmt(i) = this and
-           b.getStmt(j) = result and
-           i < j and
-           not result instanceof SwitchCase and
-           not exists(SwitchCase sc, int k |
-                      b.getStmt(k) = sc and
-                      i < k and
-                      j > k))
+    exists(BlockStmt b, int i, int j |
+      b.getStmt(i) = this and
+      b.getStmt(j) = result and
+      i < j and
+      not result instanceof SwitchCase and
+      not exists(SwitchCase sc, int k |
+        b.getStmt(k) = sc and
+        i < k and
+        j > k
+      )
+    )
   }
 
   /**
@@ -1198,10 +1370,9 @@ class SwitchCase extends Stmt, @stmt_switch_case {
     exists(Stmt lastStmt |
       lastStmt = this.getAStmt() and
       not lastStmt.getFollowingStmt() = this.getAStmt() and
-      if lastStmt instanceof Block then
-        result = lastStmt.(Block).getLastStmtIn()
-      else
-        result = lastStmt
+      if lastStmt instanceof BlockStmt
+      then result = lastStmt.(BlockStmt).getLastStmtIn()
+      else result = lastStmt
     )
   }
 
@@ -1224,9 +1395,7 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * ```
    * this holds for `case 5:`, `case 7:` and `default:`, but not for `case 6:`.
    */
-  predicate terminatesInBreakStmt() {
-    this.getLastStmt() instanceof BreakStmt
-  }
+  predicate terminatesInBreakStmt() { this.getLastStmt() instanceof BreakStmt }
 
   /**
    * Holds if the last statement, as determined by `getLastStmt`, under
@@ -1247,9 +1416,7 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * ```
    * this holds for `case 5:`, `case 7:` and `default:`, but not for `case 6:`.
    */
-  predicate terminatesInReturnStmt() {
-    this.getLastStmt() instanceof ReturnStmt
-  }
+  predicate terminatesInReturnStmt() { this.getLastStmt() instanceof ReturnStmt }
 
   /**
    * Holds if the last statement, as determined by `getLastStmt`, under
@@ -1289,57 +1456,56 @@ class SwitchCase extends Stmt, @stmt_switch_case {
    * this holds for `default:`, but not for `case 5:`, `case 6:`,
    * or `case 7:`.
    */
-  predicate isDefault() {
-     this instanceof DefaultCase
-  }
+  predicate isDefault() { this instanceof DefaultCase }
 
   override string toString() { result = "case ...:" }
 
-  override predicate mayBeImpure() {
-    this.getExpr().mayBeImpure()
-  }
-  override predicate mayBeGloballyImpure() {
-    this.getExpr().mayBeGloballyImpure()
-  }
+  override predicate mayBeImpure() { this.getExpr().mayBeImpure() }
+
+  override predicate mayBeGloballyImpure() { this.getExpr().mayBeGloballyImpure() }
 }
 
 /**
  * A C/C++ 'default case' statement.
  *
- * For example,
+ * For example, the `default` statement in:
  * ```
+ * switch (i)
+ * {
+ * case 5:
+ *   ...
  * default:
+ *   ...
+ * }
  * ```
  */
 class DefaultCase extends SwitchCase {
-
   DefaultCase() { not exists(this.getExpr()) }
 
   override string toString() { result = "default: " }
 
-  override predicate mayBeImpure() {
-    none()
-  }
-  override predicate mayBeGloballyImpure() {
-    none()
-  }
+  override predicate mayBeImpure() { none() }
+
+  override predicate mayBeGloballyImpure() { none() }
 }
 
 /**
  * A C/C++ 'switch' statement.
  *
- * For example,
+ * For example, the `switch` statement in:
  * ```
- * switch(i) {
- *     case 1:
- *     case 2:
- *     break;
- *     default:
- *     break;
+ * switch (i)
+ * {
+ * case 5:
+ *   ...
+ * default:
+ *   ...
  * }
  * ```
  */
 class SwitchStmt extends ConditionalStmt, @stmt_switch {
+  override string getAPrimaryQlClass() { result = "SwitchStmt" }
+
   /**
    * Gets the expression that this 'switch' statement switches on.
    *
@@ -1356,6 +1522,7 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
    * the result is `i`.
    */
   Expr getExpr() { result = this.getChild(0) }
+
   override Expr getControllingExpr() { result = this.getExpr() }
 
   /**
@@ -1459,6 +1626,7 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
     this.getExpr().mayBeImpure() or
     this.getStmt().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getExpr().mayBeGloballyImpure() or
     this.getStmt().mayBeGloballyImpure()
@@ -1466,8 +1634,7 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
 
   override MacroInvocation getGeneratingMacro() {
     result.getAnExpandedElement() = this.getExpr() and
-    forall(SwitchCase c | c = this.getASwitchCase()
-                        | exists(c.getGeneratingMacro()))
+    forall(SwitchCase c | c = this.getASwitchCase() | exists(c.getGeneratingMacro()))
   }
 }
 
@@ -1480,7 +1647,7 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
  * enum color { RED, GREEN, BLUE };
  * enum color c;
  * ```
- * the 'switch' statement
+ * the `switch` statement in:
  * ```
  * switch (c) {
  * case RED:
@@ -1491,9 +1658,7 @@ class SwitchStmt extends ConditionalStmt, @stmt_switch {
  * ```
  */
 class EnumSwitch extends SwitchStmt {
-  EnumSwitch() {
-    this.getExpr().getType().getUnderlyingType() instanceof Enum
-  }
+  EnumSwitch() { this.getExpr().getType().getUnderlyingType() instanceof Enum }
 
   /**
    * Gets a constant from the enum type that does not have a case in this
@@ -1512,26 +1677,17 @@ class EnumSwitch extends SwitchStmt {
    * ```
    * there are results `GREEN` and `BLUE`.
    */
-  pragma[noopt]
   EnumConstant getAMissingCase() {
     exists(Enum et |
-      exists(Expr e, Type t |
-        e = this.getExpr() and
-        this instanceof EnumSwitch and
-        t = e.getType() and
-        et = t.getUnderlyingType()
-      ) and
+      et = this.getExpr().getUnderlyingType() and
       result = et.getAnEnumConstant() and
-      not exists(string value |
-         exists(SwitchCase sc, Expr e | sc = this.getASwitchCase() and
-                                        e = sc.getExpr() and
-                                        value = e.getValue())
-         and
-         exists(Initializer init, Expr e | init = result.getInitializer() and
-                                           e = init.getExpr() and
-                                           e.getValue() = value)
-      )
+      not this.matchesValue(result.getInitializer().getExpr().getValue())
     )
+  }
+
+  pragma[noinline]
+  private predicate matchesValue(string value) {
+    value = this.getASwitchCase().getExpr().getValue()
   }
 }
 
@@ -1544,11 +1700,22 @@ class EnumSwitch extends SwitchStmt {
  * execution continues with the next `Handler`.
  *
  * This has no concrete representation in the source, but makes the
- * control flow graph easier to use.
+ * control flow graph easier to use.  For example in the following code:
+ * ```
+ * try
+ * {
+ *   f();
+ * } catch (std::exception &e) {
+ *   g();
+ * }
+ * ```
+ * there is a handler that's associated with the `catch` block and controls
+ * entry to it.
  */
 class Handler extends Stmt, @stmt_handler {
-
   override string toString() { result = "<handler>" }
+
+  override string getAPrimaryQlClass() { result = "Handler" }
 
   /**
    * Gets the block containing the implementation of this handler.
@@ -1566,12 +1733,9 @@ class Handler extends Stmt, @stmt_handler {
    */
   Parameter getParameter() { result = getBlock().getParameter() }
 
-  override predicate mayBeImpure() {
-    none()
-  }
-  override predicate mayBeGloballyImpure() {
-    none()
-  }
+  override predicate mayBeImpure() { none() }
+
+  override predicate mayBeGloballyImpure() { none() }
 }
 
 /**
@@ -1586,23 +1750,25 @@ deprecated class FinallyEnd extends Stmt {
 
   override string toString() { result = "<finally end>" }
 
-  override predicate mayBeImpure() {
-    none()
-  }
-  override predicate mayBeGloballyImpure() {
-    none()
-  }
+  override predicate mayBeImpure() { none() }
+
+  override predicate mayBeGloballyImpure() { none() }
 }
 
 /**
  * A C/C++ 'try' statement.
  *
- * For example,
+ * For example, the `try` statement in the following code:
  * ```
- * try { f(); } catch (...) { g(); }
+ * try {
+ *   f();
+ * } catch(std::exception &e) {
+ *   g();
+ * }
  * ```
  */
 class TryStmt extends Stmt, @stmt_try_block {
+  override string getAPrimaryQlClass() { result = "TryStmt" }
 
   override string toString() { result = "try { ... }" }
 
@@ -1626,9 +1792,7 @@ class TryStmt extends Stmt, @stmt_try_block {
    * ```
    * the result of `getCatchClause(0)` is `{ g(); }`.
    */
-  CatchBlock getCatchClause(int n) {
-    result = this.getChild(n + 1).(Handler).getBlock()
-  }
+  CatchBlock getCatchClause(int n) { result = this.getChild(n + 1).(Handler).getBlock() }
 
   /**
    * Gets a 'catch block' of this 'try' statement.
@@ -1650,14 +1814,13 @@ class TryStmt extends Stmt, @stmt_try_block {
    * ```
    * the result is 1.
    */
-  int getNumberOfCatchClauses() {
-     result = count(this.getACatchClause())
-  }
+  int getNumberOfCatchClauses() { result = count(this.getACatchClause()) }
 
   override predicate mayBeImpure() {
     this.getStmt().mayBeImpure() or
     this.getACatchClause().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getStmt().mayBeGloballyImpure() or
     this.getACatchClause().mayBeGloballyImpure()
@@ -1668,7 +1831,7 @@ class TryStmt extends Stmt, @stmt_try_block {
  * A C++ 'function try' statement.
  *
  * This is a 'try' statement wrapped around an entire function body,
- * for example:
+ * for example the `try` statement in the following code:
  * ```
  * void foo() try {
  *   f();
@@ -1678,15 +1841,27 @@ class TryStmt extends Stmt, @stmt_try_block {
  * ```
  */
 class FunctionTryStmt extends TryStmt {
-  FunctionTryStmt() {
-    not exists(this.getEnclosingBlock())
-  }
+  FunctionTryStmt() { not exists(this.getEnclosingBlock()) }
+
+  override string getAPrimaryQlClass() { result = "FunctionTryStmt" }
 }
 
 /**
- * A 'catch block', from either C++'s `catch` or Objective C's `@catch`.
+ * A 'catch block', for example the second and third blocks in the following
+ * code:
+ * ```
+ * try {
+ *   f();
+ * } catch(std::exception &e) {
+ *   g();
+ * } catch(...) {
+ *   h();
+ * }
+ * ```
  */
-class CatchBlock extends Block {
+class CatchBlock extends BlockStmt {
+  override string getAPrimaryQlClass() { result = "CatchBlock" }
+
   CatchBlock() { ishandler(underlyingElement(this)) }
 
   /**
@@ -1698,18 +1873,25 @@ class CatchBlock extends Block {
   Parameter getParameter() { result.getCatchBlock() = this }
 
   /** Gets the try statement corresponding to this 'catch block'. */
-  TryStmt getTryStmt() {
-    result.getACatchClause() = this
-  }
+  TryStmt getTryStmt() { result.getACatchClause() = this }
 }
 
 /**
- * A C++ 'catch-any block', that is, `catch(...) {stmts}`.
+ * A C++ 'catch-any block', for example the third block in the following code:
+ * ```
+ * try {
+ *   f();
+ * } catch(std::exception &e) {
+ *   g();
+ * } catch(...) {
+ *   h();
+ * }
+ * ```
  */
 class CatchAnyBlock extends CatchBlock {
-  CatchAnyBlock() {
-    not exists(this.getParameter())
-  }
+  CatchAnyBlock() { not exists(this.getParameter()) }
+
+  override string getAPrimaryQlClass() { result = "CatchAnyBlock" }
 }
 
 /**
@@ -1723,49 +1905,66 @@ class MicrosoftTryStmt extends Stmt, @stmt_microsoft_try {
 }
 
 /**
- * A structured exception handling 'try except' statement, that is,
- * a `__try __except` statement. This is a Microsoft C/C++ extension.
+ * A structured exception handling 'try except' statement, for example the
+ * `__try` statement in the following code:
+ * ```
+ * __try
+ * {
+ *   f();
+ * } __except(myExceptionFilter()) {
+ *   g()
+ * }
+ * ```
+ * This is a Microsoft C/C++ extension.
  */
 class MicrosoftTryExceptStmt extends MicrosoftTryStmt {
-  MicrosoftTryExceptStmt() {
-    getChild(1) instanceof Expr
-  }
+  MicrosoftTryExceptStmt() { getChild(1) instanceof Expr }
 
-  override string toString() {
-    result = "__try { ... } __except( ... ) { ... }"
-  }
+  override string toString() { result = "__try { ... } __except( ... ) { ... }" }
 
   /** Gets the expression guarding the `__except` statement. */
   Expr getCondition() { result = getChild(1) }
 
-  /** Gets the `__except` statement (usually a `Block`). */
+  /** Gets the `__except` statement (usually a `BlockStmt`). */
   Stmt getExcept() { result = getChild(2) }
+
+  override string getAPrimaryQlClass() { result = "MicrosoftTryExceptStmt" }
 }
 
 /**
- * A structured exception handling 'try finally' statement, that is,
- * a `__try __finally` statement. This is a Microsoft C/C++ extension.
+ * A structured exception handling 'try finally' statement, for example the
+ * `__try` statement in the following code:
+ * ```
+ * __try
+ * {
+ *   f();
+ * } __finally {
+ *   g()
+ * }
+ * ```
+ * This is a Microsoft C/C++ extension.
  */
 class MicrosoftTryFinallyStmt extends MicrosoftTryStmt {
-  MicrosoftTryFinallyStmt() {
-    not getChild(1) instanceof Expr
-  }
+  MicrosoftTryFinallyStmt() { not getChild(1) instanceof Expr }
 
   override string toString() { result = "__try { ... } __finally { ... }" }
 
-  /** Gets the `__finally` statement (usually a `Block`). */
+  /** Gets the `__finally` statement (usually a `BlockStmt`). */
   Stmt getFinally() { result = getChild(1) }
+
+  override string getAPrimaryQlClass() { result = "MicrosoftTryFinallyStmt" }
 }
 
 /**
  * A C/C++ 'declaration' statement.
  *
- * For example,
+ * For example, the following statement is a declaration statement:
  * ```
  * int i, j;
  * ```
  */
 class DeclStmt extends Stmt, @stmt_decl {
+  override string getAPrimaryQlClass() { result = "DeclStmt" }
 
   /**
    * Gets the `i`th declaration entry declared by this 'declaration' statement.
@@ -1789,9 +1988,7 @@ class DeclStmt extends Stmt, @stmt_decl {
    * ```
    * the results are `i` and `j`.
    */
-  DeclarationEntry getADeclarationEntry() {
-    result = this.getDeclarationEntry(_)
-  }
+  DeclarationEntry getADeclarationEntry() { result = this.getDeclarationEntry(_) }
 
   /**
    * Gets the number of declarations declared by this 'declaration' statement.
@@ -1813,7 +2010,9 @@ class DeclStmt extends Stmt, @stmt_decl {
    * ```
    * the result of `getDeclaration(0)` is `i`.
    */
-  Declaration getDeclaration(int i) { stmt_decl_bind(underlyingElement(this), i, unresolveElement(result)) }
+  Declaration getDeclaration(int i) {
+    stmt_decl_bind(underlyingElement(this), i, unresolveElement(result))
+  }
 
   /**
    * Gets a declaration declared by this 'declaration' statement.
@@ -1831,6 +2030,7 @@ class DeclStmt extends Stmt, @stmt_decl {
   override predicate mayBeImpure() {
     this.getADeclaration().(LocalVariable).getInitializer().getExpr().mayBeImpure()
   }
+
   override predicate mayBeGloballyImpure() {
     this.getADeclaration().(LocalVariable).getInitializer().getExpr().mayBeGloballyImpure()
   }
@@ -1839,36 +2039,42 @@ class DeclStmt extends Stmt, @stmt_decl {
 /**
  * A C/C++ 'empty' statement.
  *
- * For example,
+ * For example, the following statement is an empty statement:
  * ```
  * ;
  * ```
  */
 class EmptyStmt extends Stmt, @stmt_empty {
+  override string getAPrimaryQlClass() { result = "EmptyStmt" }
 
   override string toString() { result = ";" }
 
   override predicate mayBeImpure() { none() }
+
   override predicate mayBeGloballyImpure() { none() }
 }
 
 /**
  * A C/C++ 'asm' statement.
  *
- * For example,
+ * For example, the `__asm__` statement in the following code:
  * ```
  * __asm__("movb %bh (%eax)");
  * ```
  */
 class AsmStmt extends Stmt, @stmt_asm {
-  override string toString() {
-    result = "asm statement"
-  }
+  override string toString() { result = "asm statement" }
+
+  override string getAPrimaryQlClass() { result = "AsmStmt" }
 }
 
 /**
- * A C99 statement which computes the size of a single dimension of
- * a variable length array.
+ * A C99 statement which computes the size of a single dimension of a
+ * variable length array. For example the variable length array dimension
+ * (`x`) in the following code:
+ * ```
+ * int myArray[x];
+ * ```
  *
  * Each `VlaDeclStmt` is preceded by one `VlaDimensionStmt` for each
  * variable length dimension of the array.
@@ -1876,12 +2082,18 @@ class AsmStmt extends Stmt, @stmt_asm {
 class VlaDimensionStmt extends Stmt, @stmt_set_vla_size {
   override string toString() { result = "VLA dimension size" }
 
+  override string getAPrimaryQlClass() { result = "VlaDimensionStmt" }
+
   /** Gets the expression which gives the size. */
   Expr getDimensionExpr() { result = this.getChild(0) }
 }
 
 /**
- * A C99 statement which declares a variable length array.
+ * A C99 statement which declares a variable length array. For example
+ * the variable length array declaration in the following code:
+ * ```
+ * int myArray[x];
+ * ```
  *
  * Each `VlaDeclStmt` is preceded by one `VlaDimensionStmt` for each
  * variable length dimension of the array.
@@ -1889,16 +2101,22 @@ class VlaDimensionStmt extends Stmt, @stmt_set_vla_size {
 class VlaDeclStmt extends Stmt, @stmt_vla_decl {
   override string toString() { result = "VLA declaration" }
 
+  override string getAPrimaryQlClass() { result = "VlaDeclStmt" }
+
   /**
    * Gets the number of VLA dimension statements in this VLA
    * declaration statement.
    */
   int getNumberOfVlaDimensionStmts() {
-    exists(Block b, int j |
-           this = b.getStmt(j) and
-           result = j - 1 - max(int i |
-                                i in [0 .. j - 1] and
-                                not b.getStmt(i) instanceof VlaDimensionStmt))
+    exists(BlockStmt b, int j |
+      this = b.getStmt(j) and
+      result =
+        j - 1 -
+          max(int i |
+            i in [0 .. j - 1] and
+            not b.getStmt(i) instanceof VlaDimensionStmt
+          )
+    )
   }
 
   /**
@@ -1907,9 +2125,10 @@ class VlaDeclStmt extends Stmt, @stmt_vla_decl {
    */
   VlaDimensionStmt getVlaDimensionStmt(int i) {
     i in [0 .. this.getNumberOfVlaDimensionStmts() - 1] and
-    exists(Block b, int j |
-           this = b.getStmt(j) and
-           result = b.getStmt(j - this.getNumberOfVlaDimensionStmts() + i))
+    exists(BlockStmt b, int j |
+      this = b.getStmt(j) and
+      result = b.getStmt(j - this.getNumberOfVlaDimensionStmts() + i)
+    )
   }
 
   /**

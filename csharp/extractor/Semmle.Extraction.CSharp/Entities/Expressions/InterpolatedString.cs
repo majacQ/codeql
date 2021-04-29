@@ -3,16 +3,17 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Entities;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    class InterpolatedString : Expression<InterpolatedStringExpressionSyntax>
+    internal class InterpolatedString : Expression<InterpolatedStringExpressionSyntax>
     {
-        InterpolatedString(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.INTERPOLATED_STRING)) { }
+        private InterpolatedString(ExpressionNodeInfo info) : base(info.SetKind(ExprKind.INTERPOLATED_STRING)) { }
 
         public static Expression Create(ExpressionNodeInfo info) => new InterpolatedString(info).TryPopulate();
 
-        protected override void Populate()
+        protected override void PopulateExpression(TextWriter trapFile)
         {
             var child = 0;
             foreach (var c in Syntax.Contents)

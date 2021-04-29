@@ -1,5 +1,9 @@
 package com.semmle.js.extractor;
 
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import com.semmle.jcorn.TokenType;
 import com.semmle.jcorn.jsx.JSXParser;
 import com.semmle.js.ast.AssignmentExpression;
@@ -14,6 +18,7 @@ import com.semmle.js.ast.Literal;
 import com.semmle.js.ast.LogicalExpression;
 import com.semmle.js.ast.MemberExpression;
 import com.semmle.js.ast.MetaProperty;
+import com.semmle.js.ast.ThisExpression;
 import com.semmle.js.ast.UnaryExpression;
 import com.semmle.js.ast.UpdateExpression;
 import com.semmle.js.ast.XMLAnyName;
@@ -24,14 +29,12 @@ import com.semmle.js.ast.XMLQualifiedIdentifier;
 import com.semmle.js.ast.jsx.JSXIdentifier;
 import com.semmle.js.ast.jsx.JSXMemberExpression;
 import com.semmle.js.ast.jsx.JSXSpreadAttribute;
+import com.semmle.js.ast.jsx.JSXThisExpr;
 import com.semmle.js.extractor.ASTExtractor.IdContext;
 import com.semmle.ts.ast.DecoratorList;
 import com.semmle.ts.ast.ExpressionWithTypeArguments;
 import com.semmle.ts.ast.TypeAssertion;
 import com.semmle.util.exception.CatastrophicError;
-import java.util.EnumMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /** Map from SpiderMonkey expression types to the numeric kinds used in the DB scheme. */
 public class ExprKinds {
@@ -76,6 +79,9 @@ public class ExprKinds {
     binOpKinds.put("**", 87);
     binOpKinds.put("**=", 88);
     binOpKinds.put("??", 107);
+    binOpKinds.put("&&=", 116);
+    binOpKinds.put("||=", 117);
+    binOpKinds.put("??=", 118);
   }
 
   private static final Map<String, Integer> unOpKinds = new LinkedHashMap<String, Integer>();
@@ -154,6 +160,8 @@ public class ExprKinds {
     idKinds.put(IdContext.namespaceDecl, 78);
     idKinds.put(IdContext.varAndNamespaceDecl, 78);
     idKinds.put(IdContext.varAndTypeAndNamespaceDecl, 78);
+    idKinds.put(IdContext.typeOnlyImport, 78);
+    idKinds.put(IdContext.typeOnlyExport, 103);
     idKinds.put(IdContext.varBind, 79);
     idKinds.put(IdContext.export, 103);
     idKinds.put(IdContext.exportBase, 103);
@@ -186,6 +194,11 @@ public class ExprKinds {
               @Override
               public Integer visit(JSXIdentifier nd, Void c) {
                 return visit((Identifier) nd, c);
+              }
+
+              @Override
+              public Integer visit(JSXThisExpr nd, Void c) {
+                return visit((ThisExpression) nd, c);
               }
 
               @Override
@@ -248,8 +261,9 @@ public class ExprKinds {
 
               @Override
               public Integer visit(MetaProperty nd, Void c) {
-                if (nd.getMeta().getName().equals("new")) return 82; // @newtargetexpr
-                return 93; // @functionsentexpr
+                if (nd.getMeta().getName().equals("new")) return 82; // @newtarget_expr
+                if (nd.getMeta().getName().equals("import")) return 115; // @import_meta_expr
+                return 93; // @function_sent_expr
               }
 
               @Override

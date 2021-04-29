@@ -1,11 +1,12 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class Yield : Statement<YieldStatementSyntax>
+    internal class Yield : Statement<YieldStatementSyntax>
     {
-        Yield(Context cx, YieldStatementSyntax node, IStatementParentEntity parent, int child)
+        private Yield(Context cx, YieldStatementSyntax node, IStatementParentEntity parent, int child)
             : base(cx, node, StmtKind.YIELD, parent, child) { }
 
         public static Yield Create(Context cx, YieldStatementSyntax node, IStatementParentEntity parent, int child)
@@ -15,7 +16,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             if (Stmt.Expression != null)
             {

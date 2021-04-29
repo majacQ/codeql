@@ -2,95 +2,129 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Entities;
 using Semmle.Util;
+using System.IO;
 using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class TypeMention : FreshEntity
+    internal class TypeMention : FreshEntity
     {
-        readonly TypeSyntax Syntax;
-        readonly IEntity Parent;
-        readonly Type Type;
-        readonly Microsoft.CodeAnalysis.Location Loc;
+        private readonly TypeSyntax syntax;
+        private readonly IEntity parent;
+        private readonly Type type;
+        private readonly Microsoft.CodeAnalysis.Location loc;
 
-        TypeMention(Context cx, TypeSyntax syntax, IEntity parent, Type type, Microsoft.CodeAnalysis.Location loc = null)
+        private TypeMention(Context cx, TypeSyntax syntax, IEntity parent, Type type, Microsoft.CodeAnalysis.Location loc = null)
             : base(cx)
         {
-            Syntax = syntax;
-            Parent = parent;
-            Type = type;
-            Loc = loc;
+            this.syntax = syntax;
+            this.parent = parent;
+            this.type = type;
+            this.loc = loc;
         }
 
-        void Populate()
+        private TypeSyntax GetArrayElementType(TypeSyntax type)
         {
-            switch (Syntax.Kind())
+            switch (type)
+            {
+                case ArrayTypeSyntax ats:
+                    return GetArrayElementType(ats.ElementType);
+                case NullableTypeSyntax nts:
+                    // int[]? -> int[] -> int
+                    // int?   -> int?
+                    return cx.GetTypeInfo(nts.ElementType).Type.IsReferenceType
+                        ? GetArrayElementType(nts.ElementType)
+                        : nts;
+                case PointerTypeSyntax pts:
+                    return GetArrayElementType(pts.ElementType);
+                default:
+                    return type;
+            }
+        }
+
+        private static Type GetArrayElementType(Type type)
+        {
+            switch (type)
+            {
+                case ArrayType at:
+                    return GetArrayElementType(at.ElementType.Type);
+                case NamedType nt when nt.symbol.IsBoundSpan() ||
+                                       nt.symbol.IsBoundReadOnlySpan():
+                    return nt.TypeArguments.Single();
+                case PointerType pt:
+                    return GetArrayElementType(pt.PointedAtType);
+                default:
+                    return type;
+            }
+        }
+
+        protected override void Populate(TextWriter trapFile)
+        {
+            switch (syntax.Kind())
             {
                 case SyntaxKind.ArrayType:
-                    var ats = (ArrayTypeSyntax)Syntax;
-                    var at = (ArrayType)Type;
-                    Emit(Loc ?? Syntax.GetLocation(), Parent, Type);
-                    Create(cx, ats.ElementType, this, at.ElementType);
+                case SyntaxKind.PointerType:
+                    Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);
+                    Create(cx, GetArrayElementType(syntax), this, GetArrayElementType(type));
                     return;
                 case SyntaxKind.NullableType:
-                    var nts = (NullableTypeSyntax)Syntax;
-                    if (Type is NamedType nt)
+                    var nts = (NullableTypeSyntax)syntax;
+                    if (type is NamedType nt)
                     {
-                        Emit(Loc ?? Syntax.GetLocation(), Parent, Type);
-                        Create(cx, nts.ElementType, this, nt.symbol.IsReferenceType ? nt : nt.TypeArguments[0]);
+                        if (!nt.symbol.IsReferenceType)
+                        {
+                            Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);
+                            Create(cx, nts.ElementType, this, nt.TypeArguments[0]);
+                        }
+                        else
+                        {
+                            Create(cx, nts.ElementType, parent, type);
+                        }
                     }
-                    else if(Type is ArrayType array)
+                    else if (type is ArrayType)
                     {
-                        Create(cx, nts.ElementType, Parent, array);
+                        Create(cx, nts.ElementType, parent, type);
                     }
                     return;
                 case SyntaxKind.TupleType:
-                    var tts = (TupleTypeSyntax)Syntax;
-                    var tt = (TupleType)Type;
-                    Emit(Loc ?? Syntax.GetLocation(), Parent, Type);
+                    var tts = (TupleTypeSyntax)syntax;
+                    var tt = (TupleType)type;
+                    Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);
                     tts.Elements.Zip(tt.TupleElements, (s, t) => Create(cx, s.Type, this, t.Type)).Enumerate();
                     return;
-                case SyntaxKind.PointerType:
-                    var pts = (PointerTypeSyntax)Syntax;
-                    var pt = (PointerType)Type;
-                    Emit(Loc ?? Syntax.GetLocation(), Parent, Type);
-                    Create(cx, pts.ElementType, this, pt.PointedAtType);
-                    return;
                 case SyntaxKind.GenericName:
-                    var gns = (GenericNameSyntax)Syntax;
-                    Emit(Loc ?? gns.Identifier.GetLocation(), Parent, Type);
-                    cx.PopulateLater(() => gns.TypeArgumentList.Arguments.Zip(Type.TypeMentions, (s, t) => Create(cx, s, this, t)).Enumerate());
+                    Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);
+                    cx.PopulateLater(() =>
+                        ((GenericNameSyntax)syntax)
+                            .TypeArgumentList
+                            .Arguments
+                            .Zip(type.TypeMentions, (s, t) => Create(cx, s, this, t)).Enumerate());
                     return;
                 case SyntaxKind.QualifiedName:
-                    if (Type.ContainingType == null)
-                    {
-                        // namespace qualifier
-                        Emit(Loc ?? Syntax.GetLocation(), Parent, Type);
-                    }
-                    else
+                    var qns = (QualifiedNameSyntax)syntax;
+                    var right = Create(cx, qns.Right, parent, type);
+                    if (type.ContainingType is object)
                     {
                         // Type qualifier
-                        var qns = (QualifiedNameSyntax)Syntax;
-                        var right = Create(cx, qns.Right, Parent, Type);
-                        Create(cx, qns.Left, right, Type.ContainingType);
+                        Create(cx, qns.Left, right, type.ContainingType);
                     }
                     return;
                 default:
-                    Emit(Loc ?? Syntax.GetLocation(), Parent, Type);
+                    Emit(trapFile, loc ?? syntax.GetLocation(), parent, type);
                     return;
             }
         }
 
-        void Emit(Microsoft.CodeAnalysis.Location loc, IEntity parent, Type type)
+        private void Emit(TextWriter trapFile, Microsoft.CodeAnalysis.Location loc, IEntity parent, Type type)
         {
-            cx.Emit(Tuples.type_mention(this, type.TypeRef, parent));
-            cx.Emit(Tuples.type_mention_location(this, cx.Create(loc)));
+            trapFile.type_mention(this, type.TypeRef, parent);
+            trapFile.type_mention_location(this, cx.Create(loc));
         }
 
         public static TypeMention Create(Context cx, TypeSyntax syntax, IEntity parent, Type type, Microsoft.CodeAnalysis.Location loc = null)
         {
             var ret = new TypeMention(cx, syntax, parent, type, loc);
-            cx.Try(syntax, null, () => ret.Populate());
+            cx.Try(syntax, null, () => ret.Populate(cx.TrapWriter.Writer));
             return ret;
         }
 

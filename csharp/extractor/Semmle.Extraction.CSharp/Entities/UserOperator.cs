@@ -1,29 +1,30 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.IO;
 using System.Linq;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class UserOperator : Method
+    internal class UserOperator : Method
     {
         protected UserOperator(Context cx, IMethodSymbol init)
             : base(cx, init) { }
 
-        public override void Populate()
+        public override void Populate(TextWriter trapFile)
         {
-            PopulateMethod();
-            ExtractModifiers();
+            PopulateMethod(trapFile);
+            PopulateModifiers(trapFile);
 
             var returnType = Type.Create(Context, symbol.ReturnType);
-            Context.Emit(Tuples.operators(this,
+            trapFile.operators(this,
                 symbol.Name,
                 OperatorSymbol(Context, symbol.Name),
                 ContainingType,
                 returnType.TypeRef,
-                (UserOperator)OriginalDefinition));
+                (UserOperator)OriginalDefinition);
 
             foreach (var l in Locations)
-                Context.Emit(Tuples.operator_location(this, l));
+                trapFile.operator_location(this, l);
 
             if (IsSourceDeclaration)
             {
@@ -34,7 +35,7 @@ namespace Semmle.Extraction.CSharp.Entities
                     TypeMention.Create(Context, declaration.Type, this, returnType);
             }
 
-            ContainingType.ExtractGenerics();
+            ContainingType.PopulateGenerics();
         }
 
         public override bool NeedsPopulation => Context.Defines(symbol) || IsImplicitOperator(out _);
@@ -48,32 +49,20 @@ namespace Semmle.Extraction.CSharp.Entities
             }
         }
 
-        public override IId Id
-        {
-            get
-            {
-                return new Key(tb =>
-                {
-                    AddSignatureTypeToId(Context, tb, symbol, symbol.ReturnType); // Needed for op_explicit(), which differs only by return type.
-                    tb.Append(" ");
-                    BuildMethodId(this, tb);
-                });
-            }
-        }
-
         /// <summary>
         /// For some reason, some operators are missing from the Roslyn database of mscorlib.
         /// This method returns <code>true</code> for such operators.
         /// </summary>
         /// <param name="containingType">The type containing this operator.</param>
         /// <returns></returns>
-        bool IsImplicitOperator(out ITypeSymbol containingType)
+        private bool IsImplicitOperator(out ITypeSymbol containingType)
         {
             containingType = symbol.ContainingType;
             if (containingType != null)
             {
                 var containingNamedType = containingType as INamedTypeSymbol;
-                return containingNamedType == null || !containingNamedType.MemberNames.Contains(symbol.Name);
+                return containingNamedType == null ||
+                    !containingNamedType.GetMembers(symbol.Name).Contains(symbol);
             }
 
             var pointerType = symbol.Parameters.Select(p => p.Type).OfType<IPointerTypeSymbol>().FirstOrDefault();
@@ -189,17 +178,16 @@ namespace Semmle.Extraction.CSharp.Entities
         /// <returns>The converted name.</returns>
         public static string OperatorSymbol(Context cx, string methodName)
         {
-            string result;
-            if (!OperatorSymbol(methodName, out result))
+            if (!OperatorSymbol(methodName, out var result))
                 cx.ModelError($"Unhandled operator name in OperatorSymbol(): '{methodName}'");
             return result;
         }
 
-        public new static UserOperator Create(Context cx, IMethodSymbol symbol) => UserOperatorFactory.Instance.CreateEntity(cx, symbol);
+        public static new UserOperator Create(Context cx, IMethodSymbol symbol) => UserOperatorFactory.Instance.CreateEntityFromSymbol(cx, symbol);
 
-        class UserOperatorFactory : ICachedEntityFactory<IMethodSymbol, UserOperator>
+        private class UserOperatorFactory : ICachedEntityFactory<IMethodSymbol, UserOperator>
         {
-            public static readonly UserOperatorFactory Instance = new UserOperatorFactory();
+            public static UserOperatorFactory Instance { get; } = new UserOperatorFactory();
 
             public UserOperator Create(Context cx, IMethodSymbol init) => new UserOperator(cx, init);
         }

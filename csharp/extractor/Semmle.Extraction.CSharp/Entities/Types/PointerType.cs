@@ -1,34 +1,39 @@
+using System.IO;
 using Microsoft.CodeAnalysis;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class PointerType : Type<IPointerTypeSymbol>
+    internal class PointerType : Type<IPointerTypeSymbol>
     {
-        PointerType(Context cx, IPointerTypeSymbol init)
+        private PointerType(Context cx, IPointerTypeSymbol init)
             : base(cx, init)
         {
             PointedAtType = Create(cx, symbol.PointedAtType);
         }
 
-        public override IId Id => new Key(PointedAtType, "*;type");
+        public override void WriteId(TextWriter trapFile)
+        {
+            trapFile.WriteSubId(PointedAtType);
+            trapFile.Write("*;type");
+        }
 
         // All pointer types are extracted because they won't
         // be extracted in their defining assembly.
         public override bool NeedsPopulation => true;
 
-        public override void Populate()
+        public override void Populate(TextWriter trapFile)
         {
-            Context.Emit(Tuples.pointer_referent_type(this, PointedAtType.TypeRef));
-            ExtractType();
+            trapFile.pointer_referent_type(this, PointedAtType.TypeRef);
+            PopulateType(trapFile);
         }
 
         public Type PointedAtType { get; private set; }
 
-        public static PointerType Create(Context cx, IPointerTypeSymbol symbol) => PointerTypeFactory.Instance.CreateEntity(cx, symbol);
+        public static PointerType Create(Context cx, IPointerTypeSymbol symbol) => PointerTypeFactory.Instance.CreateEntityFromSymbol(cx, symbol);
 
-        class PointerTypeFactory : ICachedEntityFactory<IPointerTypeSymbol, PointerType>
+        private class PointerTypeFactory : ICachedEntityFactory<IPointerTypeSymbol, PointerType>
         {
-            public static readonly PointerTypeFactory Instance = new PointerTypeFactory();
+            public static PointerTypeFactory Instance { get; } = new PointerTypeFactory();
 
             public PointerType Create(Context cx, IPointerTypeSymbol init) => new PointerType(cx, init);
         }

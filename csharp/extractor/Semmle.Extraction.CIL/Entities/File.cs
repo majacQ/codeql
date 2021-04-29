@@ -1,66 +1,45 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+using System.IO;
 
 namespace Semmle.Extraction.CIL.Entities
 {
-    interface IFileOrFolder : IEntity
+    public class File : LabelledEntity, IFileOrFolder
     {
-    }
-
-    interface IFile : IFileOrFolder
-    {
-    }
-
-    public class File : LabelledEntity, IFile
-    {
-        protected readonly string path;
+        protected string OriginalPath { get; }
+        protected PathTransformer.ITransformedPath TransformedPath { get; }
 
         public File(Context cx, string path) : base(cx)
         {
-            this.path = Semmle.Extraction.Entities.File.PathAsDatabaseString(path);
-            ShortId = new StringId(Semmle.Extraction.Entities.File.PathAsDatabaseId(path));
+            this.OriginalPath = path;
+            TransformedPath = cx.Cx.Extractor.PathTransformer.Transform(OriginalPath);
         }
+
+        public override void WriteId(TextWriter trapFile)
+        {
+            trapFile.Write(TransformedPath.DatabaseId);
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return GetType() == obj?.GetType() && OriginalPath == ((File)obj).OriginalPath;
+        }
+
+        public override int GetHashCode() => 11 * OriginalPath.GetHashCode();
 
         public override IEnumerable<IExtractionProduct> Contents
         {
             get
             {
-                var parent = cx.CreateFolder(System.IO.Path.GetDirectoryName(path));
-                yield return parent;
-                yield return Tuples.containerparent(parent, this);
-                yield return Tuples.files(this, path, System.IO.Path.GetFileNameWithoutExtension(path), System.IO.Path.GetExtension(path).Substring(1));
+                if (TransformedPath.ParentDirectory is PathTransformer.ITransformedPath dir)
+                {
+                    var parent = Cx.CreateFolder(dir);
+                    yield return parent;
+                    yield return Tuples.containerparent(parent, this);
+                }
+                yield return Tuples.files(this, TransformedPath.Value, TransformedPath.NameWithoutExtension, TransformedPath.Extension);
             }
         }
 
-        public override Id IdSuffix => suffix;
-
-        static readonly Id suffix = new StringId(";sourcefile");
-    }
-
-    public class PdbSourceFile : File
-    {
-        readonly PDB.ISourceFile file;
-
-        public PdbSourceFile(Context cx, PDB.ISourceFile file) : base(cx, file.Path)
-        {
-            this.file = file;
-        }
-
-        public override IEnumerable<IExtractionProduct> Contents
-        {
-            get
-            {
-                foreach (var c in base.Contents)
-                    yield return c;
-
-                var text = file.Contents;
-
-                if (text == null)
-                    cx.cx.Extractor.Logger.Log(Util.Logging.Severity.Warning, string.Format("PDB source file {0} could not be found", path));
-                else
-                    cx.cx.TrapWriter.Archive(path, text);
-
-                yield return Tuples.file_extraction_mode(this, 2);
-            }
-        }
+        public override string IdSuffix => ";sourcefile";
     }
 }

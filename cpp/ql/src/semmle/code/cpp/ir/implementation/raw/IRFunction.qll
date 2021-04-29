@@ -1,40 +1,17 @@
-private import internal.IRInternal
-import Instruction
-import cpp
+/**
+ * Provides the class `IRFunction`, which represents the Intermediate Representation for the
+ * definition of a function.
+ */
 
-private newtype TIRFunction =
-  MkIRFunction(Function func) {
-    Construction::functionHasIR(func)
-  }
+private import internal.IRInternal
+private import internal.IRFunctionImports as Imports
+import Imports::IRFunctionBase
+import Instruction
 
 /**
- * Represents the IR for a function.
+ * The IR for a function.
  */
-class IRFunction extends TIRFunction {
-  Function func;
-
-  IRFunction() {
-    this = MkIRFunction(func)
-  }
-
-  final string toString() {
-    result = "IR: " + func.toString()
-  }
-
-  /**
-   * Gets the function whose IR is represented.
-   */
-  final Function getFunction() {
-    result = func
-  }
-
-  /**
-   * Gets the location of the function.
-   */
-  final Location getLocation() {
-    result = func.getLocation()
-  }
-
+class IRFunction extends IRFunctionBase {
   /**
    * Gets the entry point for this function.
    */
@@ -51,52 +28,32 @@ class IRFunction extends TIRFunction {
     result.getEnclosingIRFunction() = this
   }
 
-  pragma[noinline]
-  final UnmodeledDefinitionInstruction getUnmodeledDefinitionInstruction() {
-    result.getEnclosingIRFunction() = this
-  }
-
-  pragma[noinline]
-  final UnmodeledUseInstruction getUnmodeledUseInstruction() {
-    result.getEnclosingIRFunction() = this
-  }
-
   /**
    * Gets the single return instruction for this function.
    */
   pragma[noinline]
-  final ReturnInstruction getReturnInstruction() {
-    result.getEnclosingIRFunction() = this
-  }
+  final ReturnInstruction getReturnInstruction() { result.getEnclosingIRFunction() = this }
 
   /**
    * Gets the variable used to hold the return value of this function. If this
    * function does not return a value, this predicate does not hold.
    */
   pragma[noinline]
-  final IRReturnVariable getReturnVariable() {
-    result.getEnclosingIRFunction() = this
-  }
-  
+  final IRReturnVariable getReturnVariable() { result.getEnclosingIRFunction() = this }
+
   /**
    * Gets the block containing the entry point of this function.
-   */  
+   */
   pragma[noinline]
-  final IRBlock getEntryBlock() {
-    result.getFirstInstruction() = getEnterFunctionInstruction()
-  }
+  final IRBlock getEntryBlock() { result.getFirstInstruction() = getEnterFunctionInstruction() }
 
   /**
    * Gets all instructions in this function.
    */
-  final Instruction getAnInstruction() {
-    result.getEnclosingIRFunction() = this
-  }
+  final Instruction getAnInstruction() { result.getEnclosingIRFunction() = this }
 
   /**
    * Gets all blocks in this function.
    */
-  final IRBlock getABlock() {
-    result.getEnclosingIRFunction() = this
-  }
+  final IRBlock getABlock() { result.getEnclosingIRFunction() = this }
 }

@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Security.AccessControl;
 
 namespace Semmle.Util.Logging
 {
@@ -56,10 +55,10 @@ namespace Semmle.Util.Logging
     /// A logger that outputs to a <code>csharp.log</code>
     /// file.
     /// </summary>
-    public class FileLogger : ILogger
+    public sealed class FileLogger : ILogger
     {
-        readonly StreamWriter writer;
-        readonly Verbosity verbosity;
+        private readonly StreamWriter writer;
+        private readonly Verbosity verbosity;
 
         public FileLogger(Verbosity verbosity, string outputFile)
         {
@@ -68,11 +67,10 @@ namespace Semmle.Util.Logging
             try
             {
                 var dir = Path.GetDirectoryName(outputFile);
-                if (dir.Length > 0 && !System.IO.Directory.Exists(dir))
+                if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
-                writer = new PidStreamWriter(new FileStream(outputFile, FileMode.Append, FileAccess.Write,
-                    FileShare.ReadWrite, 8192));
-                writer.AutoFlush = true;
+                writer = new PidStreamWriter(
+                    new FileStream(outputFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 8192));
             }
             catch (Exception ex)  // lgtm[cs/catch-of-all-exceptions]
             {
@@ -87,7 +85,7 @@ namespace Semmle.Util.Logging
             writer.Dispose();
         }
 
-        static string GetSeverityPrefix(Severity s)
+        private static string GetSeverityPrefix(Severity s)
         {
             return "[" + s.ToString().ToUpper() + "] ";
         }
@@ -102,9 +100,9 @@ namespace Semmle.Util.Logging
     /// <summary>
     /// A logger that outputs to stdout/stderr.
     /// </summary>
-    public class ConsoleLogger : ILogger
+    public sealed class ConsoleLogger : ILogger
     {
-        readonly Verbosity verbosity;
+        private readonly Verbosity verbosity;
 
         public ConsoleLogger(Verbosity verbosity)
         {
@@ -113,12 +111,12 @@ namespace Semmle.Util.Logging
 
         public void Dispose() { }
 
-        static TextWriter GetConsole(Severity s)
+        private static TextWriter GetConsole(Severity s)
         {
             return s == Severity.Error ? Console.Error : Console.Out;
         }
 
-        static string GetSeverityPrefix(Severity s)
+        private static string GetSeverityPrefix(Severity s)
         {
             switch (s)
             {
@@ -131,7 +129,7 @@ namespace Semmle.Util.Logging
                 case Severity.Error:
                     return "Error: ";
                 default:
-                    throw new ArgumentOutOfRangeException("s");
+                    throw new ArgumentOutOfRangeException(nameof(s));
             }
         }
 
@@ -145,10 +143,10 @@ namespace Semmle.Util.Logging
     /// <summary>
     /// A combined logger.
     /// </summary>
-    public class CombinedLogger : ILogger
+    public sealed class CombinedLogger : ILogger
     {
-        readonly ILogger logger1;
-        readonly ILogger logger2;
+        private readonly ILogger logger1;
+        private readonly ILogger logger2;
 
         public CombinedLogger(ILogger logger1, ILogger logger2)
         {
@@ -169,7 +167,7 @@ namespace Semmle.Util.Logging
         }
     }
 
-    static class VerbosityExtensions
+    internal static class VerbosityExtensions
     {
         /// <summary>
         /// Whether a message with the given severity must be included
@@ -190,7 +188,7 @@ namespace Semmle.Util.Logging
                 case Severity.Error:
                     return v >= Verbosity.Error;
                 default:
-                    throw new ArgumentOutOfRangeException("s");
+                    throw new ArgumentOutOfRangeException(nameof(s));
             }
         }
     }

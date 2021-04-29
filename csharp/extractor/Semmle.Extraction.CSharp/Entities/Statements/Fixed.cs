@@ -1,12 +1,13 @@
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.CSharp.Syntax; // lgtm[cs/similar-file]
 using Semmle.Extraction.CSharp.Entities.Expressions;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class Fixed : Statement<FixedStatementSyntax>
+    internal class Fixed : Statement<FixedStatementSyntax>
     {
-        Fixed(Context cx, FixedStatementSyntax @fixed, IStatementParentEntity parent, int child)
+        private Fixed(Context cx, FixedStatementSyntax @fixed, IStatementParentEntity parent, int child)
             : base(cx, @fixed, StmtKind.FIXED, parent, child) { }
 
         public static Fixed Create(Context cx, FixedStatementSyntax node, IStatementParentEntity parent, int child)
@@ -16,7 +17,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             VariableDeclarations.Populate(cx, Stmt.Declaration, this, -1, childIncrement: -1);
             Create(cx, Stmt.Statement, this, 0);

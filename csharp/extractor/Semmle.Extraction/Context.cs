@@ -1,29 +1,30 @@
 using Microsoft.CodeAnalysis;
-using System.Linq;
 using Semmle.Extraction.CommentProcessing;
-using System.Collections.Generic;
-using System;
-using Semmle.Util.Logging;
 using Semmle.Extraction.Entities;
+using Semmle.Util.Logging;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace Semmle.Extraction
 {
     /// <summary>
-    /// State which needs needs to be available throughout the extraction process.
-    ///     There is one Context object per trap output file.
+    /// State that needs to be available throughout the extraction process.
+    /// There is one Context object per trap output file.
     /// </summary>
     public class Context
     {
         /// <summary>
-        /// Interface to various extraction functions, e.g. logger, trap writer.
+        /// Access various extraction functions, e.g. logger, trap writer.
         /// </summary>
-        public readonly IExtractor Extractor;
+        public IExtractor Extractor { get; }
 
         /// <summary>
         /// The program database provided by Roslyn.
         /// There's one per syntax tree, which makes things awkward.
         /// </summary>
-        public SemanticModel Model(SyntaxNode node)
+        public SemanticModel GetModel(SyntaxNode node)
         {
             if (cachedModel == null || node.SyntaxTree != cachedModel.SyntaxTree)
             {
@@ -33,67 +34,50 @@ namespace Semmle.Extraction
             return cachedModel;
         }
 
-        SemanticModel cachedModel;
+        private SemanticModel? cachedModel;
 
         /// <summary>
-        ///     Access to the trap file.
+        /// Access to the trap file.
         /// </summary>
-        public readonly TrapWriter TrapWriter;
-
-        int NewId() => TrapWriter.IdCounter++;
+        public TrapWriter TrapWriter { get; }
 
         /// <summary>
-        /// Creates a new entity using the factory.
+        /// Holds if assembly information should be prefixed to TRAP labels.
         /// </summary>
-        /// <param name="factory">The entity factory.</param>
-        /// <param name="init">The initializer for the entity.</param>
-        /// <returns>The new/existing entity.</returns>
-        public Entity CreateEntity<Type, Entity>(ICachedEntityFactory<Type, Entity> factory, Type init) where Entity : ICachedEntity
+        public bool ShouldAddAssemblyTrapPrefix { get; }
+
+        private int GetNewId() => TrapWriter.IdCounter++;
+
+        // A recursion guard against writing to the trap file whilst writing an id to the trap file.
+        private bool writingLabel = false;
+
+        public void DefineLabel(IEntity entity, TextWriter trapFile, IExtractor extractor)
         {
-            return init == null ? CreateEntity2(factory, init) : CreateNonNullEntity(factory, init);
-        }
-
-        /// <summary>
-        /// Creates a new entity using the factory.
-        /// Uses a different cache to <see cref="CreateEntity{Type, Entity}(ICachedEntityFactory{Type, Entity}, Type)"/>,
-        /// and can store null values.
-        /// </summary>
-        /// <param name="factory">The entity factory.</param>
-        /// <param name="init">The initializer for the entity.</param>
-        /// <returns>The new/existing entity.</returns>
-        public Entity CreateEntity2<Type, Entity>(ICachedEntityFactory<Type, Entity> factory, Type init) where Entity : ICachedEntity
-        {
-            using (StackGuard)
+            if (writingLabel)
             {
-                var entity = factory.Create(this, init);
-
-                if (entityLabelCache.TryGetValue(entity, out var label))
+                // Don't define a label whilst writing a label.
+                PopulateLater(() => DefineLabel(entity, trapFile, extractor));
+            }
+            else
+            {
+                try
                 {
-                    entity.Label = label;
+                    writingLabel = true;
+                    entity.DefineLabel(trapFile, extractor);
                 }
-                else
+                finally
                 {
-                    var id = entity.Id;
-#if DEBUG_LABELS
-                    CheckEntityHasUniqueLabel(id, entity);
-#endif
-                    label = new Label(NewId());
-                    entity.Label = label;
-                    entityLabelCache[entity] = label;
-                    DefineLabel(label, id);
-                    if (entity.NeedsPopulation)
-                        Populate(init as ISymbol, entity);
+                    writingLabel = false;
                 }
-                return entity;
             }
         }
 
 #if DEBUG_LABELS
-        private void CheckEntityHasUniqueLabel(IId id, ICachedEntity entity)
+        private void CheckEntityHasUniqueLabel(string id, ICachedEntity entity)
         {
-            if (idLabelCache.TryGetValue(id, out var originalEntity))
+            if (idLabelCache.ContainsKey(id))
             {
-                ExtractionError("Label collision for " + id, entity.Label.ToString(), Entities.Location.Create(this, entity.ReportingLocation), "", Severity.Warning);
+                this.Extractor.Message(new Message("Label collision for " + id, entity.Label.ToString(), Entities.Location.Create(this, entity.ReportingLocation), "", Severity.Warning));
             }
             else
             {
@@ -102,28 +86,48 @@ namespace Semmle.Extraction
         }
 #endif
 
-        private Entity CreateNonNullEntity<Type, Entity>(ICachedEntityFactory<Type, Entity> factory, Type init) where Entity : ICachedEntity
+        public Label GetNewLabel() => new Label(GetNewId());
+
+        public TEntity CreateEntity<TInit, TEntity>(ICachedEntityFactory<TInit, TEntity> factory, object cacheKey, TInit init)
+            where TEntity : ICachedEntity =>
+            cacheKey is ISymbol s ? CreateEntity(factory, s, init, symbolEntityCache) : CreateEntity(factory, cacheKey, init, objectEntityCache);
+
+        public TEntity CreateEntityFromSymbol<TSymbol, TEntity>(ICachedEntityFactory<TSymbol, TEntity> factory, TSymbol init)
+            where TSymbol : ISymbol
+            where TEntity : ICachedEntity => CreateEntity(factory, init, init, symbolEntityCache);
+
+        /// <summary>
+        /// Creates and populates a new entity, or returns the existing one from the cache.
+        /// </summary>
+        /// <param name="factory">The entity factory.</param>
+        /// <param name="cacheKey">The key used for caching.</param>
+        /// <param name="init">The initializer for the entity.</param>
+        /// <param name="dictionary">The dictionary to use for caching.</param>
+        /// <returns>The new/existing entity.</returns>
+        private TEntity CreateEntity<TInit, TCacheKey, TEntity>(ICachedEntityFactory<TInit, TEntity> factory, TCacheKey cacheKey, TInit init, IDictionary<TCacheKey, ICachedEntity> dictionary)
+            where TCacheKey : notnull
+            where TEntity : ICachedEntity
         {
-            if (objectEntityCache.TryGetValue(init, out var cached))
-                return (Entity)cached;
+            if (dictionary.TryGetValue(cacheKey, out var cached))
+                return (TEntity)cached;
 
             using (StackGuard)
             {
-                var label = new Label(NewId());
+                var label = GetNewLabel();
                 var entity = factory.Create(this, init);
                 entity.Label = label;
 
-                objectEntityCache[init] = entity;
+                dictionary[cacheKey] = entity;
 
-                var id = entity.Id;
-                DefineLabel(label, id);
-
-#if DEBUG_LABELS
-                CheckEntityHasUniqueLabel(id, entity);
-#endif
-
+                DefineLabel(entity, TrapWriter.Writer, Extractor);
                 if (entity.NeedsPopulation)
                     Populate(init as ISymbol, entity);
+
+#if DEBUG_LABELS
+                using var id = new StringWriter();
+                entity.WriteQuotedId(id);
+                CheckEntityHasUniqueLabel(id.ToString(), entity);
+#endif
 
                 return entity;
             }
@@ -145,11 +149,9 @@ namespace Semmle.Extraction
             {
                 return false;
             }
-            else
-            {
-                extractedGenerics.Add(entity.Label);
-                return true;
-            }
+
+            extractedGenerics.Add(entity.Label);
+            return true;
         }
 
         /// <summary>
@@ -158,35 +160,24 @@ namespace Semmle.Extraction
         /// </summary>
         public void AddFreshLabel(IEntity entity)
         {
-            var label = new Label(NewId());
-            TrapWriter.Emit(new DefineFreshLabelEmitter(label));
-            entity.Label = label;
+            entity.Label = GetNewLabel();
+            entity.DefineFreshLabel(TrapWriter.Writer);
         }
 
 #if DEBUG_LABELS
-        readonly Dictionary<IId, ICachedEntity> idLabelCache = new Dictionary<IId, ICachedEntity>();
+        private readonly Dictionary<string, ICachedEntity> idLabelCache = new Dictionary<string, ICachedEntity>();
 #endif
-        readonly Dictionary<object, ICachedEntity> objectEntityCache = new Dictionary<object, ICachedEntity>();
-        readonly Dictionary<ICachedEntity, Label> entityLabelCache = new Dictionary<ICachedEntity, Label>();
-        readonly HashSet<Label> extractedGenerics = new HashSet<Label>();
 
-        public void DefineLabel(IEntity entity)
-        {
-            entity.Label = new Label(NewId());
-            DefineLabel(entity.Label, entity.Id);
-        }
-
-        void DefineLabel(Label label, IId id)
-        {
-            TrapWriter.Emit(new DefineLabelEmitter(label, id));
-        }
+        private readonly IDictionary<object, ICachedEntity> objectEntityCache = new Dictionary<object, ICachedEntity>();
+        private readonly IDictionary<ISymbol, ICachedEntity> symbolEntityCache = new Dictionary<ISymbol, ICachedEntity>(10000, SymbolEqualityComparer.IncludeNullability);
+        private readonly HashSet<Label> extractedGenerics = new HashSet<Label>();
 
         /// <summary>
         /// Queue of items to populate later.
         /// The only reason for this is so that the call stack does not
         /// grow indefinitely, causing a potential stack overflow.
         /// </summary>
-        readonly Queue<Action> populateQueue = new Queue<Action>();
+        private readonly Queue<Action> populateQueue = new Queue<Action>();
 
         /// <summary>
         /// Enqueue the given action to be performed later.
@@ -202,7 +193,9 @@ namespace Semmle.Extraction
                 populateQueue.Enqueue(() => WithDuplicationGuard(key, a));
             }
             else
+            {
                 populateQueue.Enqueue(a);
+            }
         }
 
         /// <summary>
@@ -230,7 +223,7 @@ namespace Semmle.Extraction
         /// <summary>
         /// The current compilation unit.
         /// </summary>
-        public readonly Compilation Compilation;
+        public Compilation Compilation { get; }
 
         /// <summary>
         /// Create a new context, one per source file/assembly.
@@ -239,19 +232,23 @@ namespace Semmle.Extraction
         /// <param name="c">The Roslyn compilation.</param>
         /// <param name="extractedEntity">Name of the source/dll file.</param>
         /// <param name="scope">Defines which symbols are included in the trap file (e.g. AssemblyScope or SourceScope)</param>
-        public Context(IExtractor e, Compilation c, TrapWriter trapWriter, IExtractionScope scope)
+        /// <param name="addAssemblyTrapPrefix">Whether to add assembly prefixes to TRAP labels.</param>
+        public Context(IExtractor e, Compilation c, TrapWriter trapWriter, IExtractionScope scope, bool addAssemblyTrapPrefix)
         {
             Extractor = e;
             Compilation = c;
-            Scope = scope;
+            this.scope = scope;
             TrapWriter = trapWriter;
+            ShouldAddAssemblyTrapPrefix = addAssemblyTrapPrefix;
         }
 
-        public bool IsGlobalContext => Scope.IsGlobalScope;
+        public bool FromSource => scope.FromSource;
 
-        public readonly ICommentGenerator CommentGenerator = new CommentProcessor();
+        public bool IsGlobalContext => scope.IsGlobalScope;
 
-        readonly IExtractionScope Scope;
+        public ICommentGenerator CommentGenerator { get; } = new CommentProcessor();
+
+        private IExtractionScope scope { get; }
 
         /// <summary>
         ///     Whether the given symbol needs to be defined in this context.
@@ -259,34 +256,36 @@ namespace Semmle.Extraction
         ///     of the symbol is a constructed generic.
         /// </summary>
         /// <param name="symbol">The symbol to populate.</param>
-        public bool Defines(ISymbol symbol) => !Equals(symbol, symbol.OriginalDefinition) || Scope.InScope(symbol);
+        public bool Defines(ISymbol symbol) =>
+            !SymbolEqualityComparer.Default.Equals(symbol, symbol.OriginalDefinition) ||
+            scope.InScope(symbol);
 
         /// <summary>
         /// Whether the current extraction context defines a given file.
         /// </summary>
         /// <param name="path">The path to query.</param>
-        public bool DefinesFile(string path) => Scope.InFileScope(path);
+        public bool DefinesFile(string path) => scope.InFileScope(path);
 
-        int currentRecursiveDepth = 0;
-        const int maxRecursiveDepth = 150;
+        private int currentRecursiveDepth = 0;
+        private const int maxRecursiveDepth = 150;
 
-        void EnterScope()
+        private void EnterScope()
         {
             if (currentRecursiveDepth >= maxRecursiveDepth)
                 throw new StackOverflowException(string.Format("Maximum nesting depth of {0} exceeded", maxRecursiveDepth));
             ++currentRecursiveDepth;
         }
 
-        void ExitScope()
+        private void ExitScope()
         {
             --currentRecursiveDepth;
         }
 
         public IDisposable StackGuard => new ScopeGuard(this);
 
-        private class ScopeGuard : IDisposable
+        private sealed class ScopeGuard : IDisposable
         {
-            readonly Context cx;
+            private readonly Context cx;
 
             public ScopeGuard(Context c)
             {
@@ -300,70 +299,32 @@ namespace Semmle.Extraction
             }
         }
 
-        class DefineLabelEmitter : ITrapEmitter
+        private class PushEmitter : ITrapEmitter
         {
-            readonly Label label;
-            readonly IId id;
-
-            public DefineLabelEmitter(Label label, IId id)
-            {
-                this.label = label;
-                this.id = id;
-            }
-
-            public void EmitToTrapBuilder(ITrapBuilder tb)
-            {
-                label.AppendTo(tb);
-                tb.Append("=");
-                id.AppendTo(tb);
-                tb.AppendLine();
-            }
-        }
-
-        class DefineFreshLabelEmitter : ITrapEmitter
-        {
-            readonly Label Label;
-
-            public DefineFreshLabelEmitter(Label label)
-            {
-                Label = label;
-            }
-
-            public void EmitToTrapBuilder(ITrapBuilder tb)
-            {
-                Label.AppendTo(tb);
-                tb.Append("=*");
-                tb.AppendLine();
-            }
-        }
-
-        class PushEmitter : ITrapEmitter
-        {
-            readonly Key Key;
+            private readonly Key key;
 
             public PushEmitter(Key key)
             {
-                Key = key;
+                this.key = key;
             }
 
-            public void EmitToTrapBuilder(ITrapBuilder tb)
+            public void EmitTrap(TextWriter trapFile)
             {
-                tb.Append(".push ");
-                Key.AppendTo(tb);
-                tb.AppendLine();
+                trapFile.Write(".push ");
+                key.AppendTo(trapFile);
+                trapFile.WriteLine();
             }
         }
 
-        class PopEmitter : ITrapEmitter
+        private class PopEmitter : ITrapEmitter
         {
-            public void EmitToTrapBuilder(ITrapBuilder tb)
+            public void EmitTrap(TextWriter trapFile)
             {
-                tb.Append(".pop");
-                tb.AppendLine();
+                trapFile.WriteLine(".pop");
             }
         }
 
-        readonly Stack<Key> tagStack = new Stack<Key>();
+        private readonly Stack<Key> tagStack = new Stack<Key>();
 
         /// <summary>
         /// Populates an entity, handling the tag stack appropriately
@@ -371,8 +332,15 @@ namespace Semmle.Extraction
         /// <param name="optionalSymbol">Symbol for reporting errors.</param>
         /// <param name="entity">The entity to populate.</param>
         /// <exception cref="InternalError">Thrown on invalid trap stack behaviour.</exception>
-        public void Populate(ISymbol optionalSymbol, ICachedEntity entity)
+        public void Populate(ISymbol? optionalSymbol, ICachedEntity entity)
         {
+            if (writingLabel)
+            {
+                // Don't write tuples etc if we're currently defining a label
+                PopulateLater(() => Populate(optionalSymbol, entity));
+                return;
+            }
+
             bool duplicationGuard;
             bool deferred;
 
@@ -400,9 +368,9 @@ namespace Semmle.Extraction
                     throw new InternalError("Unexpected TrapStackBehaviour");
             }
 
-            var a = duplicationGuard ?
-                (Action)(() => WithDuplicationGuard(new Key(entity, this.Create(entity.ReportingLocation)), entity.Populate)) :
-                (Action)(() => this.Try(null, optionalSymbol, entity.Populate));
+            var a = duplicationGuard && this.Create(entity.ReportingLocation) is NonGeneratedSourceLocation loc ?
+                (Action)(() => WithDuplicationGuard(new Key(entity, loc), () => entity.Populate(TrapWriter.Writer))) :
+                (Action)(() => this.Try(null, optionalSymbol, () => entity.Populate(TrapWriter.Writer)));
 
             if (deferred)
                 populateQueue.Enqueue(a);
@@ -416,7 +384,7 @@ namespace Semmle.Extraction
         /// </summary>
         public void WithDuplicationGuard(Key key, Action a)
         {
-            if (Scope is AssemblyScope)
+            if (scope is AssemblyScope)
             {
                 // No need for a duplication guard when extracting assemblies,
                 // and the duplication guard could lead to method bodies being missed
@@ -448,7 +416,7 @@ namespace Semmle.Extraction
         public void BindComments(IEntity entity, Microsoft.CodeAnalysis.Location l)
         {
             var duplicationGuardKey = tagStack.Count > 0 ? tagStack.Peek() : null;
-            CommentGenerator.RegisterElementLocation(entity.Label, duplicationGuardKey, l);
+            CommentGenerator.AddElement(entity.Label, duplicationGuardKey, l);
         }
 
         /// <summary>
@@ -457,9 +425,9 @@ namespace Semmle.Extraction
         /// <param name="message">The error message.</param>
         /// <param name="entityText">A textual representation of the failed entity.</param>
         /// <param name="location">The location of the error.</param>
-        /// <param name="stackTrace">An optional stack trace of the error, or an empty string.</param>
+        /// <param name="stackTrace">An optional stack trace of the error, or null.</param>
         /// <param name="severity">The severity of the error.</param>
-        public void ExtractionError(string message, string entityText, Entities.Location location, string stackTrace = "", Severity severity = Severity.Error)
+        public void ExtractionError(string message, string entityText, Entities.Location location, string? stackTrace = null, Severity severity = Severity.Error)
         {
             var msg = new Message(message, entityText, location, stackTrace, severity);
             ExtractionError(msg);
@@ -471,13 +439,13 @@ namespace Semmle.Extraction
         /// <param name="message">The text of the message.</param>
         /// <param name="optionalSymbol">The symbol of the error, or null.</param>
         /// <param name="optionalEntity">The entity of the error, or null.</param>
-        public void ExtractionError(string message, ISymbol optionalSymbol, IEntity optionalEntity)
+        public void ExtractionError(string message, ISymbol? optionalSymbol, IEntity optionalEntity)
         {
             if (!(optionalSymbol is null))
             {
                 ExtractionError(message, optionalSymbol.ToDisplayString(), Entities.Location.Create(this, optionalSymbol.Locations.FirstOrDefault()));
             }
-            else if(!(optionalEntity is null))
+            else if (!(optionalEntity is null))
             {
                 ExtractionError(message, optionalEntity.Label.ToString(), Entities.Location.Create(this, optionalEntity.ReportingLocation));
             }
@@ -498,7 +466,7 @@ namespace Semmle.Extraction
         }
     }
 
-    static public class ContextExtensions
+    public static class ContextExtensions
     {
         /// <summary>
         /// Signal an error in the program model.
@@ -506,7 +474,7 @@ namespace Semmle.Extraction
         /// <param name="cx">The context.</param>
         /// <param name="node">The syntax node causing the failure.</param>
         /// <param name="msg">The error message.</param>
-        static public void ModelError(this Context cx, SyntaxNode node, string msg)
+        public static void ModelError(this Context cx, SyntaxNode node, string msg)
         {
             if (!cx.Extractor.Standalone)
                 throw new InternalError(node, msg);
@@ -518,7 +486,7 @@ namespace Semmle.Extraction
         /// <param name="context">The context.</param>
         /// <param name="node">Symbol causing the error.</param>
         /// <param name="msg">The error message.</param>
-        static public void ModelError(this Context cx, ISymbol symbol, string msg)
+        public static void ModelError(this Context cx, ISymbol symbol, string msg)
         {
             if (!cx.Extractor.Standalone)
                 throw new InternalError(symbol, msg);
@@ -529,7 +497,7 @@ namespace Semmle.Extraction
         /// </summary>
         /// <param name="context">The context.</param>
         /// <param name="msg">The error message.</param>
-        static public void ModelError(this Context cx, string msg)
+        public static void ModelError(this Context cx, string msg)
         {
             if (!cx.Extractor.Standalone)
                 throw new InternalError(msg);
@@ -543,7 +511,7 @@ namespace Semmle.Extraction
         /// <param name="node">Optional syntax node for error reporting.</param>
         /// <param name="symbol">Optional symbol for error reporting.</param>
         /// <param name="a">The action to perform.</param>
-        static public void Try(this Context context, SyntaxNode node, ISymbol symbol, Action a)
+        public static void Try(this Context context, SyntaxNode? node, ISymbol? symbol, Action a)
         {
             try
             {
@@ -571,7 +539,7 @@ namespace Semmle.Extraction
         /// </summary>
         /// <param name="cx">Extractor context.</param>
         /// <param name="tuple">Tuple to write.</param>
-        static public void Emit(this Context cx, Tuple tuple)
+        public static void Emit(this Context cx, Tuple tuple)
         {
             cx.TrapWriter.Emit(tuple);
         }

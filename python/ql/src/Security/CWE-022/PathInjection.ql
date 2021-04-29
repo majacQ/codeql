@@ -17,15 +17,8 @@
  */
 
 import python
-import semmle.python.security.Paths
+import semmle.python.security.dataflow.PathInjection
 
-/* Sources */
-import semmle.python.web.HttpRequest
-
-/* Sinks */
-import semmle.python.security.injection.Path
-
-
-from TaintedPathSource src, TaintedPathSink sink
-where src.flowsTo(sink)
-select sink.getSink(), src, sink, "This path depends on $@.", src.getSource(), "a user-provided value"
+from CustomPathNode source, CustomPathNode sink
+where pathInjection(source, sink)
+select sink, source, sink, "This path depends on $@.", source, "a user-provided value"

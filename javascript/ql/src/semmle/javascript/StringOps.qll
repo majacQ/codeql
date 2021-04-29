@@ -57,6 +57,38 @@ module StringOps {
     }
 
     /**
+     * A call to a utility function (`callee`) that performs a StartsWith check (`inner`).
+     */
+    private class IndirectStartsWith extends Range, DataFlow::CallNode {
+      StartsWith inner;
+      Function callee;
+
+      IndirectStartsWith() {
+        inner.getEnclosingExpr() = unique(Expr ret | ret = callee.getAReturnedExpr()) and
+        callee = unique(Function f | f = this.getACallee()) and
+        not this.isImprecise() and
+        inner.getBaseString().getALocalSource().getEnclosingExpr() = callee.getAParameter() and
+        inner.getSubstring().getALocalSource().getEnclosingExpr() = callee.getAParameter()
+      }
+
+      override DataFlow::Node getBaseString() {
+        exists(int arg |
+          inner.getBaseString().getALocalSource().getEnclosingExpr() = callee.getParameter(arg) and
+          result = this.getArgument(arg)
+        )
+      }
+
+      override DataFlow::Node getSubstring() {
+        exists(int arg |
+          inner.getSubstring().getALocalSource().getEnclosingExpr() = callee.getParameter(arg) and
+          result = this.getArgument(arg)
+        )
+      }
+
+      override boolean getPolarity() { result = inner.getPolarity() }
+    }
+
+    /**
      * An expression of form `A.startsWith(B)`.
      */
     private class StartsWith_Native extends Range, DataFlow::MethodCallNode {
@@ -75,7 +107,6 @@ module StringOps {
      */
     private class StartsWith_IndexOfEquals extends Range, DataFlow::ValueNode {
       override EqualityTest astNode;
-
       DataFlow::MethodCallNode indexOf;
 
       StartsWith_IndexOfEquals() {
@@ -118,8 +149,10 @@ module StringOps {
       StartsWith_Library() {
         getNumArgument() = 2 and
         exists(DataFlow::SourceNode callee | this = callee.getACall() |
-          callee = LodashUnderscore::member("startsWith") or
-          callee = DataFlow::moduleMember("ramda", "startsWith") or
+          callee = LodashUnderscore::member("startsWith")
+          or
+          callee = DataFlow::moduleMember("ramda", "startsWith")
+          or
           exists(string name |
             callee = Closure::moduleImport("goog.string." + name) and
             (name = "startsWith" or name = "caseInsensitiveStartsWith")
@@ -137,9 +170,7 @@ module StringOps {
      */
     private class StartsWith_FirstCharacter extends Range, DataFlow::ValueNode {
       override EqualityTest astNode;
-
       DataFlow::PropRead read;
-
       Expr constant;
 
       StartsWith_FirstCharacter() {
@@ -161,17 +192,21 @@ module StringOps {
      */
     private class StartsWith_Substring extends Range, DataFlow::ValueNode {
       override EqualityTest astNode;
-
       DataFlow::MethodCallNode call;
-
       DataFlow::Node substring;
 
       StartsWith_Substring() {
         astNode.hasOperands(call.asExpr(), substring.asExpr()) and
-        (call.getMethodName() = "substring" or call.getMethodName() = "substr") and
+        (
+          call.getMethodName() = "substring" or
+          call.getMethodName() = "substr" or
+          call.getMethodName() = "slice"
+        ) and
         call.getNumArgument() = 2 and
         (
-          substring.getALocalSource().getAPropertyRead("length").flowsTo(call.getArgument(1))
+          AccessPath::getAnAliasedSourceNode(substring)
+              .getAPropertyRead("length")
+              .flowsTo(call.getArgument(1))
           or
           substring.getStringValue().length() = call.getArgument(1).asExpr().getIntValue()
         )
@@ -188,166 +223,15 @@ module StringOps {
   /**
    * A expression that is equivalent to `A.includes(B)` or `!A.includes(B)`.
    *
-   * Note that this also includes calls to the array method named `includes`.
+   * Note that this class is equivalent to `InclusionTest`, which also matches
+   * inclusion tests on array objects.
    */
-  class Includes extends DataFlow::Node {
-    Includes::Range range;
-
-    Includes() { this = range }
-
+  class Includes extends InclusionTest {
     /** Gets the `A` in `A.includes(B)`. */
-    DataFlow::Node getBaseString() { result = range.getBaseString() }
+    DataFlow::Node getBaseString() { result = getContainerNode() }
 
     /** Gets the `B` in `A.includes(B)`. */
-    DataFlow::Node getSubstring() { result = range.getSubstring() }
-
-    /**
-     * Gets the polarity of the check.
-     *
-     * If the polarity is `false` the check returns `true` if the string does not contain
-     * the given substring.
-     */
-    boolean getPolarity() { result = range.getPolarity() }
-  }
-
-  module Includes {
-    /**
-     * A expression that is equivalent to `A.includes(B)` or `!A.includes(B)`.
-     *
-     * Note that this also includes calls to the array method named `includes`.
-     */
-    abstract class Range extends DataFlow::Node {
-      /** Gets the `A` in `A.includes(B)`. */
-      abstract DataFlow::Node getBaseString();
-
-      /** Gets the `B` in `A.includes(B)`. */
-      abstract DataFlow::Node getSubstring();
-
-      /**
-       * Gets the polarity of the check.
-       *
-       * If the polarity is `false` the check returns `true` if the string does not contain
-       * the given substring.
-       */
-      boolean getPolarity() { result = true }
-    }
-
-    /**
-     * A call to a method named `includes`, assumed to refer to `String.prototype.includes`.
-     */
-    private class Includes_Native extends Range, DataFlow::MethodCallNode {
-      Includes_Native() {
-        getMethodName() = "includes" and
-        getNumArgument() = 1
-      }
-
-      override DataFlow::Node getBaseString() { result = getReceiver() }
-
-      override DataFlow::Node getSubstring() { result = getArgument(0) }
-    }
-
-    /**
-     * A call to `_.includes` or similar, assumed to operate on strings.
-     */
-    private class Includes_Library extends Range, DataFlow::CallNode {
-      Includes_Library() {
-        exists(string name |
-          this = LodashUnderscore::member(name).getACall() and
-          (name = "includes" or name = "include" or name = "contains")
-          or
-          this = Closure::moduleImport("goog.string." + name).getACall() and
-          (name = "contains" or name = "caseInsensitiveContains")
-        )
-      }
-
-      override DataFlow::Node getBaseString() { result = getArgument(0) }
-
-      override DataFlow::Node getSubstring() { result = getArgument(1) }
-    }
-
-    /**
-     * A check of form `A.indexOf(B) !== -1` or similar.
-     */
-    private class Includes_IndexOfEquals extends Range, DataFlow::ValueNode {
-      MethodCallExpr indexOf;
-
-      override EqualityTest astNode;
-
-      Includes_IndexOfEquals() {
-        exists(Expr index | astNode.hasOperands(indexOf, index) |
-          // one operand is of the form `whitelist.indexOf(x)`
-          indexOf.getMethodName() = "indexOf" and
-          // and the other one is -1
-          index.getIntValue() = -1
-        )
-      }
-
-      override DataFlow::Node getBaseString() { result = indexOf.getReceiver().flow() }
-
-      override DataFlow::Node getSubstring() { result = indexOf.getArgument(0).flow() }
-
-      override boolean getPolarity() { result = astNode.getPolarity().booleanNot() }
-    }
-
-    /**
-     * A check of form `A.indexOf(B) >= 0` or similar.
-     */
-    private class Includes_IndexOfRelational extends Range, DataFlow::ValueNode {
-      MethodCallExpr indexOf;
-
-      override RelationalComparison astNode;
-
-      boolean polarity;
-
-      Includes_IndexOfRelational() {
-        exists(Expr lesser, Expr greater |
-          astNode.getLesserOperand() = lesser and
-          astNode.getGreaterOperand() = greater and
-          indexOf.getMethodName() = "indexOf" and
-          indexOf.getNumArgument() = 1
-        |
-          polarity = true and
-          greater = indexOf and
-          (
-            lesser.getIntValue() = 0 and astNode.isInclusive()
-            or
-            lesser.getIntValue() = -1 and not astNode.isInclusive()
-          )
-          or
-          polarity = false and
-          lesser = indexOf and
-          (
-            greater.getIntValue() = -1 and astNode.isInclusive()
-            or
-            greater.getIntValue() = 0 and not astNode.isInclusive()
-          )
-        )
-      }
-
-      override DataFlow::Node getBaseString() { result = indexOf.getReceiver().flow() }
-
-      override DataFlow::Node getSubstring() { result = indexOf.getArgument(0).flow() }
-
-      override boolean getPolarity() { result = polarity }
-    }
-
-    /**
-     * An expression of form `~A.indexOf(B)` which, when coerced to a boolean, is equivalent to `A.includes(B)`.
-     */
-    private class Includes_IndexOfBitwise extends Range, DataFlow::ValueNode {
-      MethodCallExpr indexOf;
-
-      override BitNotExpr astNode;
-
-      Includes_IndexOfBitwise() {
-        astNode.getOperand() = indexOf and
-        indexOf.getMethodName() = "indexOf"
-      }
-
-      override DataFlow::Node getBaseString() { result = indexOf.getReceiver().flow() }
-
-      override DataFlow::Node getSubstring() { result = indexOf.getArgument(0).flow() }
-    }
+    DataFlow::Node getSubstring() { result = getContainedNode() }
   }
 
   /**
@@ -402,6 +286,38 @@ module StringOps {
     }
 
     /**
+     * A call to a utility function (`callee`) that performs an EndsWith check (`inner`).
+     */
+    private class IndirectEndsWith extends Range, DataFlow::CallNode {
+      EndsWith inner;
+      Function callee;
+
+      IndirectEndsWith() {
+        inner.getEnclosingExpr() = unique(Expr ret | ret = callee.getAReturnedExpr()) and
+        callee = unique(Function f | f = this.getACallee()) and
+        not this.isImprecise() and
+        inner.getBaseString().getALocalSource().getEnclosingExpr() = callee.getAParameter() and
+        inner.getSubstring().getALocalSource().getEnclosingExpr() = callee.getAParameter()
+      }
+
+      override DataFlow::Node getBaseString() {
+        exists(int arg |
+          inner.getBaseString().getALocalSource().getEnclosingExpr() = callee.getParameter(arg) and
+          result = this.getArgument(arg)
+        )
+      }
+
+      override DataFlow::Node getSubstring() {
+        exists(int arg |
+          inner.getSubstring().getALocalSource().getEnclosingExpr() = callee.getParameter(arg) and
+          result = this.getArgument(arg)
+        )
+      }
+
+      override boolean getPolarity() { result = inner.getPolarity() }
+    }
+
+    /**
      * A call of form `A.endsWith(B)`.
      */
     private class EndsWith_Native extends Range, DataFlow::MethodCallNode {
@@ -422,8 +338,10 @@ module StringOps {
       EndsWith_Library() {
         getNumArgument() = 2 and
         exists(DataFlow::SourceNode callee | this = callee.getACall() |
-          callee = LodashUnderscore::member("endsWith") or
-          callee = DataFlow::moduleMember("ramda", "endsWith") or
+          callee = LodashUnderscore::member("endsWith")
+          or
+          callee = DataFlow::moduleMember("ramda", "endsWith")
+          or
           exists(string name |
             callee = Closure::moduleImport("goog.string." + name) and
             (name = "endsWith" or name = "caseInsensitiveEndsWith")
@@ -438,69 +356,450 @@ module StringOps {
   }
 
   /**
-   * A data flow node that concatenates strings and returns the result.
+   * Holds if `first` and `second` are adjacent leaves in a concatenation tree.
    */
-  class Concatenation extends DataFlow::Node {
-    Concatenation() {
+  pragma[nomagic]
+  private predicate adjacentLeaves(ConcatenationLeaf first, ConcatenationLeaf second) {
+    exists(Concatenation parent, int i |
+      first = parent.getOperand(i).getLastLeaf() and
+      second = parent.getOperand(i + 1).getFirstLeaf()
+    )
+  }
+
+  /**
+   * A data flow node that performs a string concatenation or occurs as an operand
+   * in a string concatenation.
+   *
+   * For example, the expression `x + y + z` contains the following concatenation
+   * nodes:
+   * - The leaf nodes `x`, `y`, and `z`
+   * - The intermediate node `x + y`, which is both a concatenation and an operand
+   * - The root node `x + y + z`
+   *
+   *
+   * Note that the following are not recognized a string concatenations:
+   * - Array `join()` calls with a non-empty separator
+   * - Tagged template literals
+   *
+   *
+   * Also note that all `+` operators are seen as string concatenations,
+   * even in cases where it is used for arithmetic.
+   *
+   * Examples of string concatenations:
+   * ```
+   * x + y
+   * x += y
+   * [x, y].join('')
+   * Array(x, y).join('')
+   * `Hello, ${message}`
+   * ```
+   */
+  class ConcatenationNode extends DataFlow::Node {
+    pragma[inline]
+    ConcatenationNode() {
       exists(StringConcatenation::getAnOperand(this))
+      or
+      this = StringConcatenation::getAnOperand(_)
     }
 
     /**
      * Gets the `n`th operand of this string concatenation.
      */
-    DataFlow::Node getOperand(int n) {
-      result = StringConcatenation::getOperand(this, n)
-    }
+    pragma[inline]
+    ConcatenationOperand getOperand(int n) { result = StringConcatenation::getOperand(this, n) }
 
     /**
      * Gets an operand of this string concatenation.
      */
-    DataFlow::Node getAnOperand() {
-      result = StringConcatenation::getAnOperand(this)
-    }
+    pragma[inline]
+    ConcatenationOperand getAnOperand() { result = StringConcatenation::getAnOperand(this) }
 
     /**
      * Gets the number of operands of this string concatenation.
      */
-    int getNumOperand() {
-      result = StringConcatenation::getNumOperand(this)
-    }
+    pragma[inline]
+    int getNumOperand() { result = StringConcatenation::getNumOperand(this) }
 
     /**
      * Gets the first operand of this string concatenation.
      */
-    DataFlow::Node getFirstOperand() {
-      result = StringConcatenation::getFirstOperand(this)
-    }
+    pragma[inline]
+    ConcatenationOperand getFirstOperand() { result = StringConcatenation::getFirstOperand(this) }
 
     /**
      * Gets the last operand of this string concatenation
      */
-    DataFlow::Node getLastOperand() {
-      result = StringConcatenation::getLastOperand(this)
-    }
+    pragma[inline]
+    ConcatenationOperand getLastOperand() { result = StringConcatenation::getLastOperand(this) }
 
     /**
      * Holds if this only acts as a string coercion, such as `"" + x`.
      */
-    predicate isCoercion() {
-      StringConcatenation::isCoercion(this)
-    }
+    pragma[inline]
+    predicate isCoercion() { StringConcatenation::isCoercion(this) }
 
     /**
      * Holds if this is the root of a concatenation tree, that is,
      * it is a concatenation operator that is not itself the immediate operand to
      * another concatenation operator.
      */
-    predicate isRoot() {
-      StringConcatenation::isRoot(this)
-    }
+    pragma[inline]
+    predicate isRoot() { StringConcatenation::isRoot(this) }
+
+    /**
+     * Holds if this is a leaf in the concatenation tree, that is, it is not
+     * itself a concatenation.
+     */
+    pragma[inline]
+    predicate isLeaf() { not exists(StringConcatenation::getAnOperand(this)) }
 
     /**
      * Gets the root of the concatenation tree in which this is an operator.
      */
-    Concatenation getRoot() {
-      result = StringConcatenation::getRoot(this)
+    pragma[inline]
+    ConcatenationRoot getRoot() { result = StringConcatenation::getRoot(this) }
+
+    /**
+     * Gets the enclosing concatenation in which this is an operand, if any.
+     */
+    pragma[inline]
+    Concatenation getParentConcatenation() { this = StringConcatenation::getAnOperand(result) }
+
+    /**
+     * Gets the last leaf in this concatenation tree.
+     *
+     * For example, `z` is the last leaf in `x + y + z`.
+     */
+    pragma[inline]
+    ConcatenationLeaf getLastLeaf() { result = StringConcatenation::getLastOperand*(this) }
+
+    /**
+     * Gets the first leaf in this concatenation tree.
+     *
+     * For example, `x` is the first leaf in `x + y + z`.
+     */
+    pragma[inline]
+    ConcatenationLeaf getFirstLeaf() { result = StringConcatenation::getFirstOperand*(this) }
+
+    /**
+     * Gets the leaf that is occurs immediately before this leaf in the
+     * concatenation tree, if any.
+     *
+     * For example, `y` is the previous leaf from `z` in `x + y + z`.
+     */
+    pragma[inline]
+    ConcatenationLeaf getPreviousLeaf() { adjacentLeaves(result, this) }
+
+    /**
+     * Gets the leaf that is occurs immediately after this leaf in the
+     * concatenation tree, if any.
+     *
+     * For example, `y` is the next leaf from `x` in `x + y + z`.
+     */
+    pragma[inline]
+    ConcatenationLeaf getNextLeaf() { adjacentLeaves(this, result) }
+  }
+
+  /**
+   * A data flow node that performs a string concatenation and returns the result.
+   *
+   * Examples:
+   * ```
+   * x + y
+   * x += y
+   * [x, y].join('')
+   * Array(x, y).join('')
+   * `Hello ${message}`
+   * ```
+   *
+   * See `ConcatenationNode` for more information.
+   */
+  class Concatenation extends ConcatenationNode {
+    pragma[inline]
+    Concatenation() { exists(StringConcatenation::getAnOperand(this)) }
+  }
+
+  /**
+   * One of the operands in a string concatenation.
+   *
+   * Examples:
+   * ```
+   * x + y              // x and y are operands
+   * [x, y].join('')    // x and y are operands
+   * `Hello ${message}` // `Hello ` and message are operands
+   * ```
+   *
+   * See `ConcatenationNode` for more information.
+   */
+  class ConcatenationOperand extends ConcatenationNode {
+    pragma[inline]
+    ConcatenationOperand() { this = StringConcatenation::getAnOperand(_) }
+  }
+
+  /**
+   * A data flow node that performs a string concatenation, and is not an
+   * immediate operand in a larger string concatenation.
+   *
+   * Examples:
+   * ```
+   * // x + y + z is a root, but the inner x + y is not
+   * return x + y + z;
+   * ```
+   *
+   * See `ConcatenationNode` for more information.
+   */
+  class ConcatenationRoot extends Concatenation {
+    pragma[inline]
+    ConcatenationRoot() { isRoot() }
+
+    /**
+     * Gets a leaf in this concatenation tree that this node is the root of.
+     */
+    pragma[inline]
+    ConcatenationLeaf getALeaf() { this = StringConcatenation::getRoot(result) }
+
+    /**
+     * Returns the concatenation of all constant operands in this concatenation,
+     * ignoring the non-constant parts entirely.
+     *
+     * For example, for the following concatenation
+     * ```
+     * `Hello ${person}, how are you?`
+     * ```
+     * the result is `"Hello , how are you?"`
+     */
+    string getConstantStringParts() {
+      result = getStringValue()
+      or
+      not exists(getStringValue()) and
+      result =
+        strictconcat(StringLiteralLike leaf |
+          leaf = this.(SmallConcatenationRoot).getALeaf().asExpr()
+        |
+          leaf.getStringValue()
+          order by
+            leaf.getLocation().getStartLine(), leaf.getLocation().getStartColumn()
+        )
+    }
+  }
+
+  /**
+   * A concatenation root where the combined length of the constant parts
+   * is less than 1 million chars.
+   */
+  private class SmallConcatenationRoot extends ConcatenationRoot {
+    SmallConcatenationRoot() {
+      sum(StringLiteralLike leaf | leaf = getALeaf().asExpr() | leaf.getStringValue().length()) <
+        1000 * 1000
+    }
+  }
+
+  /** A string literal or template literal without any substitutions. */
+  private class StringLiteralLike extends Expr {
+    StringLiteralLike() {
+      this instanceof StringLiteral or
+      this instanceof TemplateElement
+    }
+  }
+
+  /**
+   * An operand to a concatenation that is not itself a concatenation.
+   *
+   * Example:
+   * ```
+   * x + y + z            // x, y, and z are leaves
+   * [x, y + z].join('')  // x, y, and z are leaves
+   * ```
+   *
+   * See `ConcatenationNode` for more information.
+   */
+  class ConcatenationLeaf extends ConcatenationOperand {
+    pragma[inline]
+    ConcatenationLeaf() { isLeaf() }
+  }
+
+  /**
+   * The root node in a concatenation of one or more strings containing HTML fragments.
+   */
+  class HtmlConcatenationRoot extends ConcatenationRoot {
+    pragma[noinline]
+    HtmlConcatenationRoot() {
+      getConstantStringParts().regexpMatch("(?s).*</?[a-zA-Z][^\\r\\n<>/]*/?>.*")
+    }
+  }
+
+  /**
+   * A data flow node that is part of an HTML string concatenation.
+   */
+  class HtmlConcatenationNode extends ConcatenationNode {
+    HtmlConcatenationNode() { getRoot() instanceof HtmlConcatenationRoot }
+  }
+
+  /**
+   * A data flow node that is part of an HTML string concatenation,
+   * and is not itself a concatenation operator.
+   */
+  class HtmlConcatenationLeaf extends ConcatenationLeaf {
+    HtmlConcatenationLeaf() { getRoot() instanceof HtmlConcatenationRoot }
+  }
+
+  /**
+   * A data flow node whose boolean value indicates whether a regexp matches a given string.
+   *
+   * For example, the condition of each of the following `if`-statements are `RegExpTest` nodes:
+   * ```js
+   * if (regexp.test(str)) { ... }
+   * if (regexp.exec(str) != null) { ... }
+   * if (str.matches(regexp)) { ... }
+   * ```
+   *
+   * Note that `RegExpTest` represents a boolean-valued expression or one
+   * that is coerced to a boolean, which is not always the same as the call that performs the
+   * regexp-matching. For example, the `exec` call below is not itself a `RegExpTest`,
+   * but the `match` variable in the condition is:
+   * ```js
+   * let match = regexp.exec(str);
+   * if (!match) { ... } // <--- 'match' is the RegExpTest
+   * ```
+   */
+  class RegExpTest extends DataFlow::Node {
+    RegExpTest::Range range;
+
+    RegExpTest() { this = range }
+
+    /**
+     * Gets the AST of the regular expression used in the test, if it can be seen locally.
+     */
+    RegExpTerm getRegExp() {
+      result = getRegExpOperand().getALocalSource().(DataFlow::RegExpCreationNode).getRoot()
+      or
+      result = range.getRegExpOperand(true).asExpr().(StringLiteral).asRegExp()
+    }
+
+    /**
+     * Gets the data flow node corresponding to the regular expression object used in the test.
+     *
+     * In some cases this represents a string value being coerced to a RegExp object.
+     */
+    DataFlow::Node getRegExpOperand() { result = range.getRegExpOperand(_) }
+
+    /**
+     * Gets the data flow node corresponding to the string being tested against the regular expression.
+     */
+    DataFlow::Node getStringOperand() { result = range.getStringOperand() }
+
+    /**
+     * Gets the return value indicating that the string matched the regular expression.
+     *
+     * For example, for `regexp.exec(str) == null`, the polarity is `false`, and for
+     * `regexp.exec(str) != null` the polarity is `true`.
+     */
+    boolean getPolarity() { result = range.getPolarity() }
+  }
+
+  /**
+   * Companion module to the `RegExpTest` class.
+   */
+  module RegExpTest {
+    /**
+     * A data flow node whose boolean value indicates whether a regexp matches a given string.
+     *
+     * This class can be extended to contribute new kinds of `RegExpTest` nodes.
+     */
+    abstract class Range extends DataFlow::Node {
+      /**
+       * Gets the data flow node corresponding to the regular expression object used in the test.
+       */
+      abstract DataFlow::Node getRegExpOperand(boolean coerced);
+
+      /**
+       * Gets the data flow node corresponding to the string being tested against the regular expression.
+       */
+      abstract DataFlow::Node getStringOperand();
+
+      /**
+       * Gets the return value indicating that the string matched the regular expression.
+       */
+      boolean getPolarity() { result = true }
+    }
+
+    private class TestCall extends Range, DataFlow::MethodCallNode {
+      TestCall() { getMethodName() = "test" }
+
+      override DataFlow::Node getRegExpOperand(boolean coerced) {
+        result = getReceiver() and coerced = false
+      }
+
+      override DataFlow::Node getStringOperand() { result = getArgument(0) }
+    }
+
+    private class MatchCall extends DataFlow::MethodCallNode {
+      MatchCall() { getMethodName() = "match" }
+    }
+
+    private class ExecCall extends DataFlow::MethodCallNode {
+      ExecCall() { getMethodName() = "exec" }
+    }
+
+    private predicate isCoercedToBoolean(Expr e) {
+      e = any(ConditionGuardNode guard).getTest()
+      or
+      e = any(LogNotExpr n).getOperand()
+    }
+
+    /**
+     * Holds if `e` evaluating to `polarity` implies that `operand` is not null.
+     */
+    private predicate impliesNotNull(Expr e, Expr operand, boolean polarity) {
+      exists(EqualityTest test, Expr other |
+        e = test and
+        polarity = test.getPolarity().booleanNot() and
+        test.hasOperands(other, operand) and
+        SyntacticConstants::isNullOrUndefined(other) and
+        not (
+          // 'exec() === undefined' doesn't work
+          other instanceof SyntacticConstants::UndefinedConstant and
+          test.isStrict()
+        )
+      )
+      or
+      isCoercedToBoolean(e) and
+      operand = e and
+      polarity = true
+    }
+
+    private class ExecTest extends Range, DataFlow::ValueNode {
+      ExecCall exec;
+      boolean polarity;
+
+      ExecTest() {
+        exists(Expr use | exec.flowsToExpr(use) | impliesNotNull(astNode, use, polarity))
+      }
+
+      override DataFlow::Node getRegExpOperand(boolean coerced) {
+        result = exec.getReceiver() and coerced = false
+      }
+
+      override DataFlow::Node getStringOperand() { result = exec.getArgument(0) }
+
+      override boolean getPolarity() { result = polarity }
+    }
+
+    private class MatchTest extends Range, DataFlow::ValueNode {
+      MatchCall match;
+      boolean polarity;
+
+      MatchTest() {
+        exists(Expr use | match.flowsToExpr(use) | impliesNotNull(astNode, use, polarity))
+      }
+
+      override DataFlow::Node getRegExpOperand(boolean coerced) {
+        result = match.getArgument(0) and coerced = true
+      }
+
+      override DataFlow::Node getStringOperand() { result = match.getReceiver() }
+
+      override boolean getPolarity() { result = polarity }
     }
   }
 }

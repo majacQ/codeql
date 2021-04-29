@@ -1,3 +1,8 @@
+/**
+ * Provides classes for identifying files that contain test cases. It is often
+ * desirable to exclude these files from analysis.
+ */
+
 import semmle.code.cpp.File
 
 /**
@@ -18,7 +23,7 @@ private class GoogleTest extends MacroInvocation {
     // invocation of a macro from Google Test.
     this.getMacro().getFile() instanceof GoogleTestHeader
   }
-} 
+}
 
 /**
  * The `boost/test` directory.
@@ -36,8 +41,7 @@ private class BoostTestFolder extends Folder {
 private class BoostTest extends MacroInvocation {
   BoostTest() {
     // invocation of a macro from Boost Test.
-    this.getMacro().getFile().getParentContainer+()
-      instanceof BoostTestFolder
+    this.getMacro().getFile().getParentContainer+() instanceof BoostTestFolder
   }
 }
 
@@ -45,9 +49,7 @@ private class BoostTest extends MacroInvocation {
  * The `cppunit` directory.
  */
 private class CppUnitFolder extends Folder {
-  CppUnitFolder() {
-    getBaseName() = "cppunit"
-  }
+  CppUnitFolder() { getBaseName() = "cppunit" }
 }
 
 /**
@@ -65,16 +67,13 @@ private class CppUnitClass extends Class {
  */
 private class CppUnitTest extends Element {
   CppUnitTest() {
-    (
-      // class with a base class from cppunit. 
-      this.(Class).getABaseClass*() instanceof CppUnitClass and
-
-      // class itself is not a part of cppunit.
-      not this instanceof CppUnitClass
-    ) or (
-      // any member function of a test is also test code
-      this.(Function).getDeclaringType() instanceof CppUnitTest
-    )
+    // class with a base class from cppunit.
+    this.(Class).getABaseClass*() instanceof CppUnitClass and
+    // class itself is not a part of cppunit.
+    not this instanceof CppUnitClass
+    or
+    // any member function of a test is also test code
+    this.(Function).getDeclaringType() instanceof CppUnitTest
   }
 }
 

@@ -7,11 +7,12 @@
 
 import java
 
-newtype AssertKind =
+private newtype AssertKind =
   AssertKindTrue() or
   AssertKindFalse() or
   AssertKindNotNull() or
-  AssertKindFail()
+  AssertKindFail() or
+  AssertKindThat()
 
 private predicate assertionMethod(Method m, AssertKind kind) {
   exists(RefType junit |
@@ -25,6 +26,13 @@ private predicate assertionMethod(Method m, AssertKind kind) {
     m.hasName("assertFalse") and kind = AssertKindFalse()
     or
     m.hasName("fail") and kind = AssertKindFail()
+  )
+  or
+  exists(RefType hamcrest |
+    m.getDeclaringType() = hamcrest and
+    hamcrest.hasQualifiedName("org.hamcrest", "MatcherAssert")
+  |
+    m.hasName("assertThat") and kind = AssertKindThat()
   )
   or
   exists(RefType objects |
@@ -42,6 +50,7 @@ private predicate assertionMethod(Method m, AssertKind kind) {
   )
 }
 
+/** An assertion method. */
 class AssertionMethod extends Method {
   AssertionMethod() { assertionMethod(this, _) }
 
@@ -82,6 +91,14 @@ class AssertFailMethod extends AssertionMethod {
   AssertFailMethod() { assertionMethod(this, AssertKindFail()) }
 }
 
+/**
+ * A method that asserts that its first argument has a property
+ * given by its second argument.
+ */
+class AssertThatMethod extends AssertionMethod {
+  AssertThatMethod() { assertionMethod(this, AssertKindThat()) }
+}
+
 /** A trivially failing assertion. That is, `assert false` or its equivalents. */
 predicate assertFail(BasicBlock bb, ControlFlowNode n) {
   bb = n.getBasicBlock() and
@@ -93,6 +110,6 @@ predicate assertFail(BasicBlock bb, ControlFlowNode n) {
       n = m.getACheck(any(BooleanLiteral b | b.getBooleanValue() = true))
     ) or
     exists(AssertFailMethod m | n = m.getACheck()) or
-    n.(AssertStmt).getExpr().getProperExpr().(BooleanLiteral).getBooleanValue() = false
+    n.(AssertStmt).getExpr().(BooleanLiteral).getBooleanValue() = false
   )
 }

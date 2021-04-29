@@ -78,9 +78,7 @@ private newtype TAccessPath =
   /**
    * A property access on an access path.
    */
-  MkAccessStep(AccessPath base, PropertyName name) {
-    exists(namedPropAccess(base, name, _))
-  }
+  MkAccessStep(AccessPath base, PropertyName name) { exists(namedPropAccess(base, name, _)) }
 
 /**
  * A representation of a (nested) property access on an SSA variable or captured variable
@@ -130,8 +128,9 @@ class AccessPath extends TAccessPath {
     exists(AccessPath base, PropertyName name, string rest |
       rest = "." + any(string s | name = StaticPropertyName(s))
       or
-      rest = "[" +
-          any(SsaVariable var | name = DynamicPropertyName(var)).getSourceVariable().getName() + "]"
+      rest =
+        "[" + any(SsaVariable var | name = DynamicPropertyName(var)).getSourceVariable().getName() +
+          "]"
     |
       result = base.toString() + rest and
       this = MkAccessStep(base, name)

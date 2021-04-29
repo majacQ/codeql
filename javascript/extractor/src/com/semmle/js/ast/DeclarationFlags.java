@@ -17,9 +17,10 @@ public class DeclarationFlags {
   public static final int protected_ = 1 << 6;
   public static final int optional = 1 << 7;
   public static final int definiteAssignmentAssertion = 1 << 8;
+  public static final int declareKeyword = 1 << 9;
 
   public static final int none = 0;
-  public static final int numberOfFlags = 9;
+  public static final int numberOfFlags = 10;
 
   public static final List<String> names =
       Arrays.asList(
@@ -31,19 +32,21 @@ public class DeclarationFlags {
           "private",
           "protected",
           "optional",
-          "definiteAssignmentAssertion");
+          "definiteAssignmentAssertion",
+          "declare");
 
   public static final List<String> relationNames =
       Arrays.asList(
-          "isComputed",
-          "isAbstractMember",
-          "isStatic",
-          "hasReadonlyKeyword",
-          "hasPublicKeyword",
-          "hasPrivateKeyword",
-          "hasProtectedKeyword",
-          "isOptionalMember",
-          "hasDefiniteAssignmentAssertion");
+          "is_computed",
+          "is_abstract_member",
+          "is_static",
+          "has_readonly_keyword",
+          "has_public_keyword",
+          "has_private_keyword",
+          "has_protected_keyword",
+          "is_optional_member",
+          "has_definite_assignment_assertion",
+          "has_declare_keyword");
 
   public static boolean isComputed(int flags) {
     return (flags & computed) != 0;
@@ -79,6 +82,10 @@ public class DeclarationFlags {
 
   public static boolean hasDefiniteAssignmentAssertion(int flags) {
     return (flags & definiteAssignmentAssertion) != 0;
+  }
+
+  public static boolean hasDeclareKeyword(int flags) {
+    return (flags & declareKeyword) != 0;
   }
 
   /** Returns a mask with the computed bit set to the value of <tt>enable</tt>. */
@@ -126,6 +133,11 @@ public class DeclarationFlags {
    */
   public static int getDefiniteAssignmentAssertion(boolean enable) {
     return enable ? definiteAssignmentAssertion : 0;
+  }
+
+  /** Returns a mask with the declare keyword bit set to the value of <tt>enable</tt>. */
+  public static int getDeclareKeyword(boolean enable) {
+    return enable ? declareKeyword : 0;
   }
 
   /** Returns true if the <tt>n</tt>th bit is set in <tt>flags</tt>. */

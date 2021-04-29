@@ -8,9 +8,10 @@
  * @id java/sql-injection
  * @tags security
  *       external/cwe/cwe-089
+ *       external/cwe/cwe-564
  */
 
-import semmle.code.java.Expr
+import java
 import semmle.code.java.dataflow.FlowSources
 import SqlInjectionLib
 import DataFlow::PathGraph

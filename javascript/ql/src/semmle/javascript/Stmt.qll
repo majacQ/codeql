@@ -2,11 +2,22 @@
 
 import javascript
 
-/** A statement. */
+/**
+ * A statement.
+ *
+ * Examples:
+ *
+ * ```
+ * x = 0;
+ *
+ * if (typeof console !== "undefined") {
+ *   log = console.log;
+ * } else {
+ *   log = alert;
+ * }
+ * ```
+ */
 class Stmt extends @stmt, ExprOrStmt, Documentable {
-  /** Gets the statement container (toplevel, function or namespace) to which this statement belongs. */
-  override StmtContainer getContainer() { stmtContainers(this, result) }
-
   /** Holds if this statement has an implicitly inserted semicolon. */
   predicate hasSemicolonInserted() {
     isSubjectToSemicolonInsertion() and
@@ -40,20 +51,65 @@ class Stmt extends @stmt, ExprOrStmt, Documentable {
     getContainer().(Expr).getEnclosingStmt().nestedIn(outer)
   }
 
-  override predicate isAmbient() { hasDeclareKeyword(this) or getParent().isAmbient() }
+  /**
+   * Gets the `try` statement with a catch block containing this statement without
+   * crossing function boundaries or other `try ` statements with catch blocks.
+   */
+  TryStmt getEnclosingTryCatchStmt() {
+    getParentStmt+() = result.getBody() and
+    exists(result.getACatchClause()) and
+    not exists(TryStmt mid | exists(mid.getACatchClause()) |
+      getParentStmt+() = mid.getBody() and mid.getParentStmt+() = result.getBody()
+    )
+  }
 }
+
+private class TControlStmt =
+  TLoopStmt or @if_stmt or @with_stmt or @switch_stmt or @try_stmt or @catch_clause;
+
+private class TLoopStmt = TEnhancedForLoop or @while_stmt or @do_while_stmt or @for_stmt;
+
+private class TEnhancedForLoop = @for_in_stmt or @for_each_stmt or @for_of_stmt;
 
 /**
  * A control statement, that is, is a loop, an if statement, a switch statement,
  * a with statement, a try statement, or a catch clause.
+ *
+ * Examples:
+ *
+ * ```
+ * if (typeof console !== "undefined") {
+ *   log = console.log;
+ * } else {
+ *   log = alert;
+ * }
+ *
+ * while(hasNext()) {
+ *   handle(getNext());
+ * }
+ * ```
  */
-abstract class ControlStmt extends Stmt {
+class ControlStmt extends TControlStmt, Stmt {
   /** Gets a statement controlled by this control statement. */
   abstract Stmt getAControlledStmt();
 }
 
-/** A loop, that is, is a while loop, a do-while loop, a for loop, or a for-in loop. */
-abstract class LoopStmt extends ControlStmt {
+/**
+ * A loop, that is, is a while loop, a do-while loop, a for loop, or a for-in loop.
+ *
+ * Examples:
+ *
+ * ```
+ * while(hasNext()) {
+ *   handle(getNext());
+ * }
+ *
+ * do {
+ *   handle(lines[i]);
+ * } while(++i < lines.length);
+ * ```
+ */
+class LoopStmt extends TLoopStmt, ControlStmt {
   /** Gets the body of this loop. */
   abstract Stmt getBody();
 
@@ -63,11 +119,31 @@ abstract class LoopStmt extends ControlStmt {
   override Stmt getAControlledStmt() { result = getBody() }
 }
 
-/** An empty statement. */
-class EmptyStmt extends @emptystmt, Stmt { }
+/**
+ * An empty statement.
+ *
+ * Example:
+ *
+ * ```
+ * ;
+ * ```
+ */
+class EmptyStmt extends @empty_stmt, Stmt {
+  override string getAPrimaryQlClass() { result = "EmptyStmt" }
+}
 
-/** A block of statements. */
-class BlockStmt extends @blockstmt, Stmt {
+/**
+ * A block of statements.
+ *
+ * Example:
+ *
+ * ```
+ * {
+ *   console.log(msg);
+ * }
+ * ```
+ */
+class BlockStmt extends @block_stmt, Stmt {
   /** Gets the `i`th statement in this block. */
   Stmt getStmt(int i) { result = getChildStmt(i) }
 
@@ -79,10 +155,21 @@ class BlockStmt extends @blockstmt, Stmt {
 
   /** Holds if this block is a function body. */
   predicate isFunctionBody() { this.getParent() instanceof Function }
+
+  override string getAPrimaryQlClass() { result = "BlockStmt" }
 }
 
-/** An expression statement. */
-class ExprStmt extends @exprstmt, Stmt {
+/**
+ * An expression statement.
+ *
+ * Examples:
+ *
+ * ```
+ * x = 0;
+ * console.log("Restart.");
+ * ```
+ */
+class ExprStmt extends @expr_stmt, Stmt {
   /** Gets the expression of this expression statement. */
   Expr getExpr() { result = getChildExpr(0) }
 
@@ -109,6 +196,8 @@ class ExprStmt extends @exprstmt, Stmt {
       f = assgn.getRhs()
     )
   }
+
+  override string getAPrimaryQlClass() { result = "ExprStmt" }
 }
 
 /**
@@ -145,7 +234,18 @@ private class MaybeDirective extends ExprStmt {
   }
 }
 
-/** A directive: string literal expression statement in the beginning of a statement container. */
+/**
+ * A directive: string literal expression statement in the beginning of a statement container.
+ *
+ * Examples:
+ *
+ * ```
+ * function f() {
+ *   "use strict";
+ *   "a custom directive";
+ * }
+ * ```
+ */
 class Directive extends MaybeDirective {
   Directive() {
     exists(StmtContainer sc, ASTNode body, int i |
@@ -158,61 +258,161 @@ class Directive extends MaybeDirective {
   }
 }
 
-/** A known directive, such as a strict mode declaration. */
+/**
+ * A known directive, such as a strict mode declaration.
+ *
+ * Example:
+ *
+ * ```
+ * "use strict";
+ * ```
+ */
 abstract class KnownDirective extends Directive { }
 
-/** A strict mode declaration. */
+/**
+ * A strict mode declaration.
+ *
+ * Example:
+ *
+ * ```
+ * "use strict";
+ * ```
+ */
 class StrictModeDecl extends KnownDirective {
   StrictModeDecl() { getDirectiveText() = "use strict" }
 }
 
-/** An asm.js directive. */
+/**
+ * An asm.js directive.
+ *
+ * Example:
+ *
+ * ```
+ * "use asm";
+ * ```
+ */
 class ASMJSDirective extends KnownDirective {
   ASMJSDirective() { getDirectiveText() = "use asm" }
 }
 
-/** A Babel directive. */
+/**
+ * A Babel directive.
+ *
+ * Example:
+ *
+ * ```
+ * "use babel";
+ * ```
+ */
 class BabelDirective extends KnownDirective {
   BabelDirective() { getDirectiveText() = "use babel" }
 }
 
-/** A legacy 6to5 directive. */
+/**
+ * A legacy 6to5 directive.
+ *
+ * Example:
+ *
+ * ```
+ * "use 6to5";
+ * ```
+ */
 class SixToFiveDirective extends KnownDirective {
   SixToFiveDirective() { getDirectiveText() = "use 6to5" }
 }
 
-/** A SystemJS `format` directive. */
+/**
+ * A SystemJS `format` directive.
+ *
+ * Example:
+ *
+ * ```
+ * "format global";
+ * ```
+ */
 class SystemJSFormatDirective extends KnownDirective {
   SystemJSFormatDirective() { getDirectiveText().regexpMatch("format (cjs|esm|global|register)") }
 }
 
-/** A SystemJS `format register` directive. */
+/**
+ * A SystemJS `format register` directive.
+ *
+ * Example:
+ *
+ * ```
+ * "format register";
+ * ```
+ */
 class FormatRegisterDirective extends SystemJSFormatDirective {
   FormatRegisterDirective() { getDirectiveText() = "format register" }
 }
 
-/** A `ngInject` or `ngNoInject` directive. */
+/**
+ * A `ngInject` or `ngNoInject` directive.
+ *
+ * Example:
+ *
+ * ```
+ * "ngInject";
+ * ```
+ */
 class NgInjectDirective extends KnownDirective {
   NgInjectDirective() { getDirectiveText().regexpMatch("ng(No)?Inject") }
 }
 
-/** A YUI compressor directive. */
+/**
+ * A YUI compressor directive.
+ *
+ * Example:
+ *
+ * ```
+ * "console:nomunge";
+ * ```
+ */
 class YuiDirective extends KnownDirective {
   YuiDirective() { getDirectiveText().regexpMatch("([a-z0-9_]+:nomunge, ?)*([a-z0-9_]+:nomunge)") }
 }
 
-/** A SystemJS `deps` directive. */
+/**
+ * A SystemJS `deps` directive.
+ *
+ * Example:
+ *
+ * ```
+ * "deps fs";
+ * ```
+ */
 class SystemJSDepsDirective extends KnownDirective {
   SystemJSDepsDirective() { getDirectiveText().regexpMatch("deps [^ ]+") }
 }
 
-/** A `bundle` directive. */
+/**
+ * A `bundle` directive.
+ *
+ * Example:
+ *
+ * ```
+ * "bundle";
+ * ```
+ */
 class BundleDirective extends KnownDirective {
   BundleDirective() { getDirectiveText() = "bundle" }
 }
 
-/** An `if` statement. */
-class IfStmt extends @ifstmt, ControlStmt {
+/**
+ * An `if` statement.
+ *
+ * Example:
+ *
+ * ```
+ * if (typeof console !== "undefined") {
+ *   log = console.log;
+ * } else {
+ *   log = alert;
+ * }
+ * ```
+ */
+class IfStmt extends @if_stmt, ControlStmt {
   /** Gets the condition of this `if` statement. */
   Expr getCondition() { result = getChildExpr(0) }
 
@@ -238,23 +438,53 @@ class IfStmt extends @ifstmt, ControlStmt {
 
   /** Holds if this `if` statement is an `else if` of an outer `if` statement. */
   predicate isElseIf() { exists(IfStmt outer | outer.getElse() = this) }
+
+  override string getAPrimaryQlClass() { result = "IfStmt" }
 }
 
-/** A labeled statement. */
-class LabeledStmt extends @labeledstmt, Stmt {
+/**
+ * A labeled statement.
+ *
+ * Example:
+ *
+ * ```
+ * outer:
+ * for(i=0; i<10; ++i) {
+ *   for(j=0; j<i; ++j) {
+ *     if(h(i, j))
+ *       break outer;
+ *   }
+ * }
+ * ```
+ */
+class LabeledStmt extends @labeled_stmt, Stmt {
   /** Gets the label of this statement. */
   string getLabel() { result = getChildExpr(0).(Identifier).getName() }
 
   /** Gets the labeled statement of this statement. */
   Stmt getStmt() { result = getChildStmt(1) }
+
+  override string getAPrimaryQlClass() { result = "LabeledStmt" }
 }
 
+private class TJumpStmt = TBreakOrContinueStmt or @return_stmt or @throw_stmt;
+
+private class TBreakOrContinueStmt = @break_stmt or @continue_stmt;
+
 /**
- * A statement that disrupts structured control flow, that is, a
- * `continue` statement, a `break` statement,
- * a `throw` statement, or a `return` statement.
+ * A statement that disrupts structured control flow, that is, a `continue` statement,
+ * a `break` statement, a `throw` statement, or a `return` statement.
+ *
+ * Examples:
+ *
+ * ```
+ * continue outer;
+ * break;
+ * throw new Exception();
+ * return -1;
+ * ```
  */
-abstract class JumpStmt extends Stmt {
+class JumpStmt extends TJumpStmt, Stmt {
   /**
    * Gets the target of this jump.
    *
@@ -271,8 +501,17 @@ abstract class JumpStmt extends Stmt {
   abstract ASTNode getTarget();
 }
 
-/** A break or continue statement. */
-abstract class BreakOrContinueStmt extends JumpStmt {
+/**
+ * A break or continue statement.
+ *
+ * Examples:
+ *
+ * ```
+ * continue outer;
+ * break;
+ * ```
+ */
+class BreakOrContinueStmt extends TBreakOrContinueStmt, JumpStmt {
   /** Gets the label this statement refers to, if any. */
   string getTargetLabel() { result = getChildExpr(0).(Identifier).getName() }
 
@@ -280,19 +519,51 @@ abstract class BreakOrContinueStmt extends JumpStmt {
   predicate hasTargetLabel() { exists(getTargetLabel()) }
 
   /** Gets the statement this statement breaks out of or continues with. */
-  override Stmt getTarget() { jumpTargets(this, result) }
+  override Stmt getTarget() { jump_targets(this, result) }
 
   override predicate isSubjectToSemicolonInsertion() { any() }
 }
 
-/** A `break` statement. */
-class BreakStmt extends @breakstmt, BreakOrContinueStmt { }
+/**
+ * A `break` statement.
+ *
+ * Examples:
+ *
+ * ```
+ * break outer;
+ * break;
+ * ```
+ */
+class BreakStmt extends @break_stmt, BreakOrContinueStmt {
+  override string getAPrimaryQlClass() { result = "BreakStmt" }
+}
 
-/** A `continue` statement. */
-class ContinueStmt extends @continuestmt, BreakOrContinueStmt { }
+/**
+ * A `continue` statement.
+ *
+ * Examples:
+ *
+ * ```
+ * continue outer;
+ * continue;
+ * ```
+ */
+class ContinueStmt extends @continue_stmt, BreakOrContinueStmt {
+  override string getAPrimaryQlClass() { result = "ContinueStmt" }
+}
 
-/** A `with` statement. */
-class WithStmt extends @withstmt, ControlStmt {
+/**
+ * A `with` statement.
+ *
+ * Example:
+ *
+ * ```
+ * with(ctxt) {
+ *   f(x, y);
+ * }
+ * ```
+ */
+class WithStmt extends @with_stmt, ControlStmt {
   /** Gets the controlling expression of this `with` statement. */
   Expr getExpr() { result = getChildExpr(0) }
 
@@ -313,10 +584,29 @@ class WithStmt extends @withstmt, ControlStmt {
   }
 
   override Stmt getAControlledStmt() { result = getBody() }
+
+  override string getAPrimaryQlClass() { result = "WithStmt" }
 }
 
-/** A `switch` statement. */
-class SwitchStmt extends @switchstmt, ControlStmt {
+/**
+ * A `switch` statement.
+ *
+ * Example:
+ *
+ * ```
+ * switch(direction) {
+ * case "forward":
+ *   increment = 1;
+ *   break;
+ * case "backward":
+ *   increment = -1;
+ *   break;
+ * default:
+ *   throw new Error();
+ * }
+ * ```
+ */
+class SwitchStmt extends @switch_stmt, ControlStmt {
   /** Gets the controlling expression of this `switch` statement. */
   Expr getExpr() { result = getChildExpr(-1) }
 
@@ -330,10 +620,21 @@ class SwitchStmt extends @switchstmt, ControlStmt {
   int getNumCase() { result = count(getACase()) }
 
   override Case getAControlledStmt() { result = getACase() }
+
+  override string getAPrimaryQlClass() { result = "SwitchStmt" }
 }
 
-/** A `return` statement. */
-class ReturnStmt extends @returnstmt, JumpStmt {
+/**
+ * A `return` statement.
+ *
+ * Examples:
+ *
+ * ```
+ * return -1;
+ * return;
+ * ```
+ */
+class ReturnStmt extends @return_stmt, JumpStmt {
   /** Gets the expression specifying the returned value, if any. */
   Expr getExpr() { result = getChildExpr(0) }
 
@@ -345,10 +646,20 @@ class ReturnStmt extends @returnstmt, JumpStmt {
   }
 
   override predicate isSubjectToSemicolonInsertion() { any() }
+
+  override string getAPrimaryQlClass() { result = "ReturnStmt" }
 }
 
-/** A `throw` statement. */
-class ThrowStmt extends @throwstmt, JumpStmt {
+/**
+ * A `throw` statement.
+ *
+ * Example:
+ *
+ * ```
+ * throw new Error();
+ * ```
+ */
+class ThrowStmt extends @throw_stmt, JumpStmt {
   /** Gets the expression specifying the value to throw. */
   Expr getExpr() { result = getChildExpr(0) }
 
@@ -370,10 +681,25 @@ class ThrowStmt extends @throwstmt, JumpStmt {
   }
 
   override predicate isSubjectToSemicolonInsertion() { any() }
+
+  override string getAPrimaryQlClass() { result = "ThrowStmt" }
 }
 
-/** A `try` statement. */
-class TryStmt extends @trystmt, ControlStmt {
+/**
+ * A `try` statement.
+ *
+ * Example:
+ *
+ * ```
+ * try {
+ *   var text = readFile(f);
+ *   display(text);
+ * } catch(e) {
+ *   log(e);
+ * }
+ * ```
+ */
+class TryStmt extends @try_stmt, ControlStmt {
   /** Gets the body of this `try` statement. */
   BlockStmt getBody() { result = getChildStmt(0) }
 
@@ -406,20 +732,44 @@ class TryStmt extends @trystmt, ControlStmt {
 
   /** Gets the `finally` block of this `try` statement, if any. */
   BlockStmt getFinally() { result = getChildStmt(-1) }
+
+  override string getAPrimaryQlClass() { result = "TryStmt" }
 }
 
-/** A `while` loop. */
-class WhileStmt extends @whilestmt, LoopStmt {
+/**
+ * A `while` loop.
+ *
+ * Example:
+ *
+ * ```
+ * while(hasNext()) {
+ *   handle(getNext());
+ * }
+ * ```
+ */
+class WhileStmt extends @while_stmt, LoopStmt {
   /** Gets the loop condition of this `while` loop. */
   Expr getExpr() { result = getChildExpr(0) }
 
   override Expr getTest() { result = getExpr() }
 
   override Stmt getBody() { result = getChildStmt(1) }
+
+  override string getAPrimaryQlClass() { result = "WhileStmt" }
 }
 
-/** A `do`-`while` loop. */
-class DoWhileStmt extends @dowhilestmt, LoopStmt {
+/**
+ * A `do`-`while` loop.
+ *
+ * Example:
+ *
+ * ```
+ * do {
+ *   handle(lines[i]);
+ * } while(++i < lines.length);
+ * ```
+ */
+class DoWhileStmt extends @do_while_stmt, LoopStmt {
   /** Gets the loop condition of this `do`-`while` loop. */
   Expr getExpr() { result = getChildExpr(1) }
 
@@ -428,9 +778,20 @@ class DoWhileStmt extends @dowhilestmt, LoopStmt {
   override Stmt getBody() { result = getChildStmt(0) }
 
   override predicate isSubjectToSemicolonInsertion() { any() }
+
+  override string getAPrimaryQlClass() { result = "DoWhileStmt" }
 }
 
-/** An expression or a variable declaration statement. */
+/**
+ * An expression or a variable declaration statement.
+ *
+ * Examples:
+ *
+ * ```
+ * i = 0;
+ * var i = 1;
+ * ```
+ */
 class ExprOrVarDecl extends ASTNode {
   ExprOrVarDecl() {
     this instanceof Expr or
@@ -438,8 +799,18 @@ class ExprOrVarDecl extends ASTNode {
   }
 }
 
-/** A `for` loop. */
-class ForStmt extends @forstmt, LoopStmt {
+/**
+ * A `for` loop.
+ *
+ * Example:
+ *
+ * ```
+ * for(var i=0; i<10; ++i) {
+ *   sample(i);
+ * }
+ * ```
+ */
+class ForStmt extends @for_stmt, LoopStmt {
   /** Gets the init part of this `for` loop. */
   ExprOrVarDecl getInit() {
     result = getChildExpr(0) or
@@ -452,10 +823,26 @@ class ForStmt extends @forstmt, LoopStmt {
   Expr getUpdate() { result = getChildExpr(2) }
 
   override Stmt getBody() { result = getChildStmt(3) }
+
+  override string getAPrimaryQlClass() { result = "ForStmt" }
 }
 
-/** A `for`-`in` or `for`-`of` loop. */
-abstract class EnhancedForLoop extends LoopStmt {
+/**
+ * A `for`-`in`, `for`-`of` or `for each`-`in` loop.
+ *
+ * Examples:
+ *
+ * ```
+ * for(var p in src) {
+ *   dest[p] = src[p];
+ * }
+ *
+ * for(var elt of arr) {
+ *   sum += elt;
+ * }
+ * ```
+ */
+class EnhancedForLoop extends TEnhancedForLoop, LoopStmt {
   /**
    * Gets the iterator of this `for`-`in` or `for`-`of` loop; this can be either a
    * pattern, a property reference, or a variable declaration statement.
@@ -480,6 +867,17 @@ abstract class EnhancedForLoop extends LoopStmt {
   }
 
   /**
+   * Gets the property, variable, or destructuring pattern occurring as the iterator
+   * expression in this `for`-`in` or `for`-`of` loop.
+   */
+  Expr getLValue() {
+    result = getIterator() and
+    (result instanceof BindingPattern or result instanceof PropAccess)
+    or
+    result = getIterator().(DeclStmt).getADecl().getBindingPattern()
+  }
+
+  /**
    * Gets an iterator variable of this `for`-`in` or `for`-`of` loop.
    */
   Variable getAnIterationVariable() {
@@ -499,34 +897,101 @@ abstract class EnhancedForLoop extends LoopStmt {
   }
 }
 
-/** A `for`-`in` loop. */
-class ForInStmt extends @forinstmt, EnhancedForLoop { }
+/**
+ * A `for`-`in` loop.
+ *
+ * Example:
+ *
+ * ```
+ * for(var p in src) {
+ *   dest[p] = src[p];
+ * }
+ * ```
+ */
+class ForInStmt extends @for_in_stmt, EnhancedForLoop {
+  override string getAPrimaryQlClass() { result = "ForInStmt" }
+}
 
-/** A `for`-`of` loop. */
-class ForOfStmt extends @forofstmt, EnhancedForLoop {
+/**
+ * A `for`-`of` loop.
+ *
+ * Example:
+ *
+ * ```
+ * for(var elt of arr) {
+ *   sum += elt;
+ * }
+ * ```
+ */
+class ForOfStmt extends @for_of_stmt, EnhancedForLoop {
   /**
    * Holds if this is a `for-await-of` statement.
    */
-  predicate isAwait() { isForAwaitOf(this) }
+  predicate isAwait() { is_for_await_of(this) }
+
+  override string getAPrimaryQlClass() { result = "ForOfStmt" }
 }
 
-/** A `for each`-`in` loop. */
-class ForEachStmt extends @foreachstmt, EnhancedForLoop { }
+/**
+ * A `for each`-`in` loop.
+ *
+ * Example:
+ *
+ * ```
+ * for each(var elt in arr) {
+ *   sum += elt;
+ * }
+ * ```
+ */
+class ForEachStmt extends @for_each_stmt, EnhancedForLoop {
+  override string getAPrimaryQlClass() { result = "ForEachStmt" }
+}
 
-/** A `debugger` statement. */
-class DebuggerStmt extends @debuggerstmt, Stmt {
+/**
+ * A `debugger` statement.
+ *
+ * Example:
+ *
+ * ```
+ * debugger;
+ * ```
+ */
+class DebuggerStmt extends @debugger_stmt, Stmt {
   override predicate isSubjectToSemicolonInsertion() { any() }
+
+  override string getAPrimaryQlClass() { result = "DebuggerStmt" }
 }
 
-/** A function declaration statement. */
-class FunctionDeclStmt extends @functiondeclstmt, Stmt, Function {
+/**
+ * A function declaration statement.
+ *
+ * Example:
+ *
+ * ```
+ * function abs(x) {
+ *   return abs < 0 ? -abs : abs;
+ * }
+ * ```
+ */
+class FunctionDeclStmt extends @function_decl_stmt, Stmt, Function {
   override Stmt getEnclosingStmt() { result = this }
 
-  override predicate isAmbient() { Function.super.isAmbient() }
+  override string getAPrimaryQlClass() { result = "FunctionDeclStmt" }
 }
 
-/** A declaration statement, that is, a `var`, `const` or `let` declaration. */
-class DeclStmt extends @declstmt, Stmt {
+/**
+ * A declaration statement, that is, a `var`, `const` or `let` declaration
+ * (including legacy 'let' statements).
+ *
+ * Examples:
+ *
+ * ```
+ * const fs = require('fs');
+ * var count = 0;
+ * let i = 1, j = i-1;
+ * ```
+ */
+class DeclStmt extends @decl_stmt, Stmt {
   /** Gets the `i`th declarator in this declaration statement. */
   VariableDeclarator getDecl(int i) { result = getChildExpr(i) and i >= 0 }
 
@@ -537,26 +1002,71 @@ class DeclStmt extends @declstmt, Stmt {
     // exclude variable declarations in the init part of for/for-in/for-of loops
     not exists(LoopStmt for | this = for.getAChildStmt() and this != for.getBody())
   }
+
+  override string getAPrimaryQlClass() { result = "DeclStmt" }
 }
 
-/** A `var` declaration statement. */
-class VarDeclStmt extends @vardeclstmt, DeclStmt { }
+/**
+ * A `var` declaration statement.
+ *
+ * Example:
+ *
+ * ```
+ * var count = 0;
+ * ```
+ */
+class VarDeclStmt extends @var_decl_stmt, DeclStmt { }
 
-/** A `const` declaration statement. */
-class ConstDeclStmt extends @constdeclstmt, DeclStmt { }
+/**
+ * A `const` declaration statement.
+ *
+ * Example:
+ *
+ * ```
+ * const fs = require('fs');
+ * ```
+ */
+class ConstDeclStmt extends @const_decl_stmt, DeclStmt { }
 
-/** A `let` declaration statement. */
-class LetStmt extends @letstmt, DeclStmt { }
+/**
+ * A `let` declaration statement.
+ *
+ * Example:
+ *
+ * ```
+ * let i = 1, j = i-1;
+ * ```
+ */
+class LetStmt extends @let_stmt, DeclStmt { }
 
-/** A legacy `let` statement, that is, a statement of the form `let(vardecls) stmt`. */
-class LegacyLetStmt extends @legacy_letstmt, DeclStmt {
+/**
+ * A legacy `let` statement, that is, a statement of the form `let(vardecls) stmt`.
+ *
+ * Example:
+ *
+ * ```
+ * let(i = 1) {
+ *   console.log(i);
+ * }
+ * ```
+ */
+class LegacyLetStmt extends @legacy_let_stmt, DeclStmt {
   /** Gets the statement this let statement scopes over. */
   Stmt getBody() { result = getChildStmt(-1) }
 
   override predicate isSubjectToSemicolonInsertion() { none() }
 }
 
-/** A `case` or `default` clause in a `switch` statement. */
+/**
+ * A `case` or `default` clause in a `switch` statement.
+ *
+ * Examples:
+ *
+ * ```
+ * case 1:
+ * default:
+ * ```
+ */
 class Case extends @case, Stmt {
   /** Gets the test expression of this `case` clause. */
   Expr getExpr() { result = getChildExpr(-1) }
@@ -575,10 +1085,22 @@ class Case extends @case, Stmt {
 
   /** Gets the `switch` statement to which this clause belongs. */
   SwitchStmt getSwitch() { result = getParent() }
+
+  override string getAPrimaryQlClass() { result = "Case" }
 }
 
-/** A `catch` clause. */
-class CatchClause extends @catchclause, ControlStmt, Parameterized {
+/**
+ * A `catch` clause.
+ *
+ * Example:
+ *
+ * ```
+ * catch(e) {
+ *   log(e);
+ * }
+ * ```
+ */
+class CatchClause extends @catch_clause, ControlStmt, Parameterized {
   /** Gets the body of this `catch` clause. */
   BlockStmt getBody() { result = getChildStmt(1) }
 
@@ -589,4 +1111,6 @@ class CatchClause extends @catchclause, ControlStmt, Parameterized {
 
   /** Gets the scope induced by this `catch` clause. */
   CatchScope getScope() { result.getCatchClause() = this }
+
+  override string getAPrimaryQlClass() { result = "CatchClause" }
 }

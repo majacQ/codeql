@@ -1,41 +1,44 @@
+using System.IO;
 using Microsoft.CodeAnalysis;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    sealed class Namespace : CachedEntity<INamespaceSymbol>
+    internal sealed class Namespace : CachedEntity<INamespaceSymbol>
     {
-        Namespace(Context cx, INamespaceSymbol init)
+        private Namespace(Context cx, INamespaceSymbol init)
             : base(cx, init) { }
 
         public override Microsoft.CodeAnalysis.Location ReportingLocation => null;
 
-        public override void Populate()
+        public override void Populate(TextWriter trapFile)
         {
-            Context.Emit(Tuples.namespaces(this, symbol.Name));
+            trapFile.namespaces(this, symbol.Name);
 
             if (symbol.ContainingNamespace != null)
             {
-                Namespace parent = Create(Context, symbol.ContainingNamespace);
-                Context.Emit(Tuples.parent_namespace(this, parent));
+                var parent = Create(Context, symbol.ContainingNamespace);
+                trapFile.parent_namespace(this, parent);
             }
         }
 
         public override bool NeedsPopulation => true;
 
-        public override IId Id
+        public override void WriteId(TextWriter trapFile)
         {
-            get
+            if (!symbol.IsGlobalNamespace)
             {
-                return symbol.IsGlobalNamespace ? new Key(";namespace") :
-                    new Key(Create(Context, symbol.ContainingNamespace), ".", symbol.Name, ";namespace");
+                trapFile.WriteSubId(Create(Context, symbol.ContainingNamespace));
+                trapFile.Write('.');
+                trapFile.Write(symbol.Name);
             }
+            trapFile.Write(";namespace");
         }
 
-        public static Namespace Create(Context cx, INamespaceSymbol ns) => NamespaceFactory.Instance.CreateEntity2(cx, ns);
+        public static Namespace Create(Context cx, INamespaceSymbol ns) => NamespaceFactory.Instance.CreateEntityFromSymbol(cx, ns);
 
-        class NamespaceFactory : ICachedEntityFactory<INamespaceSymbol, Namespace>
+        private class NamespaceFactory : ICachedEntityFactory<INamespaceSymbol, Namespace>
         {
-            public static readonly NamespaceFactory Instance = new NamespaceFactory();
+            public static NamespaceFactory Instance { get; } = new NamespaceFactory();
 
             public Namespace Create(Context cx, INamespaceSymbol init) => new Namespace(cx, init);
         }
@@ -44,7 +47,7 @@ namespace Semmle.Extraction.CSharp.Entities
 
         public override int GetHashCode() => QualifiedName.GetHashCode();
 
-        string QualifiedName => symbol.ToDisplayString();
+        private string QualifiedName => symbol.ToDisplayString();
 
         public override bool Equals(object obj)
         {

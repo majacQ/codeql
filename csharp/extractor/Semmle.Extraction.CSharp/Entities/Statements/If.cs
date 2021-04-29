@@ -1,11 +1,12 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class If : Statement<IfStatementSyntax>
+    internal class If : Statement<IfStatementSyntax>
     {
-        If(Context cx, IfStatementSyntax node, IStatementParentEntity parent, int child)
+        private If(Context cx, IfStatementSyntax node, IStatementParentEntity parent, int child)
             : base(cx, node, StmtKind.IF, parent, child) { }
 
         public static If Create(Context cx, IfStatementSyntax node, IStatementParentEntity parent, int child)
@@ -15,7 +16,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             Expression.Create(cx, Stmt.Condition, this, 0);
 

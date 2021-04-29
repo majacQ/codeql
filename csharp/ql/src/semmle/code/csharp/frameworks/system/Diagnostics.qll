@@ -11,9 +11,24 @@ class SystemDiagnosticsNamespace extends Namespace {
   }
 }
 
+/** The `System.Diagnostics.CodeAnalysis` namespace. */
+class SystemDiagnosticsCodeAnalysisNamespace extends Namespace {
+  SystemDiagnosticsCodeAnalysisNamespace() {
+    this.getParentNamespace() instanceof SystemDiagnosticsNamespace and
+    this.hasName("CodeAnalysis")
+  }
+}
+
 /** A class in the `System.Diagnostics` namespace. */
 class SystemDiagnosticsClass extends Class {
   SystemDiagnosticsClass() { this.getNamespace() instanceof SystemDiagnosticsNamespace }
+}
+
+/** A class in the `System.Diagnostics.CodeAnalysis` namespace. */
+class SystemDiagnosticsCodeAnalysisClass extends Class {
+  SystemDiagnosticsCodeAnalysisClass() {
+    this.getNamespace() instanceof SystemDiagnosticsCodeAnalysisNamespace
+  }
 }
 
 /** The `System.Diagnostics.Debug` class. */
@@ -23,7 +38,7 @@ class SystemDiagnosticsDebugClass extends SystemDiagnosticsClass {
     this.isStatic()
   }
 
-  /** Gets and `Assert(bool, ...)` method. */
+  /** Gets an `Assert(bool, ...)` method. */
   Method getAssertMethod() {
     result.getDeclaringType() = this and
     result.hasName("Assert") and
@@ -55,5 +70,12 @@ class SystemDiagnosticsProcessClass extends SystemDiagnosticsClass {
     result.getDeclaringType() = this and
     result.hasName("Start") and
     result.getReturnType() instanceof SystemDiagnosticsProcessClass
+  }
+}
+
+/** The `System.Diagnostics.CodeAnalysis.DoesNotReturnIfAttribute` class. */
+class SystemDiagnosticsCodeAnalysisDoesNotReturnIfAttributeClass extends SystemDiagnosticsCodeAnalysisClass {
+  SystemDiagnosticsCodeAnalysisDoesNotReturnIfAttributeClass() {
+    this.hasName("DoesNotReturnIfAttribute")
   }
 }

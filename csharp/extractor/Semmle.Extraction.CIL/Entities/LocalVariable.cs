@@ -1,28 +1,29 @@
 ﻿using System.Collections.Generic;
+using System.IO;
 
 namespace Semmle.Extraction.CIL.Entities
 {
-    interface ILocal : ILabelledEntity
+    internal class LocalVariable : LabelledEntity
     {
-    }
-
-    class LocalVariable : LabelledEntity, ILocal
-    {
-        readonly MethodImplementation method;
-        readonly int index;
-        readonly Type type;
+        private readonly MethodImplementation method;
+        private readonly int index;
+        private readonly Type type;
 
         public LocalVariable(Context cx, MethodImplementation m, int i, Type t) : base(cx)
         {
             method = m;
             index = i;
             type = t;
-            ShortId = CIL.Id.Create(method.Label) + underscore + index;
         }
 
-        static readonly Id underscore = CIL.Id.Create("_");
-        static readonly Id suffix = CIL.Id.Create(";cil-local");
-        public override Id IdSuffix => suffix;
+        public override void WriteId(TextWriter trapFile)
+        {
+            trapFile.WriteSubId(method);
+            trapFile.Write('_');
+            trapFile.Write(index);
+        }
+
+        public override string IdSuffix => ";cil-local";
 
         public override IEnumerable<IExtractionProduct> Contents
         {

@@ -92,9 +92,7 @@ private class ConsPath extends Path, TConsPath {
  * that is, everything after the last dot. The fourth group includes the dot, the
  * fifth does not.
  */
-private string pathRegex() {
-  result = "(.*)(?:/|^)(([^/]*?)(\\.([^.]*))?)"
-}
+private string pathRegex() { result = "(.*)(?:/|^)(([^/]*?)(\\.([^.]*))?)" }
 
 /**
  * A string value that represents a (relative or absolute) file system path.
@@ -131,6 +129,14 @@ abstract class PathString extends string {
   string getDirName() { result = this.regexpCapture(pathRegex(), 1) }
 
   /**
+   * Gets the extension of the folder or file this path refers to, that is, the suffix of the base name
+   * starting at the last dot character, if there is one.
+   *
+   * Has no result if the base name does not contain a dot.
+   */
+  string getExtension() { result = this.regexpCapture(pathRegex(), 4) }
+
+  /**
    * Gets the absolute path that the sub-path consisting of the first `n`
    * components of this path refers to when resolved relative to the
    * given `root` folder.
@@ -138,26 +144,24 @@ abstract class PathString extends string {
   Path resolveUpTo(int n, Folder root) {
     n = 0 and result.getContainer() = root and root = getARootFolder()
     or
-    exists(Path base | base = resolveUpTo(n - 1, root) |
-      exists(string next | next = getComponent(n - 1) |
-        // handle empty components and the special "." folder
-        (next = "" or next = ".") and
-        result = base
-        or
-        // handle the special ".." folder
-        next = ".." and result = base.(ConsPath).getParent()
-        or
-        // special handling for Windows drive letters when resolving absolute path:
-        // the extractor populates "C:/" as a folder that has path "C:/" but name ""
-        n = 1 and
-        next.regexpMatch("[A-Za-z]:") and
-        root.getBaseName() = "" and
-        root.toString() = next.toUpperCase() + "/" and
-        result = base
-        or
-        // default case
-        result = TConsPath(base, next)
-      )
+    exists(Path base, string next | next = getComponent(this, n - 1, base, root) |
+      // handle empty components and the special "." folder
+      (next = "" or next = ".") and
+      result = base
+      or
+      // handle the special ".." folder
+      next = ".." and result = base.(ConsPath).getParent()
+      or
+      // special handling for Windows drive letters when resolving absolute path:
+      // the extractor populates "C:/" as a folder that has path "C:/" but name ""
+      n = 1 and
+      next.regexpMatch("[A-Za-z]:") and
+      root.getBaseName() = "" and
+      root.toString() = next.toUpperCase() + "/" and
+      result = base
+      or
+      // default case
+      result = TConsPath(base, next)
     )
   }
 
@@ -169,13 +173,101 @@ abstract class PathString extends string {
 }
 
 /**
- * Non-abstract base class for path expressions.
+ * Gets the `i`th component of the path `str`, where `base` is the resolved path one level up.
+ * Supports that the root directory might be compiled output from TypeScript.
  */
-private class PathExprBase extends Locatable {
-  // We must put getEnclosingModule here for it to be usable in the characteristic predicate of PathExprInModule
-  /** Gets the module containing this path expression, if any. */
-  Module getEnclosingModule() {
-    result = this.(Expr).getTopLevel() or result = this.(Comment).getTopLevel()
+private string getComponent(PathString str, int n, Path base, Folder root) {
+  base = str.resolveUpTo(n, root) and
+  (
+    result = str.getComponent(n)
+    or
+    result = TypeScriptOutDir::getOriginalTypeScriptFolder(str.getComponent(n), base.getContainer())
+  )
+}
+
+/**
+ * Predicates for resolving imports to compiled TypeScript.
+ */
+private module TypeScriptOutDir {
+  /**
+   * Gets a folder of TypeScript files that is compiled to JavaScript files in `outdir` relative to a `parent`.
+   */
+  string getOriginalTypeScriptFolder(string outdir, Folder parent) {
+    exists(JSONObject tsconfig |
+      tsconfig.getFile().getBaseName() = "tsconfig.json" and
+      tsconfig.isTopLevel() and
+      tsconfig.getFile().getParentContainer() = parent
+    |
+      outdir =
+        tsconfig
+            .getPropValue("compilerOptions")
+            .(JSONObject)
+            .getPropValue("outDir")
+            .(JSONString)
+            .getValue() and
+      result = getEffectiveRootDirFromTSConfig(tsconfig)
+    )
+  }
+
+  /**
+   * Gets the directory that contains the TypeScript source files.
+   * Based on the tsconfig.json file `tsconfig`.
+   */
+  pragma[inline]
+  private string getEffectiveRootDirFromTSConfig(JSONObject tsconfig) {
+    // if an explicit "rootDir" option exists, then use that.
+    result = getRootDir(tsconfig)
+    or
+    // otherwise, infer from "includes"
+    not exists(getRootDir(tsconfig)) and
+    (
+      // if unique root folder in "includes", then use that.
+      result = unique( | | getARootDirFromInclude(tsconfig))
+      or
+      // otherwise use "." if the includes are split over multiple folders.
+      exists(getARootDirFromInclude(tsconfig)) and
+      not exists(unique( | | getARootDirFromInclude(tsconfig))) and
+      result = "."
+    )
+  }
+
+  /**
+   * Gets the first folder from `path`.
+   */
+  bindingset[path]
+  private string getRootFolderFromPath(string path) {
+    not exists(path.indexOf("/")) and result = path
+    or
+    result = path.substring(0, path.indexOf("/", 0, 0))
+  }
+
+  /**
+   * Gets a root directory containing TypeScript files based on the "include" option from tsconfig.json.
+   * Can have multiple results if the includes are from multiple folders.
+   */
+  pragma[inline]
+  private string getARootDirFromInclude(JSONObject tsconfig) {
+    result =
+      getRootFolderFromPath(tsconfig
+            .getPropValue("include")
+            .(JSONArray)
+            .getElementValue(_)
+            .(JSONString)
+            .getValue())
+  }
+
+  /**
+   * Gets the value of the "rootDir" option from a tsconfig.json.
+   */
+  pragma[inline]
+  private string getRootDir(JSONObject tsconfig) {
+    result =
+      tsconfig
+          .getPropValue("compilerOptions")
+          .(JSONObject)
+          .getPropValue("rootDir")
+          .(JSONString)
+          .getValue()
   }
 }
 
@@ -191,12 +283,25 @@ private class PathExprBase extends Locatable {
  * as their highest-priority root, with default library paths as additional roots
  * of lower priority.
  */
-abstract class PathExpr extends PathExprBase {
+abstract class PathExpr extends Locatable {
   /** Gets the (unresolved) path represented by this expression. */
   abstract string getValue();
 
   /** Gets the root folder of priority `priority` associated with this path expression. */
-  abstract Folder getSearchRoot(int priority);
+  Folder getSearchRoot(int priority) {
+    // We default to the enclosing module's search root, though this may be overridden.
+    getEnclosingModule().searchRoot(this, result, priority)
+    or
+    result = getAdditionalSearchRoot(priority)
+  }
+
+  /**
+   * INTERNAL. Use `getSearchRoot` instead.
+   *
+   * Can be overridden by subclasses of `PathExpr` to provide additional search roots
+   * without overriding `getSearchRoot`.
+   */
+  Folder getAdditionalSearchRoot(int priority) { none() }
 
   /** Gets the `i`th component of this path. */
   string getComponent(int i) { result = getValue().(PathString).getComponent(i) }
@@ -206,6 +311,17 @@ abstract class PathExpr extends PathExprBase {
 
   /** Gets the base name of the folder or file this path refers to. */
   string getBaseName() { result = getValue().(PathString).getBaseName() }
+
+  /** Gets the stem, that is, base name without extension, of the folder or file this path refers to. */
+  string getStem() { result = getValue().(PathString).getStem() }
+
+  /**
+   * Gets the extension of the folder or file this path refers to, that is, the suffix of the base name
+   * starting at the last dot character, if there is one.
+   *
+   * Has no result if the base name does not contain a dot.
+   */
+  string getExtension() { result = getValue().(PathString).getExtension() }
 
   /**
    * Gets the file or folder that the first `n` components of this path refer to
@@ -229,6 +345,11 @@ abstract class PathExpr extends PathExprBase {
 
   /** Gets the file or folder that this path refers to. */
   Container resolve() { result = resolveUpTo(getNumComponent()) }
+
+  /** Gets the module containing this path expression, if any. */
+  Module getEnclosingModule() {
+    result = this.(Expr).getTopLevel() or result = this.(Comment).getTopLevel()
+  }
 }
 
 /** A path string derived from a path expression. */
@@ -262,8 +383,8 @@ private class ConcatPath extends PathExpr {
     )
   }
 
-  override Folder getSearchRoot(int priority) {
-    result = this.(AddExpr).getAnOperand().(PathExpr).getSearchRoot(priority)
+  override Folder getAdditionalSearchRoot(int priority) {
+    result = this.(AddExpr).getAnOperand().(PathExpr).getAdditionalSearchRoot(priority)
   }
 }
 

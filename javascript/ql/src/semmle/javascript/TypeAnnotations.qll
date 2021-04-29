@@ -3,11 +3,12 @@
  */
 
 import javascript
+private import internal.StmtContainers
 
 /**
  * A type annotation, either in the form of a TypeScript type or a JSDoc comment.
  */
-class TypeAnnotation extends @type_annotation, Locatable {
+class TypeAnnotation extends @type_annotation, NodeInStmtContainer {
   /** Holds if this is the `any` type. */
   predicate isAny() { none() }
 
@@ -90,11 +91,6 @@ class TypeAnnotation extends @type_annotation, Locatable {
   Function getEnclosingFunction() { none() }
 
   /**
-   * Gets the statement container (function or toplevel) in which this type appears.
-   */
-  StmtContainer getContainer() { none() }
-
-  /**
    * Gets the top-level containing this type annotation.
    */
   TopLevel getTopLevel() { none() }
@@ -105,4 +101,11 @@ class TypeAnnotation extends @type_annotation, Locatable {
    * Note that this has no result for JSDoc type annotations.
    */
   Type getType() { none() }
+
+  /**
+   * Gets the class referenced by this type annotation, if any.
+   *
+   * This unfolds nullability modifiers and generic type applications.
+   */
+  DataFlow::ClassNode getClass() { none() }
 }

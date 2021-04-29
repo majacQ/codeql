@@ -11,9 +11,17 @@ import javascript
  * A node in the AST representation of a YAML file, which may either be
  * a YAML value (such as a scalar or a collection) or an alias node
  * referring to some other YAML value.
+ *
+ * Examples:
+ *
+ * ```
+ * # a mapping
+ * x: 1
+ * << : *DEFAULTS  # an alias node referring to anchor `DEFAULTS`
+ * ```
  */
 class YAMLNode extends @yaml_node, Locatable {
-  override Location getLocation() { hasLocation(this, result) }
+  override Location getLocation() { yaml_locations(this, result) }
 
   /**
    * Gets the parent node of this node, which is always a collection.
@@ -75,15 +83,38 @@ class YAMLNode extends @yaml_node, Locatable {
    * Gets the YAML value this node corresponds to after resolving aliases and includes.
    */
   YAMLValue eval() { result = this }
+
+  override string getAPrimaryQlClass() { result = "YAMLNode" }
 }
 
 /**
  * A YAML value; that is, either a scalar or a collection.
+ *
+ * Examples:
+ *
+ * ```
+ * ---
+ * "a string"
+ * ---
+ * - a
+ * - sequence
+ * ```
  */
 abstract class YAMLValue extends YAMLNode { }
 
 /**
  * A YAML scalar.
+ *
+ * Examples:
+ *
+ * ```
+ * 42
+ * 1.0
+ * 2001-12-15T02:59:43.1Z
+ * true
+ * null
+ * "hello"
+ * ```
  */
 class YAMLScalar extends YAMLValue, @yaml_scalar_node {
   /**
@@ -113,10 +144,19 @@ class YAMLScalar extends YAMLValue, @yaml_scalar_node {
    * Gets the value of this scalar, as a string.
    */
   string getValue() { yaml_scalars(this, _, result) }
+
+  override string getAPrimaryQlClass() { result = "YAMLScalar" }
 }
 
 /**
  * A YAML scalar representing an integer value.
+ *
+ * Examples:
+ *
+ * ```
+ * 42
+ * 0xffff
+ * ```
  */
 class YAMLInteger extends YAMLScalar {
   YAMLInteger() { hasStandardTypeTag("int") }
@@ -129,6 +169,13 @@ class YAMLInteger extends YAMLScalar {
 
 /**
  * A YAML scalar representing a floating point value.
+ *
+ * Examples:
+ *
+ * ```
+ * 1.0
+ * 6.626e-34
+ * ```
  */
 class YAMLFloat extends YAMLScalar {
   YAMLFloat() { hasStandardTypeTag("float") }
@@ -141,6 +188,12 @@ class YAMLFloat extends YAMLScalar {
 
 /**
  * A YAML scalar representing a time stamp.
+ *
+ * Example:
+ *
+ * ```
+ * 2001-12-15T02:59:43.1Z
+ * ```
  */
 class YAMLTimestamp extends YAMLScalar {
   YAMLTimestamp() { hasStandardTypeTag("timestamp") }
@@ -153,6 +206,12 @@ class YAMLTimestamp extends YAMLScalar {
 
 /**
  * A YAML scalar representing a Boolean value.
+ *
+ * Example:
+ *
+ * ```
+ * true
+ * ```
  */
 class YAMLBool extends YAMLScalar {
   YAMLBool() { hasStandardTypeTag("bool") }
@@ -165,6 +224,12 @@ class YAMLBool extends YAMLScalar {
 
 /**
  * A YAML scalar representing the null value.
+ *
+ * Example:
+ *
+ * ```
+ * null
+ * ```
  */
 class YAMLNull extends YAMLScalar {
   YAMLNull() { hasStandardTypeTag("null") }
@@ -172,6 +237,12 @@ class YAMLNull extends YAMLScalar {
 
 /**
  * A YAML scalar representing a string value.
+ *
+ * Example:
+ *
+ * ```
+ * "hello"
+ * ```
  */
 class YAMLString extends YAMLScalar {
   YAMLString() { hasStandardTypeTag("str") }
@@ -179,6 +250,13 @@ class YAMLString extends YAMLScalar {
 
 /**
  * A YAML scalar representing a merge key.
+ *
+ * Example:
+ *
+ * ```
+ * x: 1
+ * << : *DEFAULTS  # merge key
+ * ```
  */
 class YAMLMergeKey extends YAMLScalar {
   YAMLMergeKey() { hasStandardTypeTag("merge") }
@@ -186,6 +264,10 @@ class YAMLMergeKey extends YAMLScalar {
 
 /**
  * A YAML scalar representing an `!include` directive.
+ *
+ * ```
+ * !include common.yaml
+ * ```
  */
 class YAMLInclude extends YAMLScalar {
   YAMLInclude() { getTag() = "!include" }
@@ -211,11 +293,34 @@ class YAMLInclude extends YAMLScalar {
 
 /**
  * A YAML collection, that is, either a mapping or a sequence.
+ *
+ * Examples:
+ *
+ * ```
+ * ---
+ * # a mapping
+ * x: 0
+ * y: 1
+ * ---
+ * # a sequence
+ * - red
+ * - green
+ * - -blue
+ * ```
  */
-class YAMLCollection extends YAMLValue, @yaml_collection_node { }
+class YAMLCollection extends YAMLValue, @yaml_collection_node {
+  override string getAPrimaryQlClass() { result = "YAMLCollection" }
+}
 
 /**
  * A YAML mapping.
+ *
+ * Example:
+ *
+ * ```
+ * x: 0
+ * y: 1
+ * ```
  */
 class YAMLMapping extends YAMLCollection, @yaml_mapping_node {
   /**
@@ -257,10 +362,20 @@ class YAMLMapping extends YAMLCollection, @yaml_mapping_node {
    * Gets the value that this mapping maps `key` to.
    */
   YAMLValue lookup(string key) { exists(YAMLScalar s | s.getValue() = key | maps(s, result)) }
+
+  override string getAPrimaryQlClass() { result = "YAMLMapping" }
 }
 
 /**
  * A YAML sequence.
+ *
+ * Example:
+ *
+ * ```
+ * - red
+ * - green
+ * - blue
+ * ```
  */
 class YAMLSequence extends YAMLCollection, @yaml_sequence_node {
   /**
@@ -272,10 +387,18 @@ class YAMLSequence extends YAMLCollection, @yaml_sequence_node {
    * Gets the `i`th element in this sequence, as a YAML value.
    */
   YAMLValue getElement(int i) { result = getElementNode(i).eval() }
+
+  override string getAPrimaryQlClass() { result = "YAMLSequence" }
 }
 
 /**
  * A YAML alias node referring to a target anchor.
+ *
+ * Example:
+ *
+ * ```
+ * *DEFAULTS
+ * ```
  */
 class YAMLAliasNode extends YAMLNode, @yaml_alias_node {
   override YAMLValue eval() {
@@ -287,10 +410,20 @@ class YAMLAliasNode extends YAMLNode, @yaml_alias_node {
    * Gets the target anchor this alias refers to.
    */
   string getTarget() { yaml_aliases(this, result) }
+
+  override string getAPrimaryQlClass() { result = "YAMLAliasNode" }
 }
 
 /**
  * A YAML document.
+ *
+ * Example:
+ *
+ * ```
+ * ---
+ * x: 0
+ * y: 1
+ * ```
  */
 class YAMLDocument extends YAMLNode {
   YAMLDocument() { not exists(getParentNode()) }
@@ -300,6 +433,8 @@ class YAMLDocument extends YAMLNode {
  * An error message produced by the YAML parser while processing a YAML file.
  */
 class YAMLParseError extends @yaml_error, Error {
+  override Location getLocation() { yaml_locations(this, result) }
+
   override string getMessage() { yaml_errors(this, result) }
 
   override string toString() { result = getMessage() }

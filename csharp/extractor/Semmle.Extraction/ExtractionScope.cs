@@ -25,6 +25,8 @@ namespace Semmle.Extraction
         bool InFileScope(string path);
 
         bool IsGlobalScope { get; }
+
+        bool FromSource { get; }
     }
 
     /// <summary>
@@ -32,8 +34,8 @@ namespace Semmle.Extraction
     /// </summary>
     public class AssemblyScope : IExtractionScope
     {
-        readonly IAssemblySymbol assembly;
-        readonly string filepath;
+        private readonly IAssemblySymbol assembly;
+        private readonly string filepath;
 
         public AssemblyScope(IAssemblySymbol symbol, string path, bool isOutput)
         {
@@ -46,7 +48,11 @@ namespace Semmle.Extraction
 
         public bool InFileScope(string path) => path == filepath;
 
-        public bool InScope(ISymbol symbol) => Equals(symbol.ContainingAssembly, assembly) || Equals(symbol, assembly);
+        public bool InScope(ISymbol symbol) =>
+            SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, assembly) ||
+            SymbolEqualityComparer.Default.Equals(symbol, assembly);
+
+        public bool FromSource => false;
     }
 
     /// <summary>
@@ -54,7 +60,7 @@ namespace Semmle.Extraction
     /// </summary>
     public class SourceScope : IExtractionScope
     {
-        readonly SyntaxTree sourceTree;
+        private readonly SyntaxTree sourceTree;
 
         public SourceScope(SyntaxTree tree)
         {
@@ -66,5 +72,7 @@ namespace Semmle.Extraction
         public bool InFileScope(string path) => path == sourceTree.FilePath;
 
         public bool InScope(ISymbol symbol) => symbol.Locations.Any(loc => loc.SourceTree == sourceTree);
+
+        public bool FromSource => true;
     }
 }

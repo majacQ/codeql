@@ -11,10 +11,26 @@ import semmle.code.cpp.dataflow.DataFlow
  * a string describing the type of the allocation.
  */
 predicate allocExpr(Expr alloc, string kind) {
-  isAllocationExpr(alloc) and
   (
-    alloc instanceof FunctionCall and
-    kind = "malloc"
+    exists(Function target |
+      alloc.(AllocationExpr).(FunctionCall).getTarget() = target and
+      (
+        target.getName() = "operator new" and
+        kind = "new" and
+        // exclude placement new and custom overloads as they
+        // may not conform to assumptions
+        not target.getNumberOfParameters() > 1
+        or
+        target.getName() = "operator new[]" and
+        kind = "new[]" and
+        // exclude placement new and custom overloads as they
+        // may not conform to assumptions
+        not target.getNumberOfParameters() > 1
+        or
+        not target instanceof OperatorNewAllocationFunction and
+        kind = "malloc"
+      )
+    )
     or
     alloc instanceof NewExpr and
     kind = "new" and
@@ -27,7 +43,8 @@ predicate allocExpr(Expr alloc, string kind) {
     // exclude placement new and custom overloads as they
     // may not conform to assumptions
     not alloc.(NewArrayExpr).getAllocatorCall().getTarget().getNumberOfParameters() > 1
-  )
+  ) and
+  not alloc.isFromUninstantiatedTemplate(_)
 }
 
 /**
@@ -47,7 +64,7 @@ predicate allocExprOrIndirect(Expr alloc, string kind) {
       or
       exists(Expr e |
         allocExprOrIndirect(e, kind) and
-        DataFlow::localFlow(DataFlow::exprNode(e), DataFlow::exprNode(rtn.getExpr()))
+        DataFlow::localExprFlow(e, rtn.getExpr())
       )
     )
   )
@@ -60,7 +77,7 @@ predicate allocExprOrIndirect(Expr alloc, string kind) {
 pragma[nomagic]
 private predicate allocReachesVariable(Variable v, Expr alloc, string kind) {
   exists(Expr mid |
-    not v instanceof LocalScopeVariable and
+    not v instanceof StackVariable and
     v.getAnAssignedValue() = mid and
     allocReaches0(mid, alloc, kind)
   )
@@ -76,7 +93,7 @@ private predicate allocReaches0(Expr e, Expr alloc, string kind) {
   allocExprOrIndirect(alloc, kind) and
   e = alloc
   or
-  exists(SsaDefinition def, LocalScopeVariable v |
+  exists(SsaDefinition def, StackVariable v |
     // alloc via SSA
     allocReaches0(def.getAnUltimateDefiningValue(v), alloc, kind) and
     e = def.getAUse(v)
@@ -109,8 +126,20 @@ predicate allocReaches(Expr e, Expr alloc, string kind) {
  * describing the type of that free or delete.
  */
 predicate freeExpr(Expr free, Expr freed, string kind) {
-  freeCall(free, freed) and
-  kind = "free"
+  exists(Function target |
+    freed = free.(DeallocationExpr).getFreedExpr() and
+    free.(FunctionCall).getTarget() = target and
+    (
+      target.getName() = "operator delete" and
+      kind = "delete"
+      or
+      target.getName() = "operator delete[]" and
+      kind = "delete[]"
+      or
+      not target instanceof OperatorDeleteDeallocationFunction and
+      kind = "free"
+    )
+  )
   or
   free.(DeleteExpr).getExpr() = freed and
   kind = "delete"

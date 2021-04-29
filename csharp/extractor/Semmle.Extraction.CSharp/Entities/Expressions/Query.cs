@@ -4,12 +4,11 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Linq;
 using Semmle.Extraction.Kinds;
 using System.Collections.Generic;
-using Semmle.Extraction.CSharp.Populators;
 using Semmle.Extraction.Entities;
 
 namespace Semmle.Extraction.CSharp.Entities.Expressions
 {
-    static class Query
+    internal static class Query
     {
         /// <summary>
         /// An expression representing a call in a LINQ query.
@@ -28,14 +27,14 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                         ExprKind.METHOD_INVOCATION, parent, child, false, null))
             {
                 if (method != null)
-                    cx.Emit(Tuples.expr_call(this, Method.Create(cx, method)));
+                    cx.TrapWriter.Writer.expr_call(this, Method.Create(cx, method));
             }
         }
 
         /// <summary>
         /// Represents a chain of method calls (the operand being recursive).
         /// </summary>
-        abstract class Clause
+        private abstract class Clause
         {
             protected readonly IMethodSymbol method;
             protected readonly List<ExpressionSyntax> arguments = new List<ExpressionSyntax>();
@@ -65,7 +64,6 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             protected Expression DeclareRangeVariable(Context cx, IExpressionParentEntity parent, int child, bool getElement, ISymbol variableSymbol, SyntaxToken name)
             {
                 var type = Type.Create(cx, cx.GetType(Expr));
-                Extraction.Entities.Location nameLoc;
 
                 AnnotatedType declType;
                 TypeSyntax declTypeSyntax = null;
@@ -83,14 +81,15 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     }
                 }
                 else
+                {
                     declType = type;
+                }
 
                 var decl = VariableDeclaration.Create(cx,
                     variableSymbol,
                     declType,
                     declTypeSyntax,
                     cx.Create(node.GetLocation()),
-                    nameLoc = cx.Create(name.GetLocation()),
                     true,
                     parent,
                     child
@@ -98,8 +97,9 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
 
                 Expression.Create(cx, Expr, decl, 0);
 
+                var nameLoc = cx.Create(name.GetLocation());
                 var access = new Expression(new ExpressionInfo(cx, type, nameLoc, ExprKind.LOCAL_VARIABLE_ACCESS, decl, 1, false, null));
-                cx.Emit(Tuples.expr_access(access, LocalVariable.GetAlreadyCreated(cx, variableSymbol)));
+                cx.TrapWriter.Writer.expr_access(access, LocalVariable.Create(cx, variableSymbol));
 
                 return decl;
             }
@@ -115,10 +115,10 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             public abstract Expression Populate(Context cx, IExpressionParentEntity parent, int child);
         }
 
-        class RangeClause : Clause
+        private class RangeClause : Clause
         {
-            readonly ISymbol declaration;
-            readonly SyntaxToken name;
+            private readonly ISymbol declaration;
+            private readonly SyntaxToken name;
 
             public RangeClause(IMethodSymbol method, SyntaxNode node, ISymbol declaration, SyntaxToken name) : base(method, node)
             {
@@ -130,12 +130,12 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                 DeclareRangeVariable(cx, parent, child, true, declaration, name);
         }
 
-        class LetClause : Clause
+        private class LetClause : Clause
         {
-            readonly Clause operand;
-            readonly ISymbol declaration;
-            readonly SyntaxToken name;
-            ISymbol intoDeclaration;
+            private readonly Clause operand;
+            private readonly ISymbol declaration;
+            private readonly SyntaxToken name;
+            private ISymbol intoDeclaration;
 
             public LetClause(Clause operand, IMethodSymbol method, SyntaxNode node, ISymbol declaration, SyntaxToken name) : base(method, node)
             {
@@ -150,7 +150,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                 return this;
             }
 
-            void DeclareIntoVariable(Context cx, IExpressionParentEntity parent, int intoChild, bool getElement)
+            private void DeclareIntoVariable(Context cx, IExpressionParentEntity parent, int intoChild, bool getElement)
             {
                 if (intoDeclaration != null)
                     DeclareRangeVariable(cx, parent, intoChild, getElement, intoDeclaration, name);
@@ -170,9 +170,9 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
             }
         }
 
-        class CallClause : Clause
+        private class CallClause : Clause
         {
-            readonly Clause operand;
+            private readonly Clause operand;
 
             public CallClause(Clause operand, IMethodSymbol method, SyntaxNode node) : base(method, node)
             {
@@ -195,16 +195,16 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
         /// <param name="cx">The extraction context.</param>
         /// <param name="node">The query expression.</param>
         /// <returns>A "syntax tree" of the query.</returns>
-        static Clause ConstructQueryExpression(Context cx, QueryExpressionSyntax node)
+        private static Clause ConstructQueryExpression(Context cx, QueryExpressionSyntax node)
         {
-            var info = cx.Model(node).GetQueryClauseInfo(node.FromClause);
+            var info = cx.GetModel(node).GetQueryClauseInfo(node.FromClause);
             var method = info.OperationInfo.Symbol as IMethodSymbol;
 
-            Clause clauseExpr = new RangeClause(method, node.FromClause, cx.Model(node).GetDeclaredSymbol(node.FromClause), node.FromClause.Identifier).AddArgument(node.FromClause.Expression);
+            var clauseExpr = new RangeClause(method, node.FromClause, cx.GetModel(node).GetDeclaredSymbol(node.FromClause), node.FromClause.Identifier).AddArgument(node.FromClause.Expression);
 
             foreach (var qc in node.Body.Clauses)
             {
-                info = cx.Model(node).GetQueryClauseInfo(qc);
+                info = cx.GetModel(node).GetQueryClauseInfo(qc);
 
                 method = info.OperationInfo.Symbol as IMethodSymbol;
 
@@ -214,7 +214,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                         var orderByClause = (OrderByClauseSyntax)qc;
                         foreach (var ordering in orderByClause.Orderings)
                         {
-                            method = cx.Model(node).GetSymbolInfo(ordering).Symbol as IMethodSymbol;
+                            method = cx.GetModel(node).GetSymbolInfo(ordering).Symbol as IMethodSymbol;
 
                             clauseExpr = clauseExpr.WithCallClause(method, orderByClause).AddArgument(ordering.Expression);
 
@@ -229,25 +229,25 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                     case SyntaxKind.FromClause:
                         var fromClause = (FromClauseSyntax)qc;
                         clauseExpr = clauseExpr.
-                            WithLetClause(method, fromClause, cx.Model(node).GetDeclaredSymbol(fromClause), fromClause.Identifier).
+                            WithLetClause(method, fromClause, cx.GetModel(node).GetDeclaredSymbol(fromClause), fromClause.Identifier).
                             AddArgument(fromClause.Expression);
                         break;
                     case SyntaxKind.LetClause:
                         var letClause = (LetClauseSyntax)qc;
-                        clauseExpr = clauseExpr.WithLetClause(method, letClause, cx.Model(node).GetDeclaredSymbol(letClause), letClause.Identifier).
+                        clauseExpr = clauseExpr.WithLetClause(method, letClause, cx.GetModel(node).GetDeclaredSymbol(letClause), letClause.Identifier).
                             AddArgument(letClause.Expression);
                         break;
                     case SyntaxKind.JoinClause:
                         var joinClause = (JoinClauseSyntax)qc;
 
-                        clauseExpr = clauseExpr.WithLetClause(method, joinClause, cx.Model(node).GetDeclaredSymbol(joinClause), joinClause.Identifier).
+                        clauseExpr = clauseExpr.WithLetClause(method, joinClause, cx.GetModel(node).GetDeclaredSymbol(joinClause), joinClause.Identifier).
                             AddArgument(joinClause.InExpression).
                             AddArgument(joinClause.LeftExpression).
                             AddArgument(joinClause.RightExpression);
 
                         if (joinClause.Into != null)
                         {
-                            var into = cx.Model(node).GetDeclaredSymbol(joinClause.Into);
+                            var into = cx.GetModel(node).GetDeclaredSymbol(joinClause.Into);
                             ((LetClause)clauseExpr).WithInto(into);
                         }
 
@@ -257,7 +257,7 @@ namespace Semmle.Extraction.CSharp.Entities.Expressions
                 }
             }
 
-            method = cx.Model(node).GetSymbolInfo(node.Body.SelectOrGroup).Symbol as IMethodSymbol;
+            method = cx.GetModel(node).GetSymbolInfo(node.Body.SelectOrGroup).Symbol as IMethodSymbol;
 
             clauseExpr = new CallClause(clauseExpr, method, node.Body.SelectOrGroup);
 

@@ -118,7 +118,7 @@ private predicate excludeNodeAndNodesBelow(Expr e) {
   or
   // Constructor init lists should be evaluated, and we can change this in
   // the future, but it would mean that a `Function` entry point is not
-  // always a `Block` or `FunctionTryStmt`.
+  // always a `BlockStmt` or `FunctionTryStmt`.
   e instanceof ConstructorInit
   or
   // Destructor field destructions should also be hooked into the CFG
@@ -132,7 +132,7 @@ private predicate excludeNodeAndNodesBelow(Expr e) {
  * control flow in them.
  */
 private predicate excludeNodesStrictlyBelow(Node n) {
-  n instanceof BuiltInOperationOffsetOf
+  n instanceof BuiltInOperationBuiltInOffsetOf
   or
   n instanceof BuiltInIntAddr
   or
@@ -173,49 +173,36 @@ predicate excludeNode(Node n) {
   excludeNode(n.getParentNode())
 }
 
-private newtype TPos =
-  PosBefore() or
-  PosAt() or
-  PosAfter() or
-  PosBeforeDestructors() or
-  PosAfterDestructors()
-
-/** A `Pos` without a `bindingset` requirement on the constructor. */
-private class AnyPos extends TPos {
-  string toString() { result = "Pos" }
-}
-
 /**
  * A constant that indicates the type of sub-node in a pair of `(Node, Pos)`.
  * See the comment block at the top of this file.
  */
-private class Pos extends AnyPos {
-  // This is to make sure we get compile errors in code that forgets to restrict a `Pos`.
+private class Pos extends int {
   bindingset[this]
   Pos() { any() }
 
   /** Holds if this is the position just _before_ the associated `Node`. */
-  predicate isBefore() { this = PosBefore() }
+  predicate isBefore() { this = 0 }
 
   /** Holds if `(n, this)` is the sub-node that represents `n` itself. */
-  predicate isAt() { this = PosAt() }
+  predicate isAt() { this = 1 }
 
   /** Holds if this is the position just _after_ the associated `Node`. */
-  predicate isAfter() { this = PosAfter() }
+  predicate isAfter() { this = 2 }
 
   /**
    * Holds if `(n, this)` is the virtual sub-node that comes just _before_ any
    * implicit destructor calls following `n`. The node `n` will be some node
    * that may be followed by local variables going out of scope.
    */
-  predicate isBeforeDestructors() { this = PosBeforeDestructors() }
+  predicate isBeforeDestructors() { this = 3 }
 
   /**
    * Holds if `(n, this)` is the virtual sub-node that comes just _after_ any
    * implicit destructor calls following `n`. The node `n` will be some node
    * that may be followed by local variables going out of scope.
    */
-  predicate isAfterDestructors() { this = PosAfterDestructors() }
+  predicate isAfterDestructors() { this = 4 }
 
   pragma[inline]
   predicate nodeBefore(Node n, Node nEq) { this.isBefore() and n = nEq }
@@ -323,13 +310,15 @@ private Node getControlOrderChildSparse(Node n, int i) {
   not result instanceof TypeName and
   not isDeleteDestructorCall(n)
   or
-  n = any(AssignExpr a |
+  n =
+    any(AssignExpr a |
       i = 0 and result = a.getRValue()
       or
       i = 1 and result = a.getLValue()
     )
   or
-  n = any(Call c |
+  n =
+    any(Call c |
       not isDeleteDestructorCall(c) and
       (
         result = c.getArgument(i)
@@ -342,7 +331,8 @@ private Node getControlOrderChildSparse(Node n, int i) {
   or
   n = any(ConditionDeclExpr cd | i = 0 and result = cd.getInitializingExpr())
   or
-  n = any(DeleteExpr del |
+  n =
+    any(DeleteExpr del |
       i = 0 and result = del.getExpr()
       or
       i = 1 and result = del.getDestructorCall()
@@ -350,7 +340,8 @@ private Node getControlOrderChildSparse(Node n, int i) {
       i = 2 and result = del.getAllocatorCall()
     )
   or
-  n = any(DeleteArrayExpr del |
+  n =
+    any(DeleteArrayExpr del |
       i = 0 and result = del.getExpr()
       or
       i = 1 and result = del.getDestructorCall()
@@ -358,7 +349,8 @@ private Node getControlOrderChildSparse(Node n, int i) {
       i = 2 and result = del.getAllocatorCall()
     )
   or
-  n = any(NewArrayExpr new |
+  n =
+    any(NewArrayExpr new |
       // Extra arguments to a built-in allocator, such as alignment or pointer
       // address, are found at child positions >= 3. Extra arguments to custom
       // allocators are instead placed as subexpressions of `getAllocatorCall`.
@@ -375,7 +367,8 @@ private Node getControlOrderChildSparse(Node n, int i) {
       i = 3 and result = new.getInitializer()
     )
   or
-  n = any(NewExpr new |
+  n =
+    any(NewExpr new |
       // Extra arguments to a built-in allocator, such as alignment or pointer
       // address, are found at child positions >= 3. Extra arguments to custom
       // allocators are instead placed as subexpressions of `getAllocatorCall`.
@@ -392,7 +385,8 @@ private Node getControlOrderChildSparse(Node n, int i) {
   or
   // The extractor sometimes emits literals with no value for captures and
   // routes control flow around them.
-  n = any(Expr e |
+  n =
+    any(Expr e |
       e.getParent() instanceof LambdaExpression and
       result = e.getChild(i) and
       forall(Literal lit | result = lit | exists(lit.getValue()))
@@ -400,7 +394,8 @@ private Node getControlOrderChildSparse(Node n, int i) {
   or
   n = any(StmtExpr e | i = 0 and result = e.getStmt())
   or
-  n = any(Initializer init |
+  n =
+    any(Initializer init |
       not skipInitializer(init) and
       not exists(ConditionDeclExpr cd | result = cd.getInitializingExpr()) and
       i = 0 and
@@ -413,14 +408,15 @@ private Node getControlOrderChildSparse(Node n, int i) {
   // in-line in the block containing their corresponding DeclStmt but should
   // not be evaluated in the order implied by their position in the block. We
   // do the following.
-  // - Block skips all the VlaDeclStmt and VlaDimensionStmt children.
+  // - BlockStmt skips all the VlaDeclStmt and VlaDimensionStmt children.
   // - VlaDeclStmt is inserted as a child of DeclStmt
   // - VlaDimensionStmt is inserted as a child of VlaDeclStmt
-  result = n.(Block).getChild(i) and
+  result = n.(BlockStmt).getChild(i) and
   not result instanceof VlaDeclStmt and
   not result instanceof VlaDimensionStmt
   or
-  n = any(DeclStmt s |
+  n =
+    any(DeclStmt s |
       exists(LocalVariable var | var = s.getDeclaration(i) |
         result = var.getInitializer() and
         not skipInitializer(result)
@@ -445,10 +441,9 @@ private Node getControlOrderChildSparse(Node n, int i) {
  * thus should not have control flow computed.
  */
 private predicate skipInitializer(Initializer init) {
-  exists(LocalVariable local |
+  exists(StaticLocalVariable local |
     init = local.getInitializer() and
-    local.isStatic() and
-    not runtimeExprInStaticInitializer(init.getExpr())
+    not local.hasDynamicInitialization()
   )
 }
 
@@ -477,29 +472,17 @@ private predicate inStaticInitializer(Expr e) {
  * contiguous, and the first index is 0.
  */
 private Node getControlOrderChildDense(Node n, int i) {
-  result = rank[i + 1](Node child, int childIdx |
+  result =
+    rank[i + 1](Node child, int childIdx |
       child = getControlOrderChildSparse(n, childIdx)
     |
-      child
-      order by
-        childIdx
+      child order by childIdx
     )
 }
 
 /** Gets the last child of `n` in control-flow order. */
 private Node getLastControlOrderChild(Node n) {
   result = getControlOrderChildDense(n, max(int i | exists(getControlOrderChildDense(n, i))))
-}
-
-private newtype TSpec =
-  SpecPos(AnyPos p) or
-  SpecAround() or
-  SpecAroundDestructors() or
-  SpecBarrier()
-
-/** A `Spec` without a `bindingset` requirement on the constructor. */
-private class AnySpec extends TSpec {
-  string toString() { result = "Spec" }
 }
 
 /**
@@ -509,24 +492,9 @@ private class AnySpec extends TSpec {
  * themselves as both source and target, as well as two _around_ values and a
  * _barrier_ value.
  */
-private class Spec extends AnySpec {
+private class Spec extends Pos {
   bindingset[this]
   Spec() { any() }
-
-  /** See Pos.isBefore. */
-  predicate isBefore() { this = SpecPos(PosBefore()) }
-
-  /** See Pos.isAt. */
-  predicate isAt() { this = SpecPos(PosAt()) }
-
-  /** See Pos.isAfter. */
-  predicate isAfter() { this = SpecPos(PosAfter()) }
-
-  /** See Pos.isBeforeDestructors. */
-  predicate isBeforeDestructors() { this = SpecPos(PosBeforeDestructors()) }
-
-  /** See Pos.isAfterDestructors. */
-  predicate isAfterDestructors() { this = SpecPos(PosAfterDestructors()) }
 
   /**
    * Holds if this spec, when used on a node `n` between `(n1, p1)` and
@@ -535,7 +503,7 @@ private class Spec extends AnySpec {
    *     (n1, p1) ----> before(n)
    *     after(n) ----> (n2, p2)
    */
-  predicate isAround() { this = SpecAround() }
+  predicate isAround() { this = 5 }
 
   /**
    * Holds if this spec, when used on a node `n` between `(n1, p1)` and
@@ -544,16 +512,17 @@ private class Spec extends AnySpec {
    *     (n1, p1)            ----> beforeDestructors(n)
    *     afterDestructors(n) ----> (n2, p2)
    */
-  predicate isAroundDestructors() { this = SpecAroundDestructors() }
+  predicate isAroundDestructors() { this = 6 }
 
   /**
    * Holds if this node is a _barrier_. A barrier resolves to no positions and
    * can be inserted between nodes that should have no sub-edges between them.
    */
-  predicate isBarrier() { this = SpecBarrier() }
+  predicate isBarrier() { this = 7 }
 
   Pos getSourcePos() {
-    this = SpecPos(result)
+    this = [0 .. 4] and
+    result = this
     or
     this.isAround() and
     result.isAfter()
@@ -563,7 +532,8 @@ private class Spec extends AnySpec {
   }
 
   Pos getTargetPos() {
-    this = SpecPos(result)
+    this = [0 .. 4] and
+    result = this
     or
     this.isAround() and
     result.isBefore()
@@ -586,7 +556,8 @@ private class Spec extends AnySpec {
  * together instead.
  */
 private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
-  scope = any(Block b |
+  scope =
+    any(BlockStmt b |
       i = -1 and ni = b and spec.isAt()
       or
       if exists(getLastControlOrderChild(b))
@@ -610,7 +581,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       )
     )
   or
-  scope = any(ShortCircuitOperator op |
+  scope =
+    any(ShortCircuitOperator op |
       i = -1 and ni = op and spec.isBefore()
       or
       i = 0 and ni = op and spec.isAt()
@@ -618,7 +590,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 1 and ni = op.getFirstChildNode() and spec.isBefore()
     )
   or
-  scope = any(ThrowExpr e |
+  scope =
+    any(ThrowExpr e |
       i = -1 and ni = e and spec.isBefore()
       or
       i = 0 and ni = e.getExpr() and spec.isAround()
@@ -630,7 +603,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 3 and ni = e.(ExceptionSource).getExceptionTarget() and spec.isBefore()
     )
   or
-  scope = any(ReturnStmt ret |
+  scope =
+    any(ReturnStmt ret |
       i = -1 and ni = ret and spec.isAt()
       or
       i = 0 and ni = ret.getExpr() and spec.isAround()
@@ -640,7 +614,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 2 and ni = ret.getEnclosingFunction() and spec.isAt()
     )
   or
-  scope = any(JumpStmt s |
+  scope =
+    any(JumpStmt s |
       i = -1 and ni = s and spec.isAt()
       or
       i = 0 and ni = s and spec.isAroundDestructors()
@@ -648,7 +623,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 1 and ni = s.getTarget() and spec.isBefore()
     )
   or
-  scope = any(ForStmt s |
+  scope =
+    any(ForStmt s |
       // ForStmt [-> init]
       i = -1 and ni = s and spec.isAt()
       or
@@ -686,7 +662,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       )
     )
   or
-  scope = any(RangeBasedForStmt for |
+  scope =
+    any(RangeBasedForStmt for |
       i = -1 and ni = for and spec.isAt()
       or
       exists(DeclStmt s | s.getADeclaration() = for.getRangeVariable() |
@@ -719,7 +696,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 7 and ni = for.getCondition() and spec.isBefore()
     )
   or
-  scope = any(TryStmt s |
+  scope =
+    any(TryStmt s |
       i = -1 and ni = s and spec.isAt()
       or
       i = 0 and ni = s.getStmt() and spec.isAround()
@@ -727,7 +705,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 1 and ni = s and spec.isAfter()
     )
   or
-  scope = any(MicrosoftTryExceptStmt s |
+  scope =
+    any(MicrosoftTryExceptStmt s |
       i = -1 and ni = s and spec.isAt()
       or
       i = 0 and ni = s.getStmt() and spec.isAround()
@@ -747,14 +726,15 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 7 and ni = s.(ExceptionSource).getExceptionTarget() and spec.isBefore()
     )
   or
-  scope = any(SwitchStmt s |
+  scope =
+    any(SwitchStmt s |
       i = -1 and ni = s and spec.isAt()
       or
       i = 0 and ni = s.getExpr() and spec.isAround()
       or
       // If the switch body is not a block then this step is skipped, and the
       // expression jumps directly to the cases.
-      i = 1 and ni = s.getStmt().(Block) and spec.isAt()
+      i = 1 and ni = s.getStmt().(BlockStmt) and spec.isAt()
       or
       i = 2 and ni = s.getASwitchCase() and spec.isBefore()
       or
@@ -774,7 +754,8 @@ private predicate straightLineSparse(Node scope, int i, Node ni, Spec spec) {
       i = 6 and ni = s and spec.isAfter()
     )
   or
-  scope = any(ComputedGotoStmt s |
+  scope =
+    any(ComputedGotoStmt s |
       i = -1 and ni = s and spec.isAt()
       or
       i = 0 and ni = s.getExpr() and spec.isBefore()
@@ -890,6 +871,21 @@ private predicate subEdge(Pos p1, Node n1, Node n2, Pos p2) {
     p2.nodeAfter(n2, s)
   )
   or
+  // ConstexprIfStmt -> condition ; { then, else } -> // same as IfStmt
+  exists(ConstexprIfStmt s |
+    p1.nodeAt(n1, s) and
+    p2.nodeBefore(n2, s.getCondition())
+    or
+    p1.nodeAfter(n1, s.getThen()) and
+    p2.nodeBeforeDestructors(n2, s)
+    or
+    p1.nodeAfter(n1, s.getElse()) and
+    p2.nodeBeforeDestructors(n2, s)
+    or
+    p1.nodeAfterDestructors(n1, s) and
+    p2.nodeAfter(n2, s)
+  )
+  or
   // WhileStmt -> condition ; body -> condition ; after dtors -> after
   exists(WhileStmt s |
     p1.nodeAt(n1, s) and
@@ -990,7 +986,8 @@ private predicate subEdgeIncludingDestructors(Pos p1, Node n1, Node n2, Pos p2) 
     exists(int maxCallIndex |
       maxCallIndex = max(int i | exists(getSynthesisedDestructorCallAfterNode(n, i))) and
       p1.nodeBeforeDestructors(n1, n) and
-      p2.nodeAt(n2, getSynthesisedDestructorCallAfterNode(n, maxCallIndex).getQualifier()))
+      p2.nodeAt(n2, getSynthesisedDestructorCallAfterNode(n, maxCallIndex).getQualifier())
+    )
     or
     // call(i+1) -> access(i)
     exists(int i |
@@ -1013,7 +1010,7 @@ private predicate subEdgeIncludingDestructors(Pos p1, Node n1, Node n2, Pos p2) 
  * The exact placement of that call in the CFG depends on the type of
  * `node` as follows:
  *
- * - `Block`: after ordinary control flow falls off the end of the block
+ * - `BlockStmt`: after ordinary control flow falls off the end of the block
  *   without jumps or exceptions.
  * - `ReturnStmt`: After the statement itself or after its operand (if
  *   present).
@@ -1054,17 +1051,18 @@ private class LogicalAndLikeExpr extends ShortCircuitOperator, LogicalAndExpr { 
 /** An expression whose control flow is the same as `||`. */
 private class LogicalOrLikeExpr extends ShortCircuitOperator {
   Expr left;
-
   Expr right;
 
   LogicalOrLikeExpr() {
-    this = any(LogicalOrExpr e |
+    this =
+      any(LogicalOrExpr e |
         left = e.getLeftOperand() and
         right = e.getRightOperand()
       )
     or
     // GNU extension: the binary `? :` operator
-    this = any(ConditionalExpr e |
+    this =
+      any(ConditionalExpr e |
         e.isTwoOperand() and
         left = e.getCondition() and
         right = e.getElse()
@@ -1079,20 +1077,20 @@ private class LogicalOrLikeExpr extends ShortCircuitOperator {
 /** An expression whose control flow is the same as `b ? x : y`. */
 private class ConditionalLikeExpr extends ShortCircuitOperator {
   Expr condition;
-
   Expr thenExpr;
-
   Expr elseExpr;
 
   ConditionalLikeExpr() {
-    this = any(ConditionalExpr e |
+    this =
+      any(ConditionalExpr e |
         not e.isTwoOperand() and
         condition = e.getCondition() and
         thenExpr = e.getThen() and
         elseExpr = e.getElse()
       )
     or
-    this = any(BuiltInChooseExpr e |
+    this =
+      any(BuiltInChooseExpr e |
         condition = e.getChild(0) and
         thenExpr = e.getChild(1) and
         elseExpr = e.getChild(2)
@@ -1179,9 +1177,8 @@ private class ExceptionSource extends Node {
 }
 
 /**
- * Holds if `test` is the test of a control-flow construct that will always
- * have true/false sub-edges out of it, where the `truth`-sub-edge goes to
- * `(n2, p2)`.
+ * Holds if `test` is the test of a control-flow construct where the `truth`
+ * sub-edge goes to `(n2, p2)`.
  */
 private predicate conditionJumpsTop(Expr test, boolean truth, Node n2, Pos p2) {
   exists(IfStmt s | test = s.getCondition() |
@@ -1193,6 +1190,24 @@ private predicate conditionJumpsTop(Expr test, boolean truth, Node n2, Pos p2) {
     or
     not exists(s.getElse()) and
     truth = false and
+    p2.nodeBeforeDestructors(n2, s)
+  )
+  or
+  exists(ConstexprIfStmt s, string cond |
+    test = s.getCondition() and
+    cond = test.getFullyConverted().getValue()
+  |
+    truth = true and
+    cond != "0" and
+    p2.nodeBefore(n2, s.getThen())
+    or
+    truth = false and
+    cond = "0" and
+    p2.nodeBefore(n2, s.getElse())
+    or
+    not exists(s.getElse()) and
+    truth = false and
+    cond = "0" and
     p2.nodeBeforeDestructors(n2, s)
   )
   or
@@ -1353,6 +1368,7 @@ private predicate conditionalSuccessor(Node n1, boolean truth, Node n2) {
     normalGroupMember(targetNode, targetPos, n2)
   )
 }
+
 import Cached
 
 cached
@@ -1360,8 +1376,6 @@ private module Cached {
   /**
    * Holds if `n2` is a successor of `n1` in the CFG. This includes also
    * true-successors and false-successors.
-   *
-   * This corresponds to the old `successors` dbscheme relation.
    */
   cached
   predicate qlCFGSuccessor(Node n1, Node n2) {
@@ -1374,9 +1388,8 @@ private module Cached {
   }
 
   /**
-   * Holds if `n2` is a true-successor of `n1` in the CFG.
-   *
-   * This corresponds to the old `truecond` dbscheme relation.
+   * Holds if `n2` is a control-flow node such that the control-flow
+   * edge `(n1, n2)` may be taken when `n1` is an expression that is true.
    */
   cached
   predicate qlCFGTrueSuccessor(Node n1, Node n2) {
@@ -1385,9 +1398,8 @@ private module Cached {
   }
 
   /**
-   * Holds if `n2` is a false-successor of `n1` in the CFG.
-   *
-   * This corresponds to the old `falsecond` dbscheme relation.
+   * Holds if `n2` is a control-flow node such that the control-flow
+   * edge `(n1, n2)` may be taken when `n1` is an expression that is false.
    */
   cached
   predicate qlCFGFalseSuccessor(Node n1, Node n2) {

@@ -4,6 +4,7 @@
 
 import javascript
 import semmle.javascript.frameworks.Templating
+private import semmle.javascript.dataflow.InferredTypes
 
 module DOM {
   /**
@@ -77,7 +78,7 @@ module DOM {
   /**
    * A JSX element, viewed as an `ElementDefinition`.
    */
-  private class JsxElementDefinition extends ElementDefinition, @jsxelement {
+  private class JsxElementDefinition extends ElementDefinition, @jsx_element {
     JsxElementDefinition() { this instanceof JSXElement }
 
     override string getName() { result = this.(JSXElement).getName() }
@@ -288,33 +289,69 @@ module DOM {
     /**
      * A data flow node that should be considered a source of DOM values.
      */
-    abstract class Range extends DataFlow::Node {}
+    abstract class Range extends DataFlow::Node { }
+
+    private string getADomPropertyName() {
+      exists(ExternalInstanceMemberDecl decl |
+        result = decl.getName() and
+        isDomRootType(decl.getDeclaringType().getASupertype*())
+      )
+    }
 
     private class DefaultRange extends Range {
       DefaultRange() {
-        this.asExpr().(VarAccess).getVariable() instanceof DOMGlobalVariable or
-        this = domValueRef().getAPropertyRead() or
-        this = domElementCreationOrQuery() or
+        this.asExpr().(VarAccess).getVariable() instanceof DOMGlobalVariable
+        or
+        exists(DataFlow::PropRead read |
+          this = read and
+          read = domValueRef().getAPropertyRead()
+        |
+          not read.mayHavePropertyName(_)
+          or
+          read.mayHavePropertyName(getADomPropertyName())
+          or
+          read.mayHavePropertyName(any(string s | exists(s.toInt())))
+        )
+        or
+        this = domElementCreationOrQuery()
+        or
         this = domElementCollection()
+        or
+        exists(JQuery::MethodCall call | this = call and call.getMethodName() = "get" |
+          call.getNumArgument() = 1 and
+          forex(InferredType t | t = call.getArgument(0).analyze().getAType() | t = TTNumber())
+        )
+        or
+        // A `this` node from a callback given to a `$().each(callback)` call.
+        // purposely not using JQuery::MethodCall to avoid `jquery.each()`.
+        exists(DataFlow::CallNode eachCall | eachCall = JQuery::objectRef().getAMethodCall("each") |
+          this = DataFlow::thisNode(eachCall.getCallback(0).getFunction()) or
+          this = eachCall.getABoundCallbackParameter(0, 1)
+        )
       }
     }
   }
 
   /** Gets a data flow node that refers directly to a value from the DOM. */
-  DataFlow::SourceNode domValueSource() {
-    result instanceof DomValueSource::Range
-  }
+  DataFlow::SourceNode domValueSource() { result instanceof DomValueSource::Range }
 
   /** Gets a data flow node that may refer to a value from the DOM. */
   private DataFlow::SourceNode domValueRef(DataFlow::TypeTracker t) {
     t.start() and
     result = domValueSource()
     or
+    t.start() and
+    result = domValueRef().getAMethodCall(["item", "namedItem"])
+    or
     exists(DataFlow::TypeTracker t2 | result = domValueRef(t2).track(t2, t))
   }
 
   /** Gets a data flow node that may refer to a value from the DOM. */
-  DataFlow::SourceNode domValueRef() { result = domValueRef(DataFlow::TypeTracker::end()) }
+  DataFlow::SourceNode domValueRef() {
+    result = domValueRef(DataFlow::TypeTracker::end())
+    or
+    result.hasUnderlyingType("Element")
+  }
 
   module LocationSource {
     /**
@@ -322,7 +359,7 @@ module DOM {
      *
      * Can be subclassed to add additional such nodes.
      */
-    abstract class Range extends DataFlow::Node {}
+    abstract class Range extends DataFlow::Node { }
 
     private class DefaultRange extends Range {
       DefaultRange() {
@@ -337,14 +374,28 @@ module DOM {
         this = DOM::domValueRef().getAPropertyRead("baseUri")
         or
         this = DataFlow::globalVarRef("location")
+        or
+        this = any(DataFlow::Node n | n.hasUnderlyingType("Location")).getALocalSource() and
+        not this = nonFirstLocationType(DataFlow::TypeTracker::end()) // only start from the source, and not the locations we can type-track to.
       }
     }
   }
 
-  /** Gets a data flow node that directly refers to a DOM `location` object. */
-  DataFlow::SourceNode locationSource() {
-    result instanceof LocationSource::Range
+  /**
+   * Get a reference to a node of type `Location` that has gone through at least 1 type-tracking step.
+   */
+  private DataFlow::SourceNode nonFirstLocationType(DataFlow::TypeTracker t) {
+    // One step inlined in the beginning.
+    exists(DataFlow::TypeTracker t2 |
+      result =
+        any(DataFlow::Node n | n.hasUnderlyingType("Location")).getALocalSource().track(t2, t)
+    )
+    or
+    exists(DataFlow::TypeTracker t2 | result = nonFirstLocationType(t2).track(t2, t))
   }
+
+  /** Gets a data flow node that directly refers to a DOM `location` object. */
+  DataFlow::SourceNode locationSource() { result instanceof LocationSource::Range }
 
   /** Gets a reference to a DOM `location` object. */
   private DataFlow::SourceNode locationRef(DataFlow::TypeTracker t) {
@@ -363,7 +414,7 @@ module DOM {
      *
      * Can be subclassed to add additional such nodes.
      */
-    abstract class Range extends DataFlow::Node {}
+    abstract class Range extends DataFlow::Node { }
 
     private class DefaultRange extends Range {
       DefaultRange() { this = DataFlow::globalVarRef("document") }
@@ -373,9 +424,7 @@ module DOM {
   /**
    * Gets a direct reference to the `document` object.
    */
-  DataFlow::SourceNode documentSource() {
-    result instanceof DocumentSource::Range
-  }
+  DataFlow::SourceNode documentSource() { result instanceof DocumentSource::Range }
 
   /**
    * Gets a reference to the `document` object.
@@ -390,5 +439,9 @@ module DOM {
   /**
    * Gets a reference to the 'document' object.
    */
-  DataFlow::SourceNode documentRef() { result = documentRef(DataFlow::TypeTracker::end()) }
+  DataFlow::SourceNode documentRef() {
+    result = documentRef(DataFlow::TypeTracker::end())
+    or
+    result.hasUnderlyingType("Document")
+  }
 }

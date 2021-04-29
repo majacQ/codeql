@@ -89,7 +89,8 @@ module HardcodedCredentials {
    */
   class ByteArrayLiteral extends Source {
     ByteArrayLiteral() {
-      this.getExpr() = any(ArrayCreation ac |
+      this.getExpr() =
+        any(ArrayCreation ac |
           ac.getArrayType().getElementType() instanceof ByteType and
           ac.hasInitializer()
         )
@@ -101,7 +102,8 @@ module HardcodedCredentials {
    */
   class CharArrayLiteral extends Source {
     CharArrayLiteral() {
-      this.getExpr() = any(ArrayCreation ac |
+      this.getExpr() =
+        any(ArrayCreation ac |
           ac.getArrayType().getElementType() instanceof CharType and
           ac.hasInitializer()
         )
@@ -166,9 +168,7 @@ module HardcodedCredentials {
    */
   class HardcodedCredentialsSinkExpr extends Sink {
     private string description;
-
     private Element supplementaryElement;
-
     private string sinkName;
 
     HardcodedCredentialsSinkExpr() {
@@ -225,10 +225,8 @@ module HardcodedCredentials {
    */
   class StringFormatSanitizer extends Sanitizer {
     StringFormatSanitizer() {
-      this.getExpr() = any(SystemStringClass s)
-            .getFormatMethod()
-            .getACall()
-            .getArgumentForName("format")
+      this.getExpr() =
+        any(SystemStringClass s).getFormatMethod().getACall().getArgumentForName("format")
     }
   }
 

@@ -34,6 +34,13 @@ abstract class ExtendCall extends DataFlow::CallNode {
   }
 }
 
+/** A version of `JQuery::dollarSource()` with fewer dependencies. */
+private DataFlow::SourceNode localDollar() {
+  result.accessesGlobal(["$", "jQuery"])
+  or
+  result = DataFlow::moduleImport("jquery")
+}
+
 /**
  * An extend call of form `extend(true/false, dst, src1, src2, ...)`, where the true/false
  * argument is possibly omitted.
@@ -47,7 +54,7 @@ private class ExtendCallWithFlag extends ExtendCall {
       name = "node.extend"
     )
     or
-    this = jquery().getAPropertyRead("extend").getACall()
+    this = localDollar().getAMemberCall("extend")
   }
 
   /**
@@ -93,7 +100,8 @@ private class ExtendCallDeep extends ExtendCall {
       callee = DataFlow::moduleMember("smart-extend", "deep") or
       callee = LodashUnderscore::member("merge") or
       callee = LodashUnderscore::member("mergeWith") or
-      callee = LodashUnderscore::member("defaultsDeep")
+      callee = LodashUnderscore::member("defaultsDeep") or
+      callee = AngularJS::angular().getAPropertyRead("merge")
     )
   }
 
@@ -122,7 +130,8 @@ private class ExtendCallShallow extends ExtendCall {
       callee = DataFlow::moduleImport("util-extend") or
       callee = DataFlow::moduleImport("utils-merge") or
       callee = DataFlow::moduleImport("xtend/mutable") or
-      callee = LodashUnderscore::member("extend")
+      callee = LodashUnderscore::member("extend") or
+      callee = AngularJS::angular().getAPropertyRead("extend")
     )
   }
 

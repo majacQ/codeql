@@ -1,68 +1,79 @@
 ﻿using System.Collections.Generic;
 using System.Reflection.Metadata;
-using System.Linq;
 using System.Reflection.Metadata.Ecma335;
+using System.IO;
 
 namespace Semmle.Extraction.CIL.Entities
 {
     /// <summary>
     /// A property.
     /// </summary>
-    interface IProperty : ILabelledEntity
+    internal sealed class Property : LabelledEntity
     {
-    }
+        private readonly Handle handle;
+        private readonly Type type;
+        private readonly PropertyDefinition pd;
+        public override string IdSuffix => ";cil-property";
+        private readonly GenericContext gc;
 
-    /// <summary>
-    /// A property.
-    /// </summary>
-    class Property : LabelledEntity, IProperty
-    {
-        readonly Handle handle;
-        readonly Type type;
-        readonly PropertyDefinition pd;
-        static readonly Id suffix = CIL.Id.Create(";cil-property");
-
-        public Property(GenericContext gc, Type type, PropertyDefinitionHandle handle) : base(gc.cx)
+        public Property(GenericContext gc, Type type, PropertyDefinitionHandle handle) : base(gc.Cx)
         {
+            this.gc = gc;
             this.handle = handle;
-            pd = cx.mdReader.GetPropertyDefinition(handle);
+            pd = Cx.MdReader.GetPropertyDefinition(handle);
             this.type = type;
-
-            var id = type.ShortId + gc.cx.Dot + cx.ShortName(pd.Name);
-            var signature = pd.DecodeSignature(new SignatureDecoder(), gc);
-            id += "(" + CIL.Id.CommaSeparatedList(signature.ParameterTypes.Select(p => p.MakeId(gc))) + ")";
-            ShortId = id;
         }
+
+        public override void WriteId(TextWriter trapFile)
+        {
+            trapFile.WriteSubId(type);
+            trapFile.Write('.');
+            trapFile.Write(Cx.GetString(pd.Name));
+            trapFile.Write("(");
+            var index = 0;
+            var signature = pd.DecodeSignature(new SignatureDecoder(), gc);
+            foreach (var param in signature.ParameterTypes)
+            {
+                trapFile.WriteSeparator(",", ref index);
+                param.WriteId(trapFile, gc);
+            }
+            trapFile.Write(")");
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is Property property && Equals(handle, property.handle);
+        }
+
+        public override int GetHashCode() => handle.GetHashCode();
 
         public override IEnumerable<IExtractionProduct> Contents
         {
             get
             {
-                yield return Tuples.metadata_handle(this, cx.assembly, MetadataTokens.GetToken(handle));
-                var sig = pd.DecodeSignature(cx.TypeSignatureDecoder, type);
+                yield return Tuples.metadata_handle(this, Cx.Assembly, MetadataTokens.GetToken(handle));
+                var sig = pd.DecodeSignature(Cx.TypeSignatureDecoder, type);
 
-                yield return Tuples.cil_property(this, type, cx.ShortName(pd.Name), sig.ReturnType);
+                yield return Tuples.cil_property(this, type, Cx.ShortName(pd.Name), sig.ReturnType);
 
                 var accessors = pd.GetAccessors();
                 if (!accessors.Getter.IsNil)
                 {
-                    var getter = (Method)cx.CreateGeneric(type, accessors.Getter);
+                    var getter = (Method)Cx.CreateGeneric(type, accessors.Getter);
                     yield return getter;
                     yield return Tuples.cil_getter(this, getter);
                 }
 
                 if (!accessors.Setter.IsNil)
                 {
-                    var setter = (Method)cx.CreateGeneric(type, accessors.Setter);
+                    var setter = (Method)Cx.CreateGeneric(type, accessors.Setter);
                     yield return setter;
                     yield return Tuples.cil_setter(this, setter);
                 }
 
-                foreach (var c in Attribute.Populate(cx, this, pd.GetCustomAttributes()))
+                foreach (var c in Attribute.Populate(Cx, this, pd.GetCustomAttributes()))
                     yield return c;
             }
         }
-
-        public override Id IdSuffix => suffix;
     }
 }

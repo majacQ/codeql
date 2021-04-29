@@ -1,47 +1,45 @@
 using Semmle.Extraction.CommentProcessing;
 using Semmle.Extraction.Entities;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class CommentBlock : CachedEntity<ICommentBlock>
+    internal class CommentBlock : CachedEntity<ICommentBlock>
     {
-        CommentBlock(Context cx, ICommentBlock init)
+        private CommentBlock(Context cx, ICommentBlock init)
             : base(cx, init) { }
 
-        public override void Populate()
+        public override void Populate(TextWriter trapFile)
         {
-            Context.Emit(Tuples.commentblock(this));
-            int child = 0;
-            Context.Emit(Tuples.commentblock_location(this, Context.Create(symbol.Location)));
+            trapFile.commentblock(this);
+            var child = 0;
+            trapFile.commentblock_location(this, Context.Create(symbol.Location));
             foreach (var l in symbol.CommentLines)
             {
-                Context.Emit(Tuples.commentblock_child(this, (CommentLine)l, child++));
+                trapFile.commentblock_child(this, (CommentLine)l, child++);
             }
         }
 
         public override bool NeedsPopulation => true;
 
-        public override IId Id
+        public override void WriteId(TextWriter trapFile)
         {
-            get
-            {
-                var loc = Context.Create(symbol.Location);
-                return new Key(loc, ";commentblock");
-            }
+            trapFile.WriteSubId(Context.Create(symbol.Location));
+            trapFile.Write(";commentblock");
         }
 
         public override Microsoft.CodeAnalysis.Location ReportingLocation => symbol.Location;
 
-        public void BindTo(Label entity, Binding binding)
+        public void BindTo(Label entity, CommentBinding binding)
         {
-            Context.Emit(Tuples.commentblock_binding(this, entity, binding));
+            Context.TrapWriter.Writer.commentblock_binding(this, entity, binding);
         }
 
-        public static CommentBlock Create(Context cx, ICommentBlock block) => CommentBlockFactory.Instance.CreateEntity(cx, block);
+        public static CommentBlock Create(Context cx, ICommentBlock block) => CommentBlockFactory.Instance.CreateEntity(cx, block, block);
 
-        class CommentBlockFactory : ICachedEntityFactory<ICommentBlock, CommentBlock>
+        private class CommentBlockFactory : ICachedEntityFactory<ICommentBlock, CommentBlock>
         {
-            public static readonly CommentBlockFactory Instance = new CommentBlockFactory();
+            public static CommentBlockFactory Instance { get; } = new CommentBlockFactory();
 
             public CommentBlock Create(Context cx, ICommentBlock init) => new CommentBlock(cx, init);
         }

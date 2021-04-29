@@ -1,12 +1,13 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Semmle.Extraction.CSharp.Entities.Expressions;
 using Semmle.Extraction.Kinds;
+using System.IO;
 
 namespace Semmle.Extraction.CSharp.Entities.Statements
 {
-    class LocalDeclaration : Statement<LocalDeclarationStatementSyntax>
+    internal class LocalDeclaration : Statement<LocalDeclarationStatementSyntax>
     {
-        static StmtKind GetKind(LocalDeclarationStatementSyntax declStmt)
+        private static StmtKind GetKind(LocalDeclarationStatementSyntax declStmt)
         {
             if (declStmt.UsingKeyword.RawKind != 0)
                 return StmtKind.USING_DECL;
@@ -17,7 +18,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return StmtKind.VAR_DECL;
         }
 
-        LocalDeclaration(Context cx, LocalDeclarationStatementSyntax declStmt, IStatementParentEntity parent, int child)
+        private LocalDeclaration(Context cx, LocalDeclarationStatementSyntax declStmt, IStatementParentEntity parent, int child)
             : base(cx, declStmt, GetKind(declStmt), parent, child) { }
 
         public static LocalDeclaration Create(Context cx, LocalDeclarationStatementSyntax node, IStatementParentEntity parent, int child)
@@ -27,7 +28,7 @@ namespace Semmle.Extraction.CSharp.Entities.Statements
             return ret;
         }
 
-        protected override void Populate()
+        protected override void PopulateStatement(TextWriter trapFile)
         {
             VariableDeclarations.Populate(cx, Stmt.Declaration, this, 0);
             cx.BindComments(this, Stmt.GetLocation());

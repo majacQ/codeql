@@ -10,6 +10,7 @@ import com.semmle.js.ast.jsx.JSXMemberExpression;
 import com.semmle.js.ast.jsx.JSXNamespacedName;
 import com.semmle.js.ast.jsx.JSXOpeningElement;
 import com.semmle.js.ast.jsx.JSXSpreadAttribute;
+import com.semmle.js.ast.jsx.JSXThisExpr;
 import com.semmle.ts.ast.ArrayTypeExpr;
 import com.semmle.ts.ast.ConditionalTypeExpr;
 import com.semmle.ts.ast.DecoratorList;
@@ -30,20 +31,21 @@ import com.semmle.ts.ast.InferTypeExpr;
 import com.semmle.ts.ast.InterfaceDeclaration;
 import com.semmle.ts.ast.InterfaceTypeExpr;
 import com.semmle.ts.ast.IntersectionTypeExpr;
-import com.semmle.ts.ast.IsTypeExpr;
-import com.semmle.ts.ast.UnaryTypeExpr;
 import com.semmle.ts.ast.KeywordTypeExpr;
 import com.semmle.ts.ast.MappedTypeExpr;
 import com.semmle.ts.ast.NamespaceDeclaration;
 import com.semmle.ts.ast.NonNullAssertion;
 import com.semmle.ts.ast.OptionalTypeExpr;
 import com.semmle.ts.ast.ParenthesizedTypeExpr;
+import com.semmle.ts.ast.PredicateTypeExpr;
 import com.semmle.ts.ast.RestTypeExpr;
+import com.semmle.ts.ast.TemplateLiteralTypeExpr;
 import com.semmle.ts.ast.TupleTypeExpr;
 import com.semmle.ts.ast.TypeAliasDeclaration;
 import com.semmle.ts.ast.TypeAssertion;
 import com.semmle.ts.ast.TypeParameter;
 import com.semmle.ts.ast.TypeofTypeExpr;
+import com.semmle.ts.ast.UnaryTypeExpr;
 import com.semmle.ts.ast.UnionTypeExpr;
 
 /**
@@ -156,6 +158,8 @@ public interface Visitor<C, R> {
 
   public R visit(TemplateLiteral nd, C q);
 
+  public R visit(TemplateLiteralTypeExpr nd, C q);
+
   public R visit(TaggedTemplateExpression nd, C q);
 
   public R visit(ArrowFunctionExpression nd, C q);
@@ -199,6 +203,8 @@ public interface Visitor<C, R> {
   public R visit(ImportSpecifier nd, C c);
 
   public R visit(JSXIdentifier nd, C c);
+
+  public R visit(JSXThisExpr nd, C c);
 
   public R visit(JSXMemberExpression nd, C c);
 
@@ -256,7 +262,7 @@ public interface Visitor<C, R> {
 
   public R visit(TypeofTypeExpr nd, C c);
 
-  public R visit(IsTypeExpr nd, C c);
+  public R visit(PredicateTypeExpr nd, C c);
 
   public R visit(InterfaceTypeExpr nd, C c);
 

@@ -14,11 +14,22 @@ abstract class SystemCommandExecution extends DataFlow::Node {
   /** Gets an argument to this execution that specifies the command. */
   abstract DataFlow::Node getACommandArgument();
 
+  /** Holds if a shell interprets `arg`. */
+  predicate isShellInterpreted(DataFlow::Node arg) { none() }
+
   /**
    * Gets an argument to this command execution that specifies the argument list
    * to the command.
    */
   DataFlow::Node getArgumentList() { none() }
+
+  /** Holds if the command execution happens synchronously. */
+  abstract predicate isSync();
+
+  /**
+   * Gets the data-flow node (if it exists) for an options argument.
+   */
+  abstract DataFlow::Node getOptionsArg();
 }
 
 /**
@@ -36,6 +47,14 @@ abstract class FileSystemAccess extends DataFlow::Node {
    * sanitization to prevent the path arguments from traversing outside the root folder.
    */
   DataFlow::Node getRootPathArgument() { none() }
+
+  /**
+   * Holds if this file system access will reject paths containing upward navigation
+   * segments (`../`).
+   *
+   * `argument` should refer to the relevant path argument or root path argument.
+   */
+  predicate isUpwardNavigationRejected(DataFlow::Node argument) { none() }
 }
 
 /**

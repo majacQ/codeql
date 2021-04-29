@@ -8,8 +8,10 @@ import semmle.code.cpp.Element
  */
 class PreprocessorDirective extends Locatable, @preprocdirect {
   override string toString() { result = "Preprocessor directive" }
-  override Location getLocation() { preprocdirects(underlyingElement(this),_,result) }
-  string getHead() { preproctext(underlyingElement(this),result,_) }
+
+  override Location getLocation() { preprocdirects(underlyingElement(this), _, result) }
+
+  string getHead() { preproctext(underlyingElement(this), result, _) }
 
   /**
    * Gets a preprocessor branching directive whose condition affects
@@ -31,11 +33,13 @@ class PreprocessorDirective extends Locatable, @preprocdirect {
   }
 }
 
+private class TPreprocessorBranchDirective = @ppd_branch or @ppd_else or @ppd_endif;
+
 /**
  * A C/C++ preprocessor branch related directive: `#if`, `#ifdef`,
  * `#ifndef`, `#elif`, `#else` or `#endif`.
  */
-abstract class PreprocessorBranchDirective extends PreprocessorDirective {
+class PreprocessorBranchDirective extends PreprocessorDirective, TPreprocessorBranchDirective {
   /**
    * Gets the `#if`, `#ifdef` or `#ifndef` directive which matches this
    * branching directive.
@@ -46,9 +50,9 @@ abstract class PreprocessorBranchDirective extends PreprocessorDirective {
    * result.
    */
   PreprocessorBranch getIf() {
-    result = (PreprocessorIf)this or
-    result = (PreprocessorIfdef)this or
-    result = (PreprocessorIfndef)this or
+    result = this.(PreprocessorIf) or
+    result = this.(PreprocessorIfdef) or
+    result = this.(PreprocessorIfndef) or
     preprocpair(unresolveElement(result), underlyingElement(this))
   }
 
@@ -60,9 +64,7 @@ abstract class PreprocessorBranchDirective extends PreprocessorDirective {
    * directives in different translation units, then there can be more than
    * one result.
    */
-  PreprocessorEndif getEndIf() {
-    preprocpair(unresolveElement(getIf()), unresolveElement(result))
-  }
+  PreprocessorEndif getEndIf() { preprocpair(unresolveElement(getIf()), unresolveElement(result)) }
 
   /**
    * Gets the next `#elif`, `#else` or `#endif` matching this branching
@@ -83,12 +85,11 @@ abstract class PreprocessorBranchDirective extends PreprocessorDirective {
    * #ifdef or #ifndef.
    */
   private int getIndexInBranch(PreprocessorBranch branch) {
-    this = rank[result](PreprocessorBranchDirective other |
+    this =
+      rank[result](PreprocessorBranchDirective other |
         other.getIf() = branch
       |
-        other
-        order by
-          other.getLocation().getStartLine()
+        other order by other.getLocation().getStartLine()
       )
   }
 }
@@ -115,9 +116,7 @@ class PreprocessorBranch extends PreprocessorBranchDirective, @ppd_branch {
    * Holds if at least one translation unit evaluated this directive's
    * condition and subsequently took the branch.
    */
-  predicate wasTaken() {
-    preproctrue(underlyingElement(this))
-  }
+  predicate wasTaken() { preproctrue(underlyingElement(this)) }
 
   /**
    * Holds if at least one translation unit evaluated this directive's
@@ -126,18 +125,14 @@ class PreprocessorBranch extends PreprocessorBranchDirective, @ppd_branch {
    * If `#else` is the next matching directive, then this means that the
    * `#else` was taken instead.
    */
-  predicate wasNotTaken() {
-    preprocfalse(underlyingElement(this))
-  }
+  predicate wasNotTaken() { preprocfalse(underlyingElement(this)) }
 
   /**
    * Holds if this directive was either taken by all translation units
    * which evaluated it, or was not taken by any translation unit which
    * evaluated it.
    */
-  predicate wasPredictable() {
-    not ( wasTaken() and wasNotTaken() )
-  }
+  predicate wasPredictable() { not (wasTaken() and wasNotTaken()) }
 }
 
 /**
@@ -158,6 +153,8 @@ class PreprocessorIf extends PreprocessorBranch, @ppd_if {
  */
 class PreprocessorIfdef extends PreprocessorBranch, @ppd_ifdef {
   override string toString() { result = "#ifdef " + this.getHead() }
+
+  override string getAPrimaryQlClass() { result = "PreprocessorIfdef" }
 }
 
 /**
@@ -213,16 +210,16 @@ class PreprocessorUndef extends PreprocessorDirective, @ppd_undef {
   /**
    * Gets the name of the macro that is undefined.
    */
-  string getName() {
-    result = getHead()
-  }
+  string getName() { result = getHead() }
 }
 
 /**
  * A C/C++ preprocessor `#pragma` directive.
  */
 class PreprocessorPragma extends PreprocessorDirective, @ppd_pragma {
-  override string toString() { result = "#pragma " + this.getHead() }
+  override string toString() {
+    if exists(this.getHead()) then result = "#pragma " + this.getHead() else result = "#pragma"
+  }
 }
 
 /**

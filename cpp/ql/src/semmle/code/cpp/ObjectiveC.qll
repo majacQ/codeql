@@ -1,3 +1,7 @@
+/**
+ * DEPRECATED: Objective-C is no longer supported.
+ */
+
 import semmle.code.cpp.Class
 private import semmle.code.cpp.internal.ResolveClass
 
@@ -132,13 +136,11 @@ deprecated class ObjcTryStmt extends TryStmt {
  * DEPRECATED: Objective-C is no longer supported.
  * An Objective C `@finally` block.
  */
-deprecated class FinallyBlock extends Block {
+deprecated class FinallyBlock extends BlockStmt {
   FinallyBlock() { none() }
 
   /** Gets the try statement corresponding to this finally block. */
-  ObjcTryStmt getTryStmt() {
-    none()
-  }
+  ObjcTryStmt getTryStmt() { none() }
 }
 
 /**
@@ -166,7 +168,9 @@ deprecated class Property extends Declaration {
   Attribute getAnAttribute() { none() }
 
   override Location getADeclarationLocation() { result = getLocation() }
+
   override Location getDefinitionLocation() { result = getLocation() }
+
   override Location getLocation() { none() }
 
   /** Gets the type of this property. */

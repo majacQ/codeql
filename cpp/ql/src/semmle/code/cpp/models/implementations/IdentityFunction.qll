@@ -4,29 +4,20 @@ import semmle.code.cpp.models.interfaces.DataFlow
 import semmle.code.cpp.models.interfaces.SideEffect
 
 /**
- * The standard function templates `std::move` and `std::identity`
+ * The standard function templates `std::move` and `std::forward`.
  */
-class IdentityFunction extends DataFlowFunction, SideEffectFunction, AliasFunction {
+private class IdentityFunction extends DataFlowFunction, SideEffectFunction, AliasFunction {
   IdentityFunction() {
     this.getNamespace().getParentNamespace() instanceof GlobalNamespace and
     this.getNamespace().getName() = "std" and
-    ( 
-      this.getName() = "move" or
-      this.getName() = "forward"
-    )
+    this.getName() = ["move", "forward"]
   }
 
-  override predicate neverReadsMemory() {
-    any()
-  }
+  override predicate hasOnlySpecificReadSideEffects() { any() }
 
-  override predicate neverWritesMemory() {
-    any()
-  }
+  override predicate hasOnlySpecificWriteSideEffects() { any() }
 
-  override predicate parameterNeverEscapes(int index) {
-    none()
-  }
+  override predicate parameterNeverEscapes(int index) { none() }
 
   override predicate parameterEscapesOnlyViaReturn(int index) {
     // These functions simply return the argument value.
@@ -40,6 +31,6 @@ class IdentityFunction extends DataFlowFunction, SideEffectFunction, AliasFuncti
 
   override predicate hasDataFlow(FunctionInput input, FunctionOutput output) {
     // These functions simply return the argument value.
-    input.isInParameter(0) and output.isOutReturnValue()
+    input.isParameter(0) and output.isReturnValue()
   }
 }
