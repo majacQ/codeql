@@ -12,8 +12,6 @@ BasicBlock getABasicBlockSuccessor(BasicBlock bb) { result = bb.getASuccessor() 
 
 class ExitBasicBlock = ControlFlow::BasicBlocks::ExitBlock;
 
-class ReadKind = SsaImpl::ReadKind;
-
 class SourceVariable = SsaImpl::TSourceVariable;
 
 predicate variableWrite = SsaImpl::variableWrite/4;

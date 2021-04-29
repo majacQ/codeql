@@ -177,6 +177,16 @@ module Ssa {
     }
 
     /**
+     * Holds is this SSA definition is live at the end of basic block `bb`.
+     * That is, this definition reaches the end of basic block `bb`, at which
+     * point it is still live, without crossing another SSA definition of the
+     * same source variable.
+     */
+    final predicate isLiveAtEndOfBlock(ControlFlow::BasicBlock bb) {
+      SsaImpl::isLiveAtEndOfBlock(this, bb)
+    }
+
+    /**
      * Gets a read of the source variable underlying this SSA definition that
      * can be reached from this SSA definition without passing through any
      * other SSA definitions. Example:
@@ -233,11 +243,7 @@ module Ssa {
      *   node between lines 9 and 10.
      */
     final AssignableRead getAReadAtNode(ControlFlow::Node cfn) {
-      exists(ControlFlow::BasicBlock bb, int i |
-        SsaImpl::ssaDefReachesRead(_, this, bb, i, SsaImpl::ActualRead()) and
-        cfn = bb.getNode(i) and
-        result.getAControlFlowNode() = cfn
-      )
+      result = SsaImpl::getAReadAtNode(this, cfn)
     }
 
     /**
@@ -379,8 +385,17 @@ module Ssa {
     }
 
     /**
+     * Gets an SSA definition whose value can flow to this one in one step. This
+     * includes inputs to phi nodes and the prior definitions of uncertain writes.
+     */
+    private Definition getAPhiInputOrPriorDefinition() {
+      result = this.(PhiNode).getAnInput() or
+      result = this.(UncertainDefinition).getPriorDefinition()
+    }
+
+    /**
      * Gets a definition that ultimately defines this SSA definition and is
-     * not itself a pseudo node. Example:
+     * not itself a phi node. Example:
      *
      * ```csharp
      * int Field;
@@ -407,8 +422,9 @@ module Ssa {
      *   definition on line 4, the explicit definition on line 7, and the implicit
      *   definition on line 9.
      */
-    final override Definition getAnUltimateDefinition() {
-      result = SsaImpl::Definition.super.getAnUltimateDefinition()
+    final Definition getAnUltimateDefinition() {
+      result = this.getAPhiInputOrPriorDefinition*() and
+      not result instanceof PhiNode
     }
 
     /**
@@ -419,7 +435,7 @@ module Ssa {
     /**
      * Gets the syntax element associated with this SSA definition, if any.
      * This is either an expression, for example `x = 0`, a parameter, or a
-     * callable. Pseudo nodes have no associated syntax element.
+     * callable. Phi nodes have no associated syntax element.
      */
     Element getElement() { result = this.getControlFlowNode().getElement() }
 
@@ -675,7 +691,12 @@ module Ssa {
      *   definition on line 4, the explicit definition on line 7, and the implicit
      *   call definition on line 9 as inputs.
      */
-    final override Definition getAnInput() { result = SsaImpl::PhiNode.super.getAnInput() }
+    final Definition getAnInput() { this.hasInputFromBlock(result, _) }
+
+    /** Holds if `inp` is an input to this phi node along the edge originating in `bb`. */
+    predicate hasInputFromBlock(Definition inp, ControlFlow::BasicBlock bb) {
+      inp = SsaImpl::phiHasInputFromBlock(this, bb)
+    }
 
     override string toString() {
       result = getToStringPrefix(this) + "SSA phi(" + getSourceVariable() + ")"
@@ -698,5 +719,11 @@ module Ssa {
    * need not be certain), an implicit non-local update via a call, or an
    * uncertain update of the qualifier.
    */
-  class UncertainDefinition extends Definition, SsaImpl::UncertainWriteDefinition { }
+  class UncertainDefinition extends Definition, SsaImpl::UncertainWriteDefinition {
+    /**
+     * Gets the immediately preceding definition. Since this update is uncertain,
+     * the value from the preceding definition might still be valid.
+     */
+    Definition getPriorDefinition() { result = SsaImpl::uncertainWriteDefinitionInput(this) }
+  }
 }
