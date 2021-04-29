@@ -6,6 +6,7 @@
 
 import FileSystem
 import semmle.code.java.Element
+private import semmle.code.SMAP
 
 /** Holds if element `e` has name `name`. */
 predicate hasName(Element e, string name) {
@@ -60,6 +61,18 @@ class Top extends @top {
    * [Locations](https://help.semmle.com/QL/learn-ql/ql/locations.html).
    */
   predicate hasLocationInfo(
+    string filepath, int startline, int startcolumn, int endline, int endcolumn
+  ) {
+    hasLocationInfoAux(filepath, startline, startcolumn, endline, endcolumn)
+    or
+    exists(string outFilepath, int outStartline, int outEndline |
+      hasLocationInfoAux(outFilepath, outStartline, _, outEndline, _) and
+      hasSmapLocationInfo(filepath, startline, startcolumn, endline, endcolumn, outFilepath,
+        outStartline, outEndline)
+    )
+  }
+
+  private predicate hasLocationInfoAux(
     string filepath, int startline, int startcolumn, int endline, int endcolumn
   ) {
     exists(File f, Location l | fixedHasLocation(this, l, f) |
@@ -150,12 +163,18 @@ class Location extends @location {
 
   /** Gets a string representation containing the file and range for this location. */
   string toString() {
-    exists(File f, int startLine, int endLine |
-      locations_default(this, f, startLine, _, endLine, _)
+    exists(File f, int startLine, int startCol, int endLine, int endCol |
+      locations_default(this, f, startLine, startCol, endLine, endCol)
     |
       if endLine = startLine
-      then result = f.toString() + ":" + startLine.toString()
-      else result = f.toString() + ":" + startLine.toString() + "-" + endLine.toString()
+      then
+        result =
+          f.toString() + ":" + startLine.toString() + "[" + startCol.toString() + "-" +
+            endCol.toString() + "]"
+      else
+        result =
+          f.toString() + ":" + startLine.toString() + "[" + startCol.toString() + "]-" +
+            endLine.toString() + "[" + endCol.toString() + "]"
     )
   }
 

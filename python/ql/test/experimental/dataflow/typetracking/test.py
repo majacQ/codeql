@@ -27,7 +27,7 @@ def baz():
 def id(x): # $tracked
     return x # $tracked
 
-def use_tracked_quux(x): # $f-:tracked
+def use_tracked_quux(x): # $ MISSING: tracked
     do_stuff(y) # call after return -- not tracked in here.
 
 def quux():
@@ -48,6 +48,15 @@ def global_var_write_test():
     x = tracked # $tracked
     write_g(x) # $tracked
     use_g()
+
+def test_import():
+    import mymodule
+    mymodule.x # $tracked
+    y = mymodule.func() # $tracked
+    y # $tracked
+    mymodule.z # $tracked
+
+# ------------------------------------------------------------------------------
 
 def expects_int(x): # $int
     do_int_stuff(x) # $int

@@ -91,12 +91,12 @@ module NodeJSLib {
     /**
      * Gets the parameter of the route handler that contains the request object.
      */
-    SimpleParameter getRequestParameter() { result = getFunction().getParameter(0) }
+    Parameter getRequestParameter() { result = getFunction().getParameter(0) }
 
     /**
      * Gets the parameter of the route handler that contains the response object.
      */
-    SimpleParameter getResponseParameter() { result = getFunction().getParameter(1) }
+    Parameter getResponseParameter() { result = getFunction().getParameter(1) }
   }
 
   /**
@@ -472,8 +472,10 @@ module NodeJSLib {
           result = promisifyAllCall and
           pred.flowsTo(promisifyAllCall.getArgument(0)) and
           promisifyAllCall =
-            [DataFlow::moduleMember("bluebird", "promisifyAll"),
-                DataFlow::moduleImport("util-promisifyall")].getACall()
+            [
+              DataFlow::moduleMember("bluebird", "promisifyAll"),
+              DataFlow::moduleImport("util-promisifyall")
+            ].getACall()
         )
       )
     }
@@ -643,6 +645,20 @@ module NodeJSLib {
     }
   }
 
+  private import semmle.javascript.PackageExports as Exports
+
+  /**
+   * A direct step from an named export to a property-read reading the exported value.
+   */
+  private class ExportsStep extends PreCallGraphStep {
+    override predicate step(DataFlow::Node pred, DataFlow::Node succ) {
+      exists(Import imp, string name |
+        succ = DataFlow::valueNode(imp).(DataFlow::SourceNode).getAPropertyRead(name) and
+        pred = imp.getImportedModule().getAnExportedValue(name)
+      )
+    }
+  }
+
   /**
    * A call to a method from module `child_process`.
    */
@@ -757,8 +773,10 @@ module NodeJSLib {
      * Gets the code to be executed as part of this invocation.
      */
     DataFlow::Node getACodeArgument() {
-      memberName in ["Script", "SourceTextModule", "compileFunction", "runInContext",
-            "runInNewContext", "runInThisContext"] and
+      memberName in [
+          "Script", "SourceTextModule", "compileFunction", "runInContext", "runInNewContext",
+          "runInThisContext"
+        ] and
       // all of the above methods/constructors take the command as their first argument
       result = getArgument(0)
     }

@@ -325,3 +325,28 @@ module.exports.typeofcheck = function (arg) {
 	var cmd = "MyWindowCommand | findstr /i /c:" + arg; // NOT OK
 	cp.exec(cmd); 
 }
+
+function id(x) {
+	return x;
+}
+
+module.exports.id = id;
+
+module.exports.unproblematic = function() {
+	cp.exec("rm -rf " + id("test")); // OK
+};
+
+module.exports.problematic = function(n) {
+	cp.exec("rm -rf " + id(n)); // NOT OK
+};
+
+function boundProblem(safe, unsafe) {
+	cp.exec("rm -rf " + safe); // OK
+	cp.exec("rm -rf " + unsafe); // NOT OK
+}
+
+Object.defineProperty(module.exports, "boundProblem", {
+	get: function () {
+		return boundProblem.bind(this, "safe");
+	}
+});

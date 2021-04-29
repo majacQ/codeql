@@ -95,7 +95,7 @@ class Node extends TIRDataFlowNode {
    * Gets the uninitialized local variable corresponding to this node, if
    * any.
    */
-  LocalVariable asUninitialized() { none() }
+  deprecated LocalVariable asUninitialized() { none() }
 
   /**
    * Gets an upper bound on the type of this node.
@@ -266,10 +266,8 @@ class ParameterIndirectionNode extends ParameterNode {
 
   override predicate isParameterOf(Function f, int pos) {
     exists(int index |
-      f.getParameter(index) = instr.getParameter()
-      or
-      index = -1 and
-      instr.getIRVariable().(IRThisVariable).getEnclosingFunction() = f
+      instr.getEnclosingFunction() = f and
+      instr.hasIndex(index)
     |
       pos = getArgumentPosOfSideEffect(index)
     )
@@ -396,16 +394,16 @@ private FieldAddressInstruction getFieldInstruction(Instruction instr) {
 
 /**
  * The target of a `fieldStoreStepAfterArraySuppression` store step, which is used to convert
- * an `ArrayContent` to a `FieldContent` when the `BufferMayWriteSideEffect` instruction stores
+ * an `ArrayContent` to a `FieldContent` when the `WriteSideEffect` instruction stores
  * into a field. See the QLDoc for `suppressArrayRead` for an example of where such a conversion
  * is inserted.
  */
-private class BufferMayWriteSideEffectFieldStoreQualifierNode extends PartialDefinitionNode {
+private class WriteSideEffectFieldStoreQualifierNode extends PartialDefinitionNode {
   override ChiInstruction instr;
-  BufferMayWriteSideEffectInstruction write;
+  WriteSideEffectInstruction write;
   FieldAddressInstruction field;
 
-  BufferMayWriteSideEffectFieldStoreQualifierNode() {
+  WriteSideEffectFieldStoreQualifierNode() {
     not instr.isResultConflated() and
     instr.getPartial() = write and
     field = getFieldInstruction(write.getDestinationAddress())
@@ -476,16 +474,8 @@ class DefinitionByReferenceNode extends InstructionNode {
       instr
           .getPrimaryInstruction()
           .(CallInstruction)
-          .getPositionalArgument(instr.getIndex())
+          .getArgument(instr.getIndex())
           .getUnconvertedResultExpression()
-    or
-    result =
-      instr
-          .getPrimaryInstruction()
-          .(CallInstruction)
-          .getThisArgument()
-          .getUnconvertedResultExpression() and
-    instr.getIndex() = -1
   }
 
   /** Gets the parameter through which this value is assigned. */
@@ -503,18 +493,6 @@ class DefinitionByReferenceNode extends InstructionNode {
     not exists(instr.getPrimaryInstruction().(CallInstruction).getStaticCallTarget()) and
     result = "output argument"
   }
-}
-
-/**
- * A node representing the memory pointed to by a function argument.
- *
- * This class exists only in order to override `toString`, which would
- * otherwise be the default implementation inherited from `InstructionNode`.
- */
-private class ArgumentIndirectionNode extends InstructionNode {
-  override ReadSideEffectInstruction instr;
-
-  override string toString() { result = "Argument " + instr.getIndex() + " indirection" }
 }
 
 /**
@@ -679,10 +657,6 @@ private predicate simpleInstructionLocalFlowStep(Operand opFrom, Instruction iTo
   iTo.(CopyInstruction).getSourceValueOperand() = opFrom
   or
   iTo.(PhiInstruction).getAnInputOperand() = opFrom
-  or
-  // A read side effect is almost never exact since we don't know exactly how
-  // much memory the callee will read.
-  iTo.(ReadSideEffectInstruction).getSideEffectOperand() = opFrom
   or
   // Treat all conversions as flow, even conversions between different numeric types.
   iTo.(ConvertInstruction).getUnaryOperand() = opFrom
