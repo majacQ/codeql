@@ -79,7 +79,7 @@ predicate isAPropertyRead(Expr e, string name) {
  * Holds if `e` is a property write of a property `name`.
  */
 predicate isAPropertyWrite(ControlFlowNode e, string name) {
-  exists(DataFlow::PropWrite write | write.getWriteNode() = e and write.getPropertyName() = name) // TODO: umambi?
+  exists(DataFlow::PropWrite write | write.getWriteNode() = e and write.getPropertyName() = name)
 }
 
 /**
@@ -299,7 +299,9 @@ where
     assign1 instanceof CallToObjectDefineProperty
     implies
     assign1.(CallToObjectDefineProperty).hasPropertyAttributeWrite("value", _)
-  )
+  ) and
+  // ignore Angular templates
+  not assign1.getTopLevel() instanceof Angular2::TemplateTopLevel
 select assign1.getWriteNode(),
   "This write to property '" + name + "' is useless, since $@ always overrides it.",
   assign2.getWriteNode(), "another property write"

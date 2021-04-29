@@ -34,18 +34,11 @@ module UnsafeJQueryPlugin {
   /**
    * An argument that may act as a HTML fragment rather than a CSS selector, as a sink for remote unsafe jQuery plugins.
    */
-  class AmbiguousHtmlOrSelectorArgument extends DataFlow::Node {
+  class AmbiguousHtmlOrSelectorArgument extends DataFlow::Node,
+    DomBasedXss::JQueryHtmlOrSelectorArgument {
     AmbiguousHtmlOrSelectorArgument() {
-      exists(JQuery::MethodCall call |
-        call.interpretsArgumentAsSelector(this) and call.interpretsArgumentAsHtml(this)
-      ) and
-      // the $-function in particular will not construct HTML for non-string values
-      analyze().getAType() = TTString() and
       // any fixed prefix makes the call unambiguous
-      not exists(DataFlow::Node prefix |
-        DomBasedXss::isPrefixOfJQueryHtmlString(this, prefix) and
-        prefix.mayHaveStringValue(_)
-      )
+      not exists(getAPrefix())
     }
   }
 
@@ -141,10 +134,7 @@ module UnsafeJQueryPlugin {
             SyntacticConstants::isUndefined(undef)
           )
           or
-          exists(Expr op1, Expr op2 | test.hasOperands(op1, op2) |
-            read.asExpr() = op1.(TypeofExpr).getOperand() and
-            op2.mayHaveStringValue(any(InferredType t | t = TTUndefined()).getTypeofTag())
-          )
+          TaintTracking::isTypeofGuard(test, read.asExpr(), "undefined")
         )
         or
         polarity = true and

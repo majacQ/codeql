@@ -1,20 +1,18 @@
 using Microsoft.CodeAnalysis;
-using System;
 using System.IO;
-using System.Reflection;
 
 namespace Semmle.Extraction.CSharp.Entities
 {
-    class Modifier : Extraction.CachedEntity<string>
+    internal class Modifier : Extraction.CachedEntity<string>
     {
-        Modifier(Context cx, string init)
+        private Modifier(Context cx, string init)
             : base(cx, init) { }
 
-        public override Microsoft.CodeAnalysis.Location ReportingLocation => null;
+        public override Location? ReportingLocation => null;
 
         public override void WriteId(TextWriter trapFile)
         {
-            trapFile.Write(symbol);
+            trapFile.Write(Symbol);
             trapFile.Write(";modifier");
         }
 
@@ -22,7 +20,7 @@ namespace Semmle.Extraction.CSharp.Entities
 
         public override void Populate(TextWriter trapFile)
         {
-            trapFile.modifiers(Label, symbol);
+            trapFile.modifiers(Label, Symbol);
         }
 
         public static string AccessbilityModifier(Accessibility access)
@@ -74,7 +72,7 @@ namespace Semmle.Extraction.CSharp.Entities
 
         public static void ExtractModifiers(Context cx, TextWriter trapFile, IEntity key, ISymbol symbol)
         {
-            bool interfaceDefinition = symbol.ContainingType != null
+            var interfaceDefinition = symbol.ContainingType is not null
                 && symbol.ContainingType.Kind == SymbolKind.NamedType
                 && symbol.ContainingType.TypeKind == TypeKind.Interface;
 
@@ -88,7 +86,7 @@ namespace Semmle.Extraction.CSharp.Entities
             if (symbol.IsSealed)
                 HasModifier(cx, trapFile, key, "sealed");
 
-            bool fromSource = symbol.DeclaringSyntaxReferences.Length > 0;
+            var fromSource = symbol.DeclaringSyntaxReferences.Length > 0;
 
             if (symbol.IsStatic && !(symbol.Kind == SymbolKind.Field && ((IFieldSymbol)symbol).IsConst && !fromSource))
                 HasModifier(cx, trapFile, key, "static");
@@ -117,7 +115,7 @@ namespace Semmle.Extraction.CSharp.Entities
 
             if (symbol.Kind == SymbolKind.NamedType)
             {
-                INamedTypeSymbol nt = symbol as INamedTypeSymbol;
+                var nt = symbol as INamedTypeSymbol;
                 if (nt is null)
                     throw new InternalError(symbol, "Symbol kind is inconsistent with its type");
 
@@ -142,11 +140,11 @@ namespace Semmle.Extraction.CSharp.Entities
             return ModifierFactory.Instance.CreateEntity(cx, (typeof(Modifier), modifier), modifier);
         }
 
-        class ModifierFactory : ICachedEntityFactory<string, Modifier>
+        private class ModifierFactory : CachedEntityFactory<string, Modifier>
         {
-            public static readonly ModifierFactory Instance = new ModifierFactory();
+            public static ModifierFactory Instance { get; } = new ModifierFactory();
 
-            public Modifier Create(Context cx, string init) => new Modifier(cx, init);
+            public override Modifier Create(Context cx, string init) => new Modifier(cx, init);
         }
         public override TrapStackBehaviour TrapStackBehaviour => TrapStackBehaviour.OptionalLabel;
     }

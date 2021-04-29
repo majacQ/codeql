@@ -2,15 +2,13 @@ package com.semmle.js.extractor;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.concurrent.ConcurrentMap;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentMap;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
-
 import com.semmle.js.extractor.ExtractorConfig.Platform;
 import com.semmle.js.extractor.ExtractorConfig.SourceType;
 import com.semmle.js.parser.ParseError;
@@ -84,7 +82,7 @@ public class ScriptExtractor implements IExtractor {
     LoCInfo loc;
     try {
       Pair<Label, LoCInfo> res =
-          new JSExtractor(config).extract(textualExtractor, source, 0, scopeManager);
+          new JSExtractor(config).extract(textualExtractor, source, TopLevelKind.SCRIPT, scopeManager);
       toplevelLabel = res.fst();
       loc = res.snd();
     } catch (ParseError e) {
@@ -126,7 +124,11 @@ public class ScriptExtractor implements IExtractor {
     }
     try {
       BufferedReader reader = new BufferedReader(new FileReader(file));
-      String result = new Gson().fromJson(reader, PackageJSON.class).type;
+      PackageJSON pkgjson = new Gson().fromJson(reader, PackageJSON.class);
+      if (pkgjson == null) {
+        return null;
+      }
+      String result = pkgjson.type;
       packageTypeCache.put(folder, Optional.ofNullable(result));
       return result;
     } catch (IOException | JsonSyntaxException e) {

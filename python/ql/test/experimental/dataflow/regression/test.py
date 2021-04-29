@@ -86,7 +86,7 @@ import module
 
 def test13():
     t = module.dangerous
-    SINK(t)  # Flow not found
+    SINK(t)
 
 def test14():
     t = module.safe
@@ -108,13 +108,13 @@ def x_sink(arg):
 def test17():
     t = C()
     t.x = module.dangerous
-    SINK(t.x)  # Flow not found
+    SINK(t.x)
 
 def test18():
     t = C()
     t.x = module.dangerous
     t = hub(t)
-    x_sink(t)  # Flow not found
+    x_sink(t)
 
 def test19():
     t = CUSTOM_SOURCE
@@ -153,7 +153,7 @@ def test22(cond):
         SINK(t)
 
 from module import dangerous as unsafe
-SINK(unsafe)  # Flow not found
+SINK(unsafe)
 
 def test23():
     with SOURCE as t:
@@ -201,8 +201,8 @@ def flow_through_type_test_if_no_class():
 def flow_in_iteration():
     t = [SOURCE]
     for i in t:
-        SINK(i)  # Flow not found
-    SINK(i)  # Flow not found
+        SINK(i)
+    SINK(i)
 
 def flow_in_generator():
     seq = [SOURCE]

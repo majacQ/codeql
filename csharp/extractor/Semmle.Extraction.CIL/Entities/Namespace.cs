@@ -1,39 +1,30 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using Semmle.Extraction.Entities;
 
 namespace Semmle.Extraction.CIL.Entities
 {
     /// <summary>
     /// A namespace.
     /// </summary>
-    interface INamespace : ITypeContainer
+    internal sealed class Namespace : TypeContainer
     {
-    }
-
-    /// <summary>
-    /// A namespace.
-    /// </summary>
-    public sealed class Namespace : TypeContainer, INamespace
-    {
-        public Namespace? ParentNamespace;
-        public readonly string Name;
+        public Namespace? ParentNamespace { get; }
+        public string Name { get; }
 
         public bool IsGlobalNamespace => ParentNamespace is null;
 
-        public override string IdSuffix => ";namespace";
-
-
         public override void WriteId(TextWriter trapFile)
         {
-            if (ParentNamespace != null && !ParentNamespace.IsGlobalNamespace)
+            if (ParentNamespace is not null && !ParentNamespace.IsGlobalNamespace)
             {
                 ParentNamespace.WriteId(trapFile);
                 trapFile.Write('.');
             }
             trapFile.Write(Name);
         }
+
+        public override string IdSuffix => ";namespacee";
 
         public override bool Equals(object? obj)
         {
@@ -49,7 +40,7 @@ namespace Semmle.Extraction.CIL.Entities
 
         public override int GetHashCode()
         {
-            int h = ParentNamespace is null ? 19 : ParentNamespace.GetHashCode();
+            var h = ParentNamespace is null ? 19 : ParentNamespace.GetHashCode();
             return 13 * h + Name.GetHashCode();
         }
 
@@ -57,15 +48,16 @@ namespace Semmle.Extraction.CIL.Entities
 
         public override IEnumerable<Type> MethodParameters => throw new NotImplementedException();
 
-        static string parseNamespaceName(string fqn)
+        private static string parseNamespaceName(string fqn)
         {
             var i = fqn.LastIndexOf('.');
             return i == -1 ? fqn : fqn.Substring(i + 1);
         }
 
-        static Namespace? createParentNamespace(Context cx, string fqn)
+        private static Namespace? createParentNamespace(Context cx, string fqn)
         {
-            if (fqn == "") return null;
+            if (fqn.Length == 0)
+                return null;
             var i = fqn.LastIndexOf('.');
             return i == -1 ? cx.GlobalNamespace : cx.Populate(new Namespace(cx, fqn.Substring(0, i)));
         }
@@ -85,7 +77,7 @@ namespace Semmle.Extraction.CIL.Entities
             get
             {
                 yield return Tuples.namespaces(this, Name);
-                if (ParentNamespace is object)
+                if (ParentNamespace is not null)
                     yield return Tuples.parent_namespace(this, ParentNamespace);
             }
         }

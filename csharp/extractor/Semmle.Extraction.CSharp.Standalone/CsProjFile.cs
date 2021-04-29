@@ -9,7 +9,7 @@ namespace Semmle.BuildAnalyser
     /// <summary>
     /// Represents a .csproj file and reads information from it.
     /// </summary>
-    class CsProjFile
+    internal class CsProjFile
     {
         private string Filename { get; }
 
@@ -59,11 +59,10 @@ namespace Semmle.BuildAnalyser
         {
             var msbuildProject = new Microsoft.Build.Execution.ProjectInstance(filename.FullName);
 
-            var references = msbuildProject.
-                Items.
-                Where(item => item.ItemType == "Reference").
-                Select(item => item.EvaluatedInclude).
-                ToArray();
+            var references = msbuildProject.Items
+                .Where(item => item.ItemType == "Reference")
+                .Select(item => item.EvaluatedInclude)
+                .ToArray();
 
             var csFiles = msbuildProject.Items
                 .Where(item => item.ItemType == "Compile")
@@ -89,45 +88,69 @@ namespace Semmle.BuildAnalyser
             var projDir = fileName.Directory;
             var root = projFile.DocumentElement;
 
+            if (root is null)
+            {
+                throw new NotSupportedException("Project file without root is not supported.");
+            }
+
             // Figure out if it's dotnet core
 
-            bool netCoreProjectFile = root.GetAttribute("Sdk") == "Microsoft.NET.Sdk";
+            var netCoreProjectFile = root.GetAttribute("Sdk") == "Microsoft.NET.Sdk";
 
             if (netCoreProjectFile)
             {
-                var explicitCsFiles = root.SelectNodes("/Project/ItemGroup/Compile/@Include", mgr).
-                    NodeList().
-                    Select(node => node.Value).
-                    Select(cs => Path.DirectorySeparatorChar == '/' ? cs.Replace("\\", "/") : cs).
-                    Select(f => Path.GetFullPath(Path.Combine(projDir.FullName, f)));
+                var explicitCsFiles = root
+                    .SelectNodes("/Project/ItemGroup/Compile/@Include", mgr)
+                    ?.NodeList()
+                    .Select(node => node.Value)
+                    .Select(cs => GetFullPath(cs, projDir))
+                    .Where(s => s is not null)
+                    ?? Enumerable.Empty<string>();
 
                 var additionalCsFiles = System.IO.Directory.GetFiles(directoryName, "*.cs", SearchOption.AllDirectories);
 
+#nullable disable warnings
                 return (explicitCsFiles.Concat(additionalCsFiles).ToArray(), Array.Empty<string>());
+#nullable restore warnings
             }
 
-            var references =
-                root.SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Reference/@Include", mgr).
-                NodeList().
-                Select(node => node.Value).
-                ToArray();
+            var references = root
+                .SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Reference/@Include", mgr)
+                ?.NodeList()
+                .Select(node => node.Value)
+                .Where(s => s is not null)
+                .ToArray()
+                ?? Array.Empty<string>();
 
-            var relativeCsIncludes =
-                root.SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Compile/@Include", mgr).
-                NodeList().
-                Select(node => node.Value).
-                ToArray();
+            var relativeCsIncludes = root
+                .SelectNodes("/msbuild:Project/msbuild:ItemGroup/msbuild:Compile/@Include", mgr)
+                ?.NodeList()
+                .Select(node => node.Value)
+                .ToArray()
+                ?? Array.Empty<string>();
 
-            var csFiles = relativeCsIncludes.
-                Select(cs => Path.DirectorySeparatorChar == '/' ? cs.Replace("\\", "/") : cs).
-                Select(f => Path.GetFullPath(Path.Combine(projDir.FullName, f))).
-                ToArray();
+            var csFiles = relativeCsIncludes
+                .Select(cs => GetFullPath(cs, projDir))
+                .Where(s => s is not null)
+                .ToArray();
 
+#nullable disable warnings
             return (csFiles, references);
+#nullable restore warnings
         }
 
-        readonly string[] references;
-        readonly string[] csFiles;
+        private static string? GetFullPath(string? file, DirectoryInfo? projDir)
+        {
+            if (file is null)
+            {
+                return null;
+            }
+
+            return Path.GetFullPath(Path.Combine(projDir?.FullName ?? string.Empty, Path.DirectorySeparatorChar == '/' ? file.Replace("\\", "/") : file));
+        }
+
+        private readonly string[] references;
+        private readonly string[] csFiles;
 
         /// <summary>
         /// The list of references as a list of assembly IDs.
@@ -140,7 +163,7 @@ namespace Semmle.BuildAnalyser
         public IEnumerable<string> Sources => csFiles;
     }
 
-    static class XmlNodeHelper
+    internal static class XmlNodeHelper
     {
         /// <summary>
         /// Helper to convert an XmlNodeList into an IEnumerable.

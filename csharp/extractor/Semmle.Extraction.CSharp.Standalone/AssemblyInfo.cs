@@ -11,7 +11,7 @@ namespace Semmle.BuildAnalyser
     /// <summary>
     /// Stores information about an assembly file (DLL).
     /// </summary>
-    sealed class AssemblyInfo
+    internal sealed class AssemblyInfo
     {
         /// <summary>
         /// The file containing the assembly.
@@ -46,11 +46,11 @@ namespace Semmle.BuildAnalyser
             get
             {
                 var result = Name;
-                if (Version != null)
+                if (Version is not null)
                     result = string.Format("{0}, Version={1}", result, Version);
-                if (Culture != null)
+                if (Culture is not null)
                     result = string.Format("{0}, Culture={1}", result, Culture);
-                if (PublicKeyToken != null)
+                if (PublicKeyToken is not null)
                     result = string.Format("{0}, PublicKeyToken={1}", result, PublicKeyToken);
                 return result;
             }
@@ -66,9 +66,10 @@ namespace Semmle.BuildAnalyser
             get
             {
                 yield return Id;
-                if (Version != null)
+                if (Version is not null)
                 {
-                    if (Culture != null) yield return string.Format("{0}, Version={1}, Culture={2}", Name, Version, Culture);
+                    if (Culture is not null)
+                        yield return string.Format("{0}, Version={1}, Culture={2}", Name, Version, Culture);
                     yield return string.Format("{0}, Version={1}", Name, Version);
                 }
                 yield return Name;
